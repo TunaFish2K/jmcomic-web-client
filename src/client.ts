@@ -22,14 +22,10 @@ function getTokenParam(timestampSeconds: number, version: string) {
     return `${timestampSeconds},${version}`;
 }
 function decryptResponseData(encryptedData: string, secret: string) {
-    const decrypted = aes.decrypt(
-        encryptedData,
-        CryptoJS.enc.Utf8.parse(secret),
-        {
-            mode: modeECB,
-            padding: noPadding,
-        },
-    );
+    const decrypted = aes.decrypt(encryptedData, encodingUTF8.parse(secret), {
+        mode: modeECB,
+        padding: noPadding,
+    });
 
     let decryptedString = decrypted.toString(encodingUTF8);
 
