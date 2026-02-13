@@ -338,4 +338,12 @@ export class Client {
         if (matchResult === null) throw new Error("scrambleId not found");
         return parseInt(matchResult[1]);
     }
+    async getPhotoWithScrambleId(id: string) {
+        const photo = await this.getPhoto(id);
+        if (photo === null) return null;
+        return {
+            ...photo,
+            scrambleId: await this.getScrambleId(id),
+        };
+    }
 }
