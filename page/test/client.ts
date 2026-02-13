@@ -1,7 +1,7 @@
 import {
     getClientDataAndCreateClient,
     getFastestAvailableBaseURL,
-} from "../src/client";
+} from "../src/modules/client";
 
 async function start() {
     const baseURL = await getFastestAvailableBaseURL();
