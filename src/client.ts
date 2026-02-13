@@ -115,36 +115,109 @@ export async function getFastestAvailableBaseURL(
     const domains = await getDomainsFromDomainServer(domainServerURL);
     return await pickFastestAvailableDomainToBaseURL(domains, checkConcurrency);
 }
+
+export async function getClientData(baseURL: string) {
+    const url = new URL("/setting", baseURL);
+    const timestampSeconds = getCurrentTimestampSeconds();
+    const res = await fetch(url, {
+        headers: {
+            token: getToken(timestampSeconds, SECRET),
+            tokenparam: getTokenParam(timestampSeconds, INITIAL_VERSION),
+        },
+    });
+    const setCookie = res.headers.getSetCookie();
+    const setCookieData = parseSetCookie(setCookie, { map: true });
+    const cookie = getCookieHeader(setCookieData);
+
+    const encryptedData = (await res.json()).data as string;
+    const decryptedData = decryptResponseData(
+        encryptedData,
+        getToken(timestampSeconds, SECRET_APP_DATA),
+    );
+    const { version, img_host: imageBaseURL } = JSON.parse(decryptedData) as {
+        version: string;
+        img_host: string;
+    };
+    return {
+        version,
+        imageBaseURL,
+        cookie,
+    };
+}
+
+export async function getClientDataAndCreateClient(baseURL: string) {
+    const { version, imageBaseURL, cookie } = await getClientData(baseURL);
+    return new Client(baseURL, version, imageBaseURL, cookie);
+}
+
 export class Client {
     baseURL: string;
-    constructor(baseURL: string) {
+    version: string;
+    imageBaseURL: string;
+    cookie: string;
+    constructor(
+        baseURL: string,
+        version: string,
+        imageBaseURL: string,
+        cookie: string,
+    ) {
         this.baseURL = baseURL;
+        this.version = version;
+        this.imageBaseURL = imageBaseURL;
+        this.cookie = cookie;
     }
-    async getClientData() {
-        const url = new URL("/setting", this.baseURL);
+
+    async search(
+        query: string,
+        options?: {
+            mainTag?: 0 | 1 | 2 | 3 | 4;
+            orderBy?: "mr" | "mv" | "mp" | "tf";
+            time?: "a" | "t" | "w" | "m";
+            page?: number;
+        },
+    ) {
+        if (!options) options = {};
+        if (!options.mainTag) options.mainTag = 0;
+        if (!options.orderBy) options.orderBy = "mr";
+        if (!options.time) options.time = "a";
+        if (!options.page) options.page = 1;
+
+        const url = new URL("/search", this.baseURL);
+        url.searchParams.set("search_query", query);
+        url.searchParams.set("main_tag", options.mainTag.toString());
+        url.searchParams.set("o", options.orderBy);
+        url.searchParams.set("t", options.time);
+        url.searchParams.set("page", options.page.toString());
+
         const timestampSeconds = getCurrentTimestampSeconds();
         const res = await fetch(url, {
             headers: {
                 token: getToken(timestampSeconds, SECRET),
-                tokenparam: getTokenParam(timestampSeconds, INITIAL_VERSION),
+                tokenparam: getTokenParam(timestampSeconds, this.version),
+                Cookie: this.cookie,
             },
         });
-        const setCookie = res.headers.getSetCookie();
-        const setCookieData = parseSetCookie(setCookie, { map: true });
-        const cookie = getCookieHeader(setCookieData);
-
         const encryptedData = (await res.json()).data as string;
         const decryptedData = decryptResponseData(
             encryptedData,
             getToken(timestampSeconds, SECRET_APP_DATA),
         );
-        const { version, img_host: imageBaseURL } = JSON.parse(
-            decryptedData,
-        ) as { version: string; img_host: string };
-        return {
-            version,
-            imageBaseURL,
-            cookie,
-        };
+        return JSON.parse(decryptedData) as {
+            search_query: string;
+            total: string;
+        } & (
+            | {
+                  redirect_aid: string;
+                  content: [];
+              }
+            | {
+                  redirect_aid: never;
+                  content: {
+                      id: string;
+                      author: string;
+                      name: string;
+                  }[];
+              }
+        );
     }
 }
