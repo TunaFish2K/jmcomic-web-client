@@ -3,11 +3,13 @@ import reactLogo from "./assets/react.svg";
 import viteLogo from "/vite.svg";
 import "./App.css";
 
+import { getClientDataAndCreateClient } from "@tiny-client/shared/client";
+
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string;
 
 function App() {
     const [count, setCount] = useState(0);
-
+    console.log(BACKEND_URL, getClientDataAndCreateClient);
     return (
         <>
             <div>

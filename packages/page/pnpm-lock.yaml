@@ -17,6 +17,9 @@ importers:
       fflate:
         specifier: ^0.8.2
         version: 0.8.2
+      jm-web-client:
+        specifier: file://..
+        version: file:..
       p-limit:
         specifier: ^7.3.0
         version: 7.3.0
@@ -863,6 +866,9 @@ packages:
 
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
+
+  jm-web-client@file:..:
+    resolution: {directory: .., type: directory}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -2004,6 +2010,8 @@ snapshots:
       is-extglob: 2.1.1
 
   isexe@2.0.0: {}
+
+  jm-web-client@file:..: {}
 
   js-tokens@4.0.0: {}
 

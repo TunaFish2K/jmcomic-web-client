@@ -1,5 +1,8 @@
 {
-	"name": "worker",
+	"name": "@tiny-client/worker",
+	"dependencies": {
+		"@tiny-client/shared": "workspace:*"
+	},
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {

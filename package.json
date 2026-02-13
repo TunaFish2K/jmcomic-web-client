@@ -2,11 +2,11 @@
   "name": "jm-web-client",
   "private": true,
   "scripts": {
-    "page:dev": "cd page && pnpm run dev",
-    "page:build": "cd page && pnpm run build",
-    "worker:dev": "cd worker && pnpm run dev",
-    "worker:deploy": "cd worker && pnpm run deploy",
-    "dev": "VITE_BACKEND_URL=http://localhost:8787 concurrently \"pnpm run worker:dev\" \"wait-on tcp:localhost:8787 && pnpm run page:dev\""
+    "page:dev": "pnpm --filter @tiny-client/page dev",
+    "page:build": "pnpm --filter @tiny-client/page build",
+    "worker:dev": "pnpm --filter @tiny-client/worker dev",
+    "worker:deploy": "pnpm --filter @tiny-client/worker deploy",
+    "dev": "concurrently \"pnpm run worker:dev\" \"wait-on tcp:localhost:8787 && VITE_BACKEND_URL=http://localhost:8787 pnpm run page:dev\""
   },
   "packageManager": "pnpm@10.28.0",
   "devDependencies": {
