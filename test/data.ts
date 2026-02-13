@@ -48,3 +48,55 @@ export function getSliceCount(
         (hex.charCodeAt(hex.length - 1) % (photoId < 421926 ? 10 : 8)) * 2 + 2
     );
 }
+
+async function arrayBufferToOffscreenCanvas(buffer: ArrayBuffer) {
+    const blob = new Blob([buffer]);
+
+    const bitmap = await createImageBitmap(blob);
+
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(bitmap, 0, 0);
+
+    bitmap.close();
+    return canvas;
+}
+
+export async function reverseImageBySlice(
+    image: ArrayBuffer,
+    sliceCount: number,
+) {
+    const original = await arrayBufferToOffscreenCanvas(image);
+    const result = new OffscreenCanvas(original.width, original.height);
+    const ctx = result.getContext("2d")!;
+    const over = original.height % sliceCount;
+    for (let i = 0; i < sliceCount; i++) {
+        const move = Math.floor(original.height / sliceCount);
+        const sY = original.height - move * (i + 1) - over;
+        let dY = move * i;
+        let sliceHeight = move;
+
+        if (i === 0) {
+            sliceHeight += over;
+        } else {
+            dY += over;
+        }
+
+        ctx.drawImage(
+            original,
+            0,
+            sY,
+            original.width,
+            sliceHeight,
+            0,
+            dY,
+            original.width,
+            sliceHeight,
+        );
+    }
+    return {
+        data: await (await result.convertToBlob()).arrayBuffer(),
+        width: original.width,
+        height: original.height,
+    };
+}

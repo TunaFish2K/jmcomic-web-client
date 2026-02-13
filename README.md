@@ -59,6 +59,6 @@
 
 - [x] 下载章节中的图片，排除无法下载的图片（比如不能跨域的gif）
 - [x] 根据章节的id和scrambleId计算图片被切成了多少份（sliceCount）
-- [ ] 根据sliceCount复原图片
+- [x] 根据sliceCount复原图片
 - [ ] 将图片打包为pdf
 - [ ] 将图片打包为zip
