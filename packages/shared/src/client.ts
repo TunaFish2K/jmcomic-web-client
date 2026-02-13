@@ -36,7 +36,7 @@ function decryptResponseData(encryptedData: string, secret: string) {
 
   return decryptedString;
 }
-async function getDomainsFromDomainServer(domainServerURL: string) {
+export async function getDomainsFromDomainServer(domainServerURL: string) {
   const res = await fetch(domainServerURL, {
     headers: {
       "User-Agent":
