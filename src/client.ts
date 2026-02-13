@@ -5,6 +5,7 @@ import modeECB from "crypto-js/mode-ecb";
 import noPadding from "crypto-js/pad-nopadding";
 import encodingUTF8 from "crypto-js/enc-utf8";
 import {
+    DOMAIN_SERVER_URL,
     INITIAL_VERSION,
     SECRET,
     SECRET_APP_DATA,
@@ -100,6 +101,19 @@ function getCookieHeader(setCookie: parse.CookieMap) {
     }
 
     return result.join("; ");
+}
+export async function getFastestAvailableBaseURL(
+    domainServerURL?: string,
+    checkConcurrency?: number,
+) {
+    if (!domainServerURL) {
+        domainServerURL =
+            DOMAIN_SERVER_URL[
+                Math.floor(Math.random() * DOMAIN_SERVER_URL.length)
+            ];
+    }
+    const domains = await getDomainsFromDomainServer(domainServerURL);
+    return await pickFastestAvailableDomainToBaseURL(domains, checkConcurrency);
 }
 export class Client {
     baseURL: string;
