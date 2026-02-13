@@ -1,6 +1,8 @@
 import pLimit from "p-limit";
 import md5 from "crypto-js/md5";
 import encodingHex from "crypto-js/enc-hex";
+import type { PhotoWithScrambleId } from "./client";
+import { AsyncZipDeflate, Zip } from "fflate";
 
 async function downloadImage({ name, url }: { name: string; url: string }) {
     try {
@@ -99,4 +101,73 @@ export async function reverseImageBySlice(
         width: original.width,
         height: original.height,
     };
+}
+
+export function decryptImagesOfPhotoAndWriteIntoZipFile(
+    photo: PhotoWithScrambleId,
+    onProgress?: (done: number, total: number) => void,
+) {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+        const chunks: Uint8Array[] = [];
+
+        const zip = new Zip((err, data, final) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            chunks.push(data);
+            if (final) {
+                const totalLength = chunks.reduce(
+                    (acc, chunk) => acc + chunk.length,
+                    0,
+                );
+                const result = new Uint8Array(totalLength);
+                let offset = 0;
+                for (const chunk of chunks) {
+                    result.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                resolve(result.buffer);
+            }
+        });
+
+        (async () => {
+            try {
+                let processed = 0;
+                const total = photo.images.length;
+                const filenameSize = total.toString().length;
+                const downloadedImages = await downloadAllImages(photo.images);
+
+                for (const image of downloadedImages) {
+                    if (image.data === null) {
+                        processed += 1;
+                        if (onProgress) onProgress(processed, total);
+                        continue;
+                    }
+                    const sliceCount = getSliceCount(
+                        photo.scrambleId,
+                        parseInt(photo.id),
+                        image.name,
+                    );
+                    const decrypted = await reverseImageBySlice(
+                        image.data,
+                        sliceCount,
+                    );
+
+                    const file = new AsyncZipDeflate(
+                        `${processed}`.padStart(filenameSize, "0") + ".jpg",
+                        { level: 6 },
+                    );
+                    zip.add(file);
+                    file.push(new Uint8Array(decrypted.data), true);
+                    if (onProgress) onProgress(processed, total);
+                    processed += 1;
+                }
+
+                zip.end();
+            } catch (err) {
+                reject(err);
+            }
+        })();
+    });
 }

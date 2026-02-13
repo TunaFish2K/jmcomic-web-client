@@ -61,4 +61,4 @@
 - [x] 根据章节的id和scrambleId计算图片被切成了多少份（sliceCount）
 - [x] 根据sliceCount复原图片
 - [ ] 将图片打包为pdf
-- [ ] 将图片打包为zip
+- [x] 将图片打包为zip
