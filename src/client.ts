@@ -220,4 +220,65 @@ export class Client {
               }
         );
     }
+    async getAlbum(id: string) {
+        const url = new URL("/album", this.baseURL);
+        url.searchParams.set("id", id);
+        const timestampSeconds = getCurrentTimestampSeconds();
+        const res = await fetch(url, {
+            headers: {
+                token: getToken(timestampSeconds, SECRET),
+                tokenparam: getTokenParam(timestampSeconds, this.version),
+                Cookie: this.cookie,
+            },
+        });
+        const encryptedData = (await res.json()).data as string;
+        const decryptedData = decryptResponseData(
+            encryptedData,
+            getToken(timestampSeconds, SECRET_APP_DATA),
+        );
+        const {
+            name,
+            images,
+            description,
+            total_views: totalViews,
+            likes,
+            series,
+            series_id: seriesID,
+            author,
+            tags,
+            works,
+            actors,
+        } = JSON.parse(decryptedData) as {
+            id: number;
+            name: string;
+            images: string[];
+            description: string | null;
+
+            total_views: string;
+            likes: string;
+
+            series: { id: string; name: string; sort: string }[];
+            series_id: string;
+
+            author: string[];
+            tags: string[];
+            works: string[];
+            actors: string[];
+        };
+        if (name === null) return null;
+        return {
+            id,
+            name,
+            images,
+            description,
+            totalViews,
+            likes,
+            series,
+            seriesID,
+            author,
+            tags,
+            works,
+            actors,
+        };
+    }
 }
