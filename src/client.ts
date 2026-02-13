@@ -9,6 +9,7 @@ import {
     INITIAL_VERSION,
     SECRET,
     SECRET_APP_DATA,
+    SECRET_CONTENT,
     SECRET_DOMAIN_SERVER,
 } from "./constants";
 import pLimit from "p-limit";
@@ -314,5 +315,27 @@ export class Client {
                 ).toString(),
             })),
         };
+    }
+    async getScrambleId(photoId: string) {
+        const timestampSeconds = getCurrentTimestampSeconds();
+
+        const url = new URL("/chapter_view_template", this.baseURL);
+        url.searchParams.set("id", photoId);
+        url.searchParams.set("mode", "vertical");
+        url.searchParams.set("page", String(0));
+        url.searchParams.set("app_img_shunt", String(1));
+        url.searchParams.set("express", "off");
+        url.searchParams.set("v", timestampSeconds.toString());
+        const res = await fetch(url, {
+            headers: {
+                Cookie: this.cookie,
+                token: getToken(timestampSeconds, SECRET_CONTENT),
+                tokenparam: getTokenParam(timestampSeconds, this.version),
+            },
+        });
+        const text = await res.text();
+        const matchResult = text.match(/var scramble_id = (\d+);/);
+        if (matchResult === null) throw new Error("scrambleId not found");
+        return parseInt(matchResult[1]);
     }
 }
