@@ -3,6 +3,7 @@ import md5 from "crypto-js/md5";
 import encodingHex from "crypto-js/enc-hex";
 import type { PhotoWithScrambleId } from "./client";
 import { AsyncZipDeflate, Zip } from "fflate";
+import { PDFDocument } from "pdf-lib";
 
 async function downloadImage({ name, url }: { name: string; url: string }) {
     try {
@@ -103,7 +104,7 @@ export async function reverseImageBySlice(
     };
 }
 
-export function decryptImagesOfPhotoAndWriteIntoZipFile(
+export function downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
     photo: PhotoWithScrambleId,
     onProgress?: (done: number, total: number) => void,
 ) {
@@ -170,4 +171,42 @@ export function decryptImagesOfPhotoAndWriteIntoZipFile(
             }
         })();
     });
+}
+
+export async function downloadAndDecryptImagesOfPhotoThenWriteIntoPDFFile(
+    photo: PhotoWithScrambleId,
+    onProgress?: (done: number, total: number) => void,
+) {
+    const pdfDocument = await PDFDocument.create();
+    let processed = 0;
+    const total = photo.images.length;
+    const downloadedImages = await downloadAllImages(photo.images);
+
+    for (const image of downloadedImages) {
+        if (image.data === null) {
+            processed += 1;
+            if (onProgress) onProgress(processed, total);
+            continue;
+        }
+        const sliceCount = getSliceCount(
+            photo.scrambleId,
+            parseInt(photo.id),
+            image.name,
+        );
+        const decrypted = await reverseImageBySlice(image.data, sliceCount);
+
+        const page = pdfDocument.addPage([decrypted.width, decrypted.height]);
+        const pdfImage = await pdfDocument.embedJpg(decrypted.data);
+        page.drawImage(pdfImage, {
+            x: 0,
+            y: 0,
+            width: decrypted.width,
+            height: decrypted.height,
+        });
+
+        processed++;
+        onProgress?.(processed, total);
+    }
+
+    return (await pdfDocument.save()).buffer;
 }
