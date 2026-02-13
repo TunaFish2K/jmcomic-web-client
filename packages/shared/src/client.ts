@@ -36,6 +36,17 @@ function decryptResponseData(encryptedData: string, secret: string) {
 
   return decryptedString;
 }
+export async function getRandomDomain(
+  domainServerURL?: string,
+) {
+  if (!domainServerURL) {
+    domainServerURL =
+      DOMAIN_SERVER_URL[Math.floor(Math.random() * DOMAIN_SERVER_URL.length)];
+  }
+  const domains = await getDomainsFromDomainServer(domainServerURL);
+  return domains[Math.floor(Math.random() * domains.length)]
+}
+
 export async function getDomainsFromDomainServer(domainServerURL: string) {
   const res = await fetch(domainServerURL, {
     headers: {
