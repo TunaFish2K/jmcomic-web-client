@@ -1,0 +1,9 @@
+{
+  "name": "jm-web-client",
+  "private": true,
+  "scripts": {
+    "page:dev": "cd page && pnpm run dev",
+    "page:build": "cd page && pnpm run build"
+  },
+  "packageManager": "pnpm@10.28.0"
+}
