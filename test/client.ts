@@ -11,7 +11,7 @@ async function start() {
     console.log("搜索结果：", searchResult);
     const album = await client.getAlbum("1235125");
     console.log("获取的本子：", album);
-    const photo = await client.getAlbum("1235125");
+    const photo = await client.getPhoto("1235125");
     console.log("获取的章节：", photo);
 }
 
