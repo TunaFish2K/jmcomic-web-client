@@ -13,3 +13,5 @@ export const HEADERS_API = {
     "user-agent":
         "Mozilla/5.0 (Linux; Android 9; V1938CT Build/PQ3A.190705.11211812; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/91.0.4472.114 Safari/537.36",
 };
+
+export const INITIAL_VERSION = "2.0.16";
