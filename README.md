@@ -1,75 +1,51 @@
-# React + TypeScript + Vite
+# 
+## 需求
+### 自动后端域名获取
+### 搜索
+如果搜索存在的车牌号，结果为仅有对应本子。
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+搜索对象：本子标题，来源作品，作者，标签，登场人物。  
 
-Currently, two official plugins are available:
+排序：最新，最多点阅，最多图片，最多爱心。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+时间筛选：全部，今天，这周，这个月。
 
-## React Compiler
+分类筛选（次要目标）
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+### 本子
+要查询并展示的内容：标题，作者，标签，封面，所有话。
 
-Note: This will impact Vite dev & build performances.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### 特定话
+支持下载并解密，以`pdf`，`zip`，或`cbz`格式导出。
+## 实现计划
+可能会随着开发过程中的评估改变。
+### 阶段一 基础功能
+- [ ] 客户端封装
+  - [ ] 存储请求共用数据，提供基础功能的函数
+- [ ] 解密与认证模块
+  - [ ] 存储用于生成以下内容的secrets
+  - [ ] 发送请求时头部需要的`token`和`tokenparam`
+  - [ ] 使用`aes-256-ecb`与`token`对请求结果进行解密
+- [ ] 可用域名获取
+  - [ ] 从CDN读取加密数据
+  - [ ] 用解密模块获得可用域名
+  - [ ] 测试可用域名
+- [ ] 通用数据的获取
+  - [ ] 通过认证模块请求`/setting`获取数据并用解密模块解密（下面不再赘述）
+  - [ ] 保存当前版本，图片CDN，Cookie
+- [ ] 搜索功能的编写
+  - [ ] 将用户搜索参数转为查询，先支持搜索对象，排序和时间筛选
+  - [ ] 调用查询接口
+  - [ ] 列出查询结果
+- [ ] 查询本子
+  - [ ] 调用接口获得返回内容
+  - [ ] 提取上述需要展示的内容并返回
+- [ ] 特定话的查询与下载
+  - [ ] 调用接口获得返回内容
+  - [ ] 得到标题，编号，每页的文件名和拼接的URL，scrambleId 
+- [ ] 图片的解密
+  - [ ] 计算切片数量的算法
+  - [ ] 用offscreen canvas重新拼接
+- [ ] 产物的生成
+  - [] pdf
+  - [] zip / cbz
