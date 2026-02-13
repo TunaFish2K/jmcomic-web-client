@@ -343,3 +343,7 @@ export class Client {
         };
     }
 }
+
+export type SearchResult = ReturnType<Client["search"]>;
+export type Album = ReturnType<Client["getAlbum"]>;
+export type Photo = ReturnType<Client["getPhoto"]>;
