@@ -70,7 +70,7 @@ export const client = new (class Client {
             };
         }
     }
-    async pickFastestAvailableDomain(
+    async pickFastestAvailableDomainToBaseURL(
         domains: string[],
         checkConcurrency: number = 20,
     ) {
@@ -84,6 +84,9 @@ export const client = new (class Client {
             (a, b) => a.timeMs - b.timeMs,
         );
         const theFastestAvailable = fastestSorted[0] ?? null;
-        return theFastestAvailable;
+        return theFastestAvailable !== null
+            ? `https://${theFastestAvailable}`
+            : null;
+    }
     }
 })();
