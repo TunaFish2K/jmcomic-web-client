@@ -281,4 +281,28 @@ export class Client {
             actors,
         };
     }
+    async getPhoto(id: string) {
+        const url = new URL("/chapter", this.baseURL);
+        url.searchParams.set("id", id);
+        const timestampSeconds = getCurrentTimestampSeconds();
+        const res = await fetch(url, {
+            headers: {
+                Cookie: this.cookie,
+                token: getToken(timestampSeconds, SECRET),
+                tokenparam: getTokenParam(timestampSeconds, this.version),
+            },
+        });
+        const encryptedData = ((await res.json()) as { data: string }).data;
+        const decryptedData = decryptResponseData(
+            encryptedData,
+            getToken(timestampSeconds, SECRET_APP_DATA),
+        );
+        const obj = JSON.parse(decryptedData) as {
+            name: string;
+            id: string;
+            images: string[];
+        };
+        if (obj.name === null) return null;
+        return decryptedData;
+    }
 }
