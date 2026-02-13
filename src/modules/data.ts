@@ -210,3 +210,19 @@ export async function downloadAndDecryptImagesOfPhotoThenWriteIntoPDFFile(
 
     return (await pdfDocument.save()).buffer;
 }
+
+export function startDownload(
+    filename: string,
+    data: Uint8Array,
+    type?: string,
+) {
+    const blob = new Blob([new Uint8Array(data)], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
