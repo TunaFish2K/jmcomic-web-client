@@ -4,8 +4,14 @@ import aes from "crypto-js/aes";
 import modeECB from "crypto-js/mode-ecb";
 import noPadding from "crypto-js/pad-nopadding";
 import encodingUTF8 from "crypto-js/enc-utf8";
-import { SECRET_DOMAIN_SERVER } from "./constants";
+import {
+    INITIAL_VERSION,
+    SECRET,
+    SECRET_APP_DATA,
+    SECRET_DOMAIN_SERVER,
+} from "./constants";
 import pLimit from "p-limit";
+import parse, { parse as parseSetCookie } from "set-cookie-parser";
 
 export const client = new (class Client {
     getToken(timestampSeconds: number, secret: string) {
@@ -88,5 +94,46 @@ export const client = new (class Client {
             ? `https://${theFastestAvailable}`
             : null;
     }
+    getCurrentTimestampSeconds() {
+        return Math.floor(Date.now() / 1000);
+    }
+    async getClientData(baseURL: string) {
+        const url = new URL("/setting", baseURL);
+        const timestampSeconds = this.getCurrentTimestampSeconds();
+        const res = await fetch(url, {
+            headers: {
+                token: this.getToken(timestampSeconds, SECRET),
+                tokenparam: this.getTokenParam(
+                    timestampSeconds,
+                    INITIAL_VERSION,
+                ),
+            },
+        });
+        const setCookie = res.headers.getSetCookie();
+        const setCookieData = parseSetCookie(setCookie, { map: true });
+        const cookie = this.getCookieHeader(setCookieData);
+
+        const encryptedData = (await res.json()).data as string;
+        const decryptedData = this.decryptResponseData(
+            encryptedData,
+            this.getToken(timestampSeconds, SECRET_APP_DATA),
+        );
+        const { version, img_host: imageBaseURL } = JSON.parse(
+            decryptedData,
+        ) as { version: string; img_host: string };
+        return {
+            version,
+            imageBaseURL,
+            cookie,
+        };
+    }
+    getCookieHeader(setCookie: parse.CookieMap) {
+        const result: string[] = [];
+
+        for (const [name, { value }] of Object.entries(setCookie)) {
+            result.push(`${name}=${value}`);
+        }
+
+        return result.join("; ");
     }
 })();
