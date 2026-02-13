@@ -30,8 +30,8 @@ export default {
 
 			// API Routes
 			if (url.pathname === '/search') {
-				const query = url.searchParams.get('q');
-				if (!query) return new Response("Missing query 'q'", { status: 400, headers: corsHeaders });
+				const query = url.searchParams.get('query');
+				if (!query) return new Response("Missing query 'query'", { status: 400, headers: corsHeaders });
 
 				const result = await client.search(query, {
 					page: Number(url.searchParams.get('page')) || 1,
@@ -47,6 +47,7 @@ export default {
 				if (!id) return new Response('Missing album id', { status: 400, headers: corsHeaders });
 
 				const result = await client.getAlbum(id);
+				if (result === null) return new Response('album not found', { status: 400, headers: corsHeaders });
 				return Response.json(result, { headers: corsHeaders });
 			}
 
@@ -55,6 +56,7 @@ export default {
 				if (!id) return new Response('Missing photo id', { status: 400, headers: corsHeaders });
 
 				const result = await client.getPhotoWithScrambleId(id);
+				if (result === null) return new Response('photo not found', { status: 400, headers: corsHeaders });
 				return Response.json(result, { headers: corsHeaders });
 			}
 
