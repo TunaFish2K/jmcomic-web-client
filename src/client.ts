@@ -347,3 +347,6 @@ export class Client {
 export type SearchResult = NonNullable<Awaited<ReturnType<Client["search"]>>>;
 export type Album = NonNullable<Awaited<ReturnType<Client["getAlbum"]>>>;
 export type Photo = NonNullable<Awaited<ReturnType<Client["getPhoto"]>>>;
+export type PhotoWithScrambleId = NonNullable<
+    Awaited<ReturnType<Client["getPhotoWithScrambleId"]>>
+>;
