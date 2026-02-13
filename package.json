@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "crypto-js": "^4.2.0",
+    "fflate": "^0.8.2",
     "p-limit": "^7.3.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
