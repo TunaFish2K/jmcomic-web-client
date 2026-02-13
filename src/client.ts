@@ -297,12 +297,22 @@ export class Client {
             encryptedData,
             getToken(timestampSeconds, SECRET_APP_DATA),
         );
-        const obj = JSON.parse(decryptedData) as {
+        const { name, images } = JSON.parse(decryptedData) as {
             name: string;
             id: string;
             images: string[];
         };
-        if (obj.name === null) return null;
-        return decryptedData;
+        if (name === null) return null;
+        return {
+            name,
+            id,
+            images: images.map((name) => ({
+                name,
+                url: new URL(
+                    `/media/photos/${id}/${name}`,
+                    this.imageBaseURL,
+                ).toString(),
+            })),
+        };
     }
 }
