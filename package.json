@@ -13,7 +13,8 @@
     "crypto-js": "^4.2.0",
     "p-limit": "^7.3.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "set-cookie-parser": "^3.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
