@@ -84,7 +84,7 @@ async function pickFastestAvailableDomainToBaseURL(
     );
     const theFastestAvailable = fastestSorted[0] ?? null;
     return theFastestAvailable !== null
-        ? `https://${theFastestAvailable}`
+        ? `https://${theFastestAvailable.domain}`
         : null;
 }
 function getCurrentTimestampSeconds() {
