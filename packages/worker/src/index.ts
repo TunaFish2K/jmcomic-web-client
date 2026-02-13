@@ -1,4 +1,4 @@
-import { getClientDataAndCreateClient } from '@tiny-client/shared/client';
+import { getClientDataAndCreateClient, getDomainsFromDomainServer, getRandomDomainToBaseURL } from '@tiny-client/shared/client';
 import { getFastestAvailableBaseURL } from '@tiny-client/shared/client';
 
 // Simple router
@@ -18,10 +18,13 @@ export default {
 		}
 
 		try {
+			/*
 			// Initialize client with fastest available domain
 			console.log('Starting domain check...');
 			const domain = await getFastestAvailableBaseURL();
 			console.log('Fastest domain found:', domain);
+			*/
+			const domain = await getRandomDomainToBaseURL();
 
 			if (!domain) return new Response('No available domain', { status: 503, headers: corsHeaders });
 
