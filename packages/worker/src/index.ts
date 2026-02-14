@@ -1,16 +1,24 @@
 import { getClientDataAndCreateClient, getRandomDomainToBaseURL } from '@tiny-client/shared/client';
 
+const corsHeaders = {
+	'Access-Control-Allow-Origin': '*',
+	'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
+	'Access-Control-Allow-Headers': '*',
+};
+
+async function getClient() {
+	const domain = await getRandomDomainToBaseURL();
+	const client = await getClientDataAndCreateClient(domain);
+	console.log('Client created.');
+	return client;
+}
+
 // Simple router
 export default {
 	async fetch(request): Promise<Response> {
 		const url = new URL(request.url);
 
 		// CORS headers
-		const corsHeaders = {
-			'Access-Control-Allow-Origin': '*',
-			'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-			'Access-Control-Allow-Headers': '*',
-		};
 
 		if (request.method === 'OPTIONS') {
 			return new Response(null, { headers: corsHeaders });
@@ -23,17 +31,13 @@ export default {
 			const domain = await getFastestAvailableBaseURL();
 			console.log('Fastest domain found:', domain);
 			*/
-			const domain = await getRandomDomainToBaseURL();
-
-			if (!domain) return new Response('No available domain', { status: 503, headers: corsHeaders });
-
-			const client = await getClientDataAndCreateClient(domain);
-			console.log('Client created.');
 
 			// API Routes
 			if (url.pathname === '/search') {
 				const query = url.searchParams.get('query');
 				if (!query) return new Response("Missing query 'query'", { status: 400, headers: corsHeaders });
+
+				const client = await getClient();
 
 				const result = await client.search(query, {
 					page: Number(url.searchParams.get('page')) || 1,
@@ -48,6 +52,8 @@ export default {
 				const id = url.pathname.split('/').pop();
 				if (!id) return new Response('Missing album id', { status: 400, headers: corsHeaders });
 
+				const client = await getClient();
+
 				const result = await client.getAlbum(id);
 				if (result === null) return new Response('album not found', { status: 404, headers: corsHeaders });
 				return Response.json(result, { headers: corsHeaders });
@@ -56,6 +62,8 @@ export default {
 			if (url.pathname.startsWith('/photo')) {
 				const id = url.pathname.split('/').pop();
 				if (!id) return new Response('Missing photo id', { status: 400, headers: corsHeaders });
+
+				const client = await getClient();
 
 				const result = await client.getPhotoWithScrambleId(id);
 				if (result === null) return new Response('photo not found', { status: 404, headers: corsHeaders });
