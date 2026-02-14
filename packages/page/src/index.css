@@ -18,9 +18,16 @@ body,
     padding: 0;
 }
 
+html {
+    background-color: #f3f4f6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
 html.dark,
 html.dark body {
-    background-color: #111827; /* gray-900 */
+    background-color: #030712;
+    color: #f3f4f6;
     color-scheme: dark;
 }
 

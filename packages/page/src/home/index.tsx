@@ -69,17 +69,17 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
     if (tasks.length === 0) return null;
 
     return (
-        <div className="fixed bottom-20 right-4 z-50 bg-white dark:bg-gray-900 shadow-xl rounded-lg border dark:border-gray-700 w-80 max-w-[calc(100vw-2rem)]">
+        <div className="fixed bottom-20 right-4 z-50 w-80 max-w-[calc(100vw-2rem)] bg-white dark:bg-gray-900 rounded-2xl shadow-2xl ring-1 ring-black/5 dark:ring-white/10">
             {/* 标题栏 */}
-            <div 
-                className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-t-lg border-b dark:border-gray-700"
+            <div
+                className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50/80 dark:hover:bg-white/5 rounded-t-2xl"
                 onClick={() => setExpanded(!expanded)}
             >
                 <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm">
+                    <span className="font-semibold text-sm">
                         下载 ({activeTasks.length}进行中)
                     </span>
-                    {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                    {expanded ? <ChevronDown size={16} className="text-gray-400" /> : <ChevronUp size={16} className="text-gray-400" />}
                 </div>
                 <div className="flex items-center gap-2">
                     {completedTasks.length > 0 && (
@@ -88,7 +88,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
                                 e.stopPropagation();
                                 clearCompleted();
                             }}
-                            className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                            className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                         >
                             清除
                         </button>
@@ -98,7 +98,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
                             e.stopPropagation();
                             onClose();
                         }}
-                        className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                        className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400"
                     >
                         <X size={16} />
                     </button>
@@ -107,36 +107,36 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
 
             {/* 任务列表 */}
             {expanded && (
-                <div className="max-h-48 overflow-y-auto">
+                <div className="max-h-48 overflow-y-auto border-t border-gray-100 dark:border-gray-800">
                     {tasks.map((task) => (
-                        <div key={task.id} className="p-3 border-b dark:border-gray-700 last:border-b-0 last:rounded-b-lg">
+                        <div key={task.id} className="px-4 py-3 border-b border-gray-50 dark:border-gray-800/50 last:border-b-0">
                             <div className="flex items-center justify-between mb-2">
                                 <div className="flex-1 min-w-0 mr-2">
                                     <div className="text-sm font-medium truncate" title={task.name}>
                                         {task.name}
                                     </div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                                        <span>{task.format.toUpperCase()}</span>
+                                    <div className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5 mt-0.5">
+                                        <span className="font-mono">{task.format.toUpperCase()}</span>
                                         <span className={`inline-block w-1.5 h-1.5 rounded-full ${getStageColor(task.stage)}`} />
                                         <span>{getStageText(task.stage)}</span>
                                     </div>
                                 </div>
                                 <button
                                     onClick={() => removeTask(task.id)}
-                                    className="text-gray-400 dark:text-gray-500 hover:text-red-500 shrink-0"
+                                    className="text-gray-300 dark:text-gray-600 hover:text-red-500 shrink-0"
                                 >
                                     <X size={14} />
                                 </button>
                             </div>
-                            
+
                             {/* 进度条 */}
-                            <div className="relative h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                            <div className="relative h-1 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
                                 <div
-                                    className={`absolute top-0 left-0 h-full transition-all duration-300 ${getStageColor(task.stage)}`}
+                                    className={`absolute top-0 left-0 h-full rounded-full ${getStageColor(task.stage)}`}
                                     style={{ width: `${task.total > 0 ? (task.progress / task.total) * 100 : 0}%` }}
                                 />
                             </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-right">
+                            <div className="text-[11px] text-gray-400 dark:text-gray-500 mt-1 text-right tabular-nums">
                                 {task.progress}/{task.total}
                             </div>
                         </div>
@@ -153,18 +153,18 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
 
     const handleDownload = async (format: 'pdf' | 'zip' | 'cbz') => {
         // 检查是否已有相同任务在进行中
-        const existingTask = tasks.find(t => 
-            t.albumId === id && 
-            t.format === format && 
-            t.stage !== 'completed' && 
+        const existingTask = tasks.find(t =>
+            t.albumId === id &&
+            t.format === format &&
+            t.stage !== 'completed' &&
             t.stage !== 'error'
         );
         if (existingTask) {
             return; // 已有相同任务在进行中
         }
-        
+
         let taskId = '';
-        
+
         try {
             // 先添加任务（获取 photo 前）
             taskId = addTask({
@@ -175,7 +175,7 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
                 progress: 0,
                 total: 1, // 临时，获取 photo 后更新
             });
-            
+
             // 获取 photo 数据
             const photo = await getPhoto(id);
             if (!photo) {
@@ -186,7 +186,7 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
             const totalImages = photo.images.length;
             // ZIP 流式处理：获取photo(1) + 图片处理(每张1进度)
             // PDF：获取photo(1) + 下载(每张1) + 打包(每张1) = 1 + totalImages * 2
-            const totalProgress = format === 'pdf' 
+            const totalProgress = format === 'pdf'
                 ? 1 + totalImages * 2  // PDF 分下载和打包两个阶段
                 : 1 + totalImages;      // ZIP 流式处理，一气呵成
 
@@ -217,16 +217,16 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
                         photo.id,
                         (photo as PhotoWithScrambleId).scrambleId
                     );
-                    
+
                     // 打包阶段（嵌入 PDF）
                     updateTask(taskId, { stage: 'packaging' });
-                    
+
                     for (let i = 0; i < downloadedImages.length; i++) {
                         const image = downloadedImages[i];
                         if (image.data === null) {
                             processedCount++;
                             // 打包阶段进度：从 1+totalImages+1 到 totalProgress
-                            updateTask(taskId, { 
+                            updateTask(taskId, {
                                 progress: 1 + totalImages + processedCount,
                                 stage: 'packaging'
                             });
@@ -251,23 +251,23 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
 
                         processedCount++;
                         // 打包阶段进度
-                        updateTask(taskId, { 
+                        updateTask(taskId, {
                             progress: 1 + totalImages + processedCount,
                             stage: 'packaging'
                         });
                     }
 
                     const pdfBytes = await pdfDocument.save();
-                    
+
                     // 完成
-                    updateTask(taskId, { 
+                    updateTask(taskId, {
                         progress: totalProgress,
                         stage: 'completed'
                     });
-                    
+
                     return pdfBytes.buffer;
                 })();
-                
+
                 startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
             } else {
                 // ZIP/CBZ：使用流式处理函数
@@ -285,7 +285,7 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
 
                 const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
                 startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
-                
+
                 // 确保最终状态为 completed
                 updateTask(taskId, {
                     progress: totalProgress,
@@ -294,8 +294,8 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
             }
         } catch (error) {
             console.error('下载失败:', error);
-            updateTask(taskId, { 
-                stage: 'error', 
+            updateTask(taskId, {
+                stage: 'error',
                 error: (error as Error).message,
                 progress: 0,
                 total: 1
@@ -304,8 +304,8 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
     };
 
     return (
-        <div className="mt-3 space-y-2">
-            <div className="text-gray-500 dark:text-gray-400 text-xs">下载格式:</div>
+        <div className="mt-4 space-y-2">
+            <div className="text-xs text-gray-400 dark:text-gray-500 font-medium">下载格式</div>
             <div className="flex gap-2">
                 <Button
                     size="sm"
@@ -350,39 +350,33 @@ function AlbumDetail({ id }: { id: string }) {
     });
 
     if (isFetching) {
-        return <div className="p-3 text-sm text-gray-500 dark:text-gray-400">加载中...</div>;
+        return <div className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">加载中...</div>;
     }
 
     if (!data) {
-        return <div className="p-3 text-sm text-gray-500 dark:text-gray-400">无法加载详情</div>;
+        return <div className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">无法加载详情</div>;
     }
 
     return (
-        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded text-sm space-y-2">
-            <div className="flex justify-between">
-                <span className="text-gray-500 dark:text-gray-400">ID:</span>
-                <span>{data.id}</span>
+        <div className="px-4 py-3 text-sm space-y-3 border-t border-gray-100 dark:border-gray-800">
+            {/* 名称 */}
+            <div className="font-medium break-words leading-snug">{data.name}</div>
+
+            {/* 统计信息 */}
+            <div className="flex gap-4 text-xs text-gray-400 dark:text-gray-500">
+                <span>ID {data.id}</span>
+                <span>浏览 {data.totalViews}</span>
+                <span>点赞 {data.likes}</span>
             </div>
-            <div>
-                <span className="text-gray-500 dark:text-gray-400 block mb-1">名称:</span>
-                <span className="break-words">{data.name}</span>
-            </div>
-            <div className="flex justify-between">
-                <span className="text-gray-500 dark:text-gray-400">浏览:</span>
-                <span>{data.totalViews}</span>
-            </div>
-            <div className="flex justify-between">
-                <span className="text-gray-500 dark:text-gray-400">点赞:</span>
-                <span>{data.likes}</span>
-            </div>
+
             {data.tags.length > 0 && (
                 <div>
-                    <span className="text-gray-500 dark:text-gray-400">标签:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">标签</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
                         {data.tags.map((tag) => (
                             <span
                                 key={tag}
-                                className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded text-xs"
+                                className="px-2.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full text-xs"
                             >
                                 {tag}
                             </span>
@@ -392,12 +386,12 @@ function AlbumDetail({ id }: { id: string }) {
             )}
             {data.works.length > 0 && (
                 <div>
-                    <span className="text-gray-500 dark:text-gray-400">作品:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">作品</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
                         {data.works.map((work) => (
                             <span
                                 key={work}
-                                className="px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded text-xs"
+                                className="px-2.5 py-0.5 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full text-xs"
                             >
                                 {work}
                             </span>
@@ -407,12 +401,12 @@ function AlbumDetail({ id }: { id: string }) {
             )}
             {data.actors.length > 0 && (
                 <div>
-                    <span className="text-gray-500 dark:text-gray-400">角色:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">角色</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
                         {data.actors.map((actor) => (
                             <span
                                 key={actor}
-                                className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded text-xs"
+                                className="px-2.5 py-0.5 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-full text-xs"
                             >
                                 {actor}
                             </span>
@@ -422,12 +416,12 @@ function AlbumDetail({ id }: { id: string }) {
             )}
             {data.author.length > 0 && (
                 <div>
-                    <span className="text-gray-500 dark:text-gray-400">作者:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">作者</span>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
                         {data.author.map((a) => (
                             <span
                                 key={a}
-                                className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded text-xs"
+                                className="px-2.5 py-0.5 bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 rounded-full text-xs"
                             >
                                 {a}
                             </span>
@@ -436,16 +430,16 @@ function AlbumDetail({ id }: { id: string }) {
                 </div>
             )}
             {data.series && data.series.length > 0 ? (
-                <div className="mt-3 space-y-2">
-                    <div className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 p-2 rounded">
+                <div className="space-y-2">
+                    <div className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 px-3 py-2 rounded-lg">
                         此为合集，暂不支持批量下载全部章节
                     </div>
                     {(() => {
                         const firstChapter = data.series[0];
                         return firstChapter ? (
-                            <DownloadButtons 
-                                id={firstChapter.id} 
-                                name={`${data.name} - ${firstChapter.name}`} 
+                            <DownloadButtons
+                                id={firstChapter.id}
+                                name={`${data.name} - ${firstChapter.name}`}
                             />
                         ) : null;
                     })()}
@@ -590,15 +584,12 @@ export default function Home() {
 
     return (
         <TaskContext.Provider value={taskContextValue}>
-            <div className="fixed inset-0 flex flex-col items-center pt-4 px-4">
+            <div className="fixed inset-0 flex flex-col items-center px-4 pt-6 pb-4">
                 {/* 任务面板 */}
                 {showTaskPanel && <TaskPanel onClose={() => { setShowTaskPanel(false); clearCompleted(); }} />}
 
-                {/* 顶部间距（当有任务面板时） */}
-                <div className={showTaskPanel && tasks.length > 0 ? "h-12" : ""} />
-
                 <div className="w-full max-w-xl flex flex-col h-full">
-                    {/* Search Bar - 始终显示 */}
+                    {/* Search Bar */}
                     <form onSubmit={handleSubmit} className="shrink-0 mb-4">
                         <InputGroup className="h-12 w-full" isInvalid={!!queryError}>
                             <InputGroup.Prefix className="p-0 flex-shrink-0">
@@ -649,7 +640,7 @@ export default function Home() {
                                 name="query"
                                 value={query}
                                 onChange={handleQueryChange}
-                                className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#111827]"
+                                className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
                                 disabled={isFetching}
                             />
                             <InputGroup.Suffix className="p-0 flex-shrink-0">
@@ -665,13 +656,13 @@ export default function Home() {
                             </InputGroup.Suffix>
                         </InputGroup>
                         {queryError && (
-                            <FieldError className="mt-1 ml-1">
+                            <FieldError className="mt-1.5 ml-1">
                                 {queryError}
                             </FieldError>
                         )}
-                        
+
                         {/* 排序和时间筛选 */}
-                        <div className="flex gap-2 mt-2 items-center">
+                        <div className="flex gap-2 mt-3 items-center">
                             <Select
                                 aria-label="排序方式"
                                 className="flex-1"
@@ -709,7 +700,7 @@ export default function Home() {
                                     </ListBox>
                                 </Select.Popover>
                             </Select>
-                            
+
                             <Select
                                 aria-label="时间范围"
                                 className="flex-1"
@@ -752,20 +743,20 @@ export default function Home() {
                             <button
                                 type="button"
                                 onClick={cycleTheme}
-                                className="h-10 w-10 shrink-0 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-white/5"
                                 title={theme === 'light' ? '浅色模式' : theme === 'dark' ? '深色模式' : '跟随系统'}
                             >
-                                {theme === 'light' && <Sun size={18} />}
-                                {theme === 'dark' && <Moon size={18} />}
-                                {theme === 'system' && <Monitor size={18} />}
+                                {theme === 'light' && <Sun size={16} />}
+                                {theme === 'dark' && <Moon size={16} />}
+                                {theme === 'system' && <Monitor size={16} />}
                             </button>
                         </div>
                     </form>
 
                     {/* 直接匹配的本子 */}
                     {redirectAid && (
-                        <div className="shrink-0 mb-4 border dark:border-gray-700 rounded bg-blue-50 dark:bg-blue-900/30">
-                            <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-t text-sm font-medium text-blue-800 dark:text-blue-200">
+                        <div className="shrink-0 mb-4 rounded-xl bg-white dark:bg-gray-900 shadow-sm ring-1 ring-black/5 dark:ring-white/10 overflow-hidden">
+                            <div className="px-4 py-2.5 bg-blue-50 dark:bg-blue-900/30 text-sm font-medium text-blue-700 dark:text-blue-300">
                                 搜索到直接匹配的本子
                             </div>
                             <AlbumDetail id={redirectAid} />
@@ -774,25 +765,25 @@ export default function Home() {
 
                     {/* 搜索结果列表 - 占据剩余空间 */}
                     {hasResults && (
-                        <div 
+                        <div
                             ref={listRef}
                             className={`flex-1 overflow-y-auto min-h-0 mb-4 relative ${isFetching ? 'pointer-events-none overflow-hidden' : ''}`}
                         >
                             {isFetching && (
-                                <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-start justify-center pt-20 z-10">
-                                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                                        <div className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin" />
+                                <div className="absolute inset-0 bg-gray-100/60 dark:bg-gray-950/60 flex items-start justify-center pt-20 z-10">
+                                    <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                                        <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin" />
                                         <span className="text-sm">加载中...</span>
                                     </div>
                                 </div>
                             )}
-                            <div className="space-y-1">
+                            <div className="space-y-2">
                                 {data.content.map((item) => {
                                     const isExpanded = expandedId === item.id;
                                     return (
-                                        <div key={item.id} className="border dark:border-gray-700 rounded">
+                                        <div key={item.id} className="bg-white dark:bg-gray-900 rounded-xl shadow-sm ring-1 ring-black/5 dark:ring-white/10 overflow-hidden">
                                             <div
-                                                className="flex items-center gap-2 p-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer text-sm w-full"
+                                                className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer text-sm"
                                                 onClick={() =>
                                                     setExpandedId(
                                                         isExpanded ? null : item.id
@@ -800,18 +791,16 @@ export default function Home() {
                                                 }
                                                 title={item.name}
                                             >
-                                                <span className="text-gray-500 dark:text-gray-400 text-xs w-16 shrink-0">
+                                                <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums shrink-0">
                                                     #{item.id}
                                                 </span>
                                                 <span className="font-medium truncate flex-1">
                                                     {item.name}
                                                 </span>
-                                                <span className="text-gray-600 dark:text-gray-300 text-xs shrink-0 mr-2">
+                                                <span className="text-gray-400 dark:text-gray-500 text-xs shrink-0">
                                                     {item.author}
                                                 </span>
-                                                <span className="text-gray-400 dark:text-gray-500">
-                                                    {isExpanded ? "▲" : "▼"}
-                                                </span>
+                                                <ChevronDown size={14} className={`text-gray-300 dark:text-gray-600 shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
                                             </div>
                                             {isExpanded && <AlbumDetail id={item.id} />}
                                         </div>
@@ -823,19 +812,26 @@ export default function Home() {
 
                     {/* 无结果提示 */}
                     {data && "content" in data && data.content.length === 0 && !redirectAid && (
-                        <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
+                        <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
                             没有找到相关结果
+                        </div>
+                    )}
+
+                    {/* 初始状态 */}
+                    {!searchParams && (
+                        <div className="flex-1 flex items-center justify-center text-gray-300 dark:text-gray-700 text-sm select-none">
+                            输入关键词开始搜索
                         </div>
                     )}
 
                     {/* 翻页 Bar - 固定在底部 */}
                     {totalCount > 0 && (
-                        <div className="shrink-0 py-3 border-t dark:border-gray-700">
-                            <div className="flex items-center justify-center gap-1 mb-2">
+                        <div className="shrink-0 pt-3 pb-1 border-t border-gray-200 dark:border-gray-800">
+                            <div className="flex items-center justify-center gap-1.5 mb-2">
                                 <Button
                                     variant="secondary"
                                     size="sm"
-                                    className="px-2 text-xs"
+                                    className="px-3 text-xs"
                                     isDisabled={page === 1 || isFetching}
                                     onPress={() => handlePageChange(1)}
                                 >
@@ -844,7 +840,7 @@ export default function Home() {
                                 <Button
                                     variant="secondary"
                                     size="sm"
-                                    className="px-2 text-xs"
+                                    className="px-3 text-xs"
                                     isDisabled={!hasPrevPage || isFetching}
                                     onPress={() => handlePageChange(page - 1)}
                                 >
@@ -853,7 +849,7 @@ export default function Home() {
                                 <Button
                                     variant="secondary"
                                     size="sm"
-                                    className="px-2 text-xs"
+                                    className="px-3 text-xs"
                                     isDisabled={!hasNextPage || isFetching}
                                     onPress={() => handlePageChange(page + 1)}
                                 >
@@ -862,15 +858,15 @@ export default function Home() {
                                 <Button
                                     variant="secondary"
                                     size="sm"
-                                    className="px-2 text-xs"
+                                    className="px-3 text-xs"
                                     isDisabled={page === totalPages || isFetching}
                                     onPress={() => handlePageChange(totalPages)}
                                 >
                                     尾页
                                 </Button>
                             </div>
-                            <div className="text-center text-gray-500 dark:text-gray-400 text-xs">
-                                {totalCount}条·{page}/{totalPages}页
+                            <div className="text-center text-gray-400 dark:text-gray-600 text-xs tabular-nums">
+                                {totalCount}条 · {page}/{totalPages}页
                             </div>
                         </div>
                     )}
