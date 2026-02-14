@@ -1,9 +1,8 @@
-import { getClientDataAndCreateClient, getDomainsFromDomainServer, getRandomDomainToBaseURL } from '@tiny-client/shared/client';
-import { getFastestAvailableBaseURL } from '@tiny-client/shared/client';
+import { getClientDataAndCreateClient, getRandomDomainToBaseURL } from '@tiny-client/shared/client';
 
 // Simple router
 export default {
-	async fetch(request, env, ctx): Promise<Response> {
+	async fetch(request): Promise<Response> {
 		const url = new URL(request.url);
 
 		// CORS headers
@@ -64,10 +63,14 @@ export default {
 			}
 
 			return new Response('Not found', { status: 404, headers: corsHeaders });
-		} catch (e: any) {
-			console.error('WORKER ERROR:', e);
-			console.error('STACK:', e.stack);
-			return new Response(JSON.stringify({ error: e.message || 'Internal Error', stack: e.stack }), { status: 500, headers: corsHeaders });
+		} catch (e) {
+			const shouldBeError = e as Error;
+			console.error('WORKER ERROR:', shouldBeError);
+			console.error('STACK:', shouldBeError.stack);
+			return new Response(JSON.stringify({ error: shouldBeError.message || 'Internal Error', stack: shouldBeError.stack }), {
+				status: 500,
+				headers: corsHeaders,
+			});
 		}
 	},
 } satisfies ExportedHandler<Env>;
