@@ -56,6 +56,12 @@ importers:
       set-cookie-parser:
         specifier: ^3.0.1
         version: 3.0.1
+      tailwind-merge:
+        specifier: ^3.4.0
+        version: 3.4.0
+      tailwind-variants:
+        specifier: ^3.2.2
+        version: 3.2.2(tailwind-merge@3.4.0)(tailwindcss@4.0.0)
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.1
