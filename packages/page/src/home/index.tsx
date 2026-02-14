@@ -1,93 +1,836 @@
-import { useState } from "react";
-import { Button, InputGroup, Select, ListBox } from "@heroui/react";
-import { SearchIcon } from "lucide-react";
-import type { Key } from "@heroui/react";
+import { useState, useRef, createContext, useContext, useCallback } from "react";
+import { Button, InputGroup, Select, ListBox, FieldError } from "@heroui/react";
+import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText } from "lucide-react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { search, getAlbum, getPhoto } from "../api";
+import type { SearchResult, Album, PhotoWithScrambleId } from "@tiny-client/shared";
+import {
+    startDownload,
+    downloadAllImages,
+    downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile,
+} from "@tiny-client/shared";
+import { PDFDocument } from "pdf-lib";
 
-export default function Home() {
-    const [query, setQuery] = useState("");
-    const [category, setCategory] = useState<Key>("all");
-    console.log(category);
+// 下载任务类型
+type DownloadTask = {
+    id: string;
+    albumId: string;
+    name: string;
+    format: 'pdf' | 'zip' | 'cbz';
+    stage: 'downloading' | 'packaging' | 'completed' | 'error';
+    progress: number;
+    total: number;
+    error?: string;
+};
+
+// 任务上下文
+type TaskContextType = {
+    tasks: DownloadTask[];
+    addTask: (task: Omit<DownloadTask, 'id'>) => string;
+    updateTask: (id: string, updates: Partial<DownloadTask>) => void;
+    removeTask: (id: string) => void;
+    clearCompleted: () => void;
+};
+
+const TaskContext = createContext<TaskContextType | null>(null);
+
+function useTasks() {
+    const context = useContext(TaskContext);
+    if (!context) throw new Error('useTasks must be used within TaskProvider');
+    return context;
+}
+
+// 任务管理面板 - 右下角浮动
+function TaskPanel({ onClose }: { onClose: () => void }) {
+    const { tasks, removeTask, clearCompleted } = useTasks();
+    const [expanded, setExpanded] = useState(true);
+
+    const activeTasks = tasks.filter(t => t.stage !== 'completed' && t.stage !== 'error');
+    const completedTasks = tasks.filter(t => t.stage === 'completed');
+
+    const getStageText = (stage: DownloadTask['stage']) => {
+        switch (stage) {
+            case 'downloading': return '下载图片';
+            case 'packaging': return '打包中';
+            case 'completed': return '完成';
+            case 'error': return '错误';
+        }
+    };
+
+    const getStageColor = (stage: DownloadTask['stage']) => {
+        switch (stage) {
+            case 'downloading': return 'bg-blue-500';
+            case 'packaging': return 'bg-yellow-500';
+            case 'completed': return 'bg-green-500';
+            case 'error': return 'bg-red-500';
+        }
+    };
+
+    if (tasks.length === 0) return null;
 
     return (
-        <div className="fixed inset-0 flex flex-col items-center pt-20">
-            <div className="w-full max-w-xl px-4">
-                <form
-                    onSubmit={(e) => {
-                        e.preventDefault();
-                    }}
-                    className="w-full flex items-center"
+        <div className="fixed bottom-20 right-4 z-50 bg-white shadow-xl rounded-lg border w-80 max-w-[calc(100vw-2rem)]">
+            {/* 标题栏 */}
+            <div 
+                className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50 rounded-t-lg border-b"
+                onClick={() => setExpanded(!expanded)}
+            >
+                <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">
+                        下载 ({activeTasks.length}进行中)
+                    </span>
+                    {expanded ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                </div>
+                <div className="flex items-center gap-2">
+                    {completedTasks.length > 0 && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                clearCompleted();
+                            }}
+                            className="text-xs text-gray-500 hover:text-gray-700"
+                        >
+                            清除
+                        </button>
+                    )}
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onClose();
+                        }}
+                        className="text-gray-400 hover:text-gray-600"
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
+            </div>
+
+            {/* 任务列表 */}
+            {expanded && (
+                <div className="max-h-48 overflow-y-auto">
+                    {tasks.map((task) => (
+                        <div key={task.id} className="p-3 border-b last:border-b-0 last:rounded-b-lg">
+                            <div className="flex items-center justify-between mb-2">
+                                <div className="flex-1 min-w-0 mr-2">
+                                    <div className="text-sm font-medium truncate" title={task.name}>
+                                        {task.name}
+                                    </div>
+                                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                                        <span>{task.format.toUpperCase()}</span>
+                                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${getStageColor(task.stage)}`} />
+                                        <span>{getStageText(task.stage)}</span>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => removeTask(task.id)}
+                                    className="text-gray-400 hover:text-red-500 shrink-0"
+                                >
+                                    <X size={14} />
+                                </button>
+                            </div>
+                            
+                            {/* 进度条 */}
+                            <div className="relative h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                <div
+                                    className={`absolute top-0 left-0 h-full transition-all duration-300 ${getStageColor(task.stage)}`}
+                                    style={{ width: `${task.total > 0 ? (task.progress / task.total) * 100 : 0}%` }}
+                                />
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1 text-right">
+                                {task.progress}/{task.total}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// 下载按钮组件
+function DownloadButtons({ id, name }: { id: string; name: string }) {
+    const { tasks, addTask, updateTask } = useTasks();
+
+    const handleDownload = async (format: 'pdf' | 'zip' | 'cbz') => {
+        // 检查是否已有相同任务在进行中
+        const existingTask = tasks.find(t => 
+            t.albumId === id && 
+            t.format === format && 
+            t.stage !== 'completed' && 
+            t.stage !== 'error'
+        );
+        if (existingTask) {
+            return; // 已有相同任务在进行中
+        }
+        
+        let taskId = '';
+        
+        try {
+            // 先添加任务（获取 photo 前）
+            taskId = addTask({
+                albumId: id,
+                name,
+                format,
+                stage: 'downloading',
+                progress: 0,
+                total: 1, // 临时，获取 photo 后更新
+            });
+            
+            // 获取 photo 数据
+            const photo = await getPhoto(id);
+            if (!photo) {
+                throw new Error('无法获取图片数据');
+            }
+
+            const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
+            const totalImages = photo.images.length;
+            // ZIP 流式处理：获取photo(1) + 图片处理(每张1进度)
+            // PDF：获取photo(1) + 下载(每张1) + 打包(每张1) = 1 + totalImages * 2
+            const totalProgress = format === 'pdf' 
+                ? 1 + totalImages * 2  // PDF 分下载和打包两个阶段
+                : 1 + totalImages;      // ZIP 流式处理，一气呵成
+
+            // 更新任务总进度
+            updateTask(taskId, {
+                total: totalProgress,
+                progress: 1, // 获取 photo 完成
+            });
+
+            if (format === 'pdf') {
+                // PDF：手动处理以分离进度
+                const buffer = await (async () => {
+                    const pdfDocument = await PDFDocument.create();
+                    let processedCount = 0;
+                    const totalImages = photo.images.length;
+
+                    // 下载图片 - 带进度回调（已在 downloadAllImages 中解密和转换）
+                    const downloadedImages = await downloadAllImages(
+                        photo.images,
+                        20,
+                        (done) => {
+                            // 下载阶段：进度从 1 到 1+totalImages
+                            updateTask(taskId, {
+                                progress: 1 + done,
+                                stage: 'downloading'
+                            });
+                        },
+                        photo.id,
+                        (photo as PhotoWithScrambleId).scrambleId
+                    );
+                    
+                    // 打包阶段（嵌入 PDF）
+                    updateTask(taskId, { stage: 'packaging' });
+                    
+                    for (let i = 0; i < downloadedImages.length; i++) {
+                        const image = downloadedImages[i];
+                        if (image.data === null) {
+                            processedCount++;
+                            // 打包阶段进度：从 1+totalImages+1 到 totalProgress
+                            updateTask(taskId, { 
+                                progress: 1 + totalImages + processedCount,
+                                stage: 'packaging'
+                            });
+                            continue;
+                        }
+
+                        // 获取尺寸
+                        const bitmap = await createImageBitmap(new Blob([image.data]));
+                        const width = bitmap.width;
+                        const height = bitmap.height;
+                        bitmap.close();
+
+                        // 添加到 PDF
+                        const page = pdfDocument.addPage([width, height]);
+                        const pdfImage = await pdfDocument.embedJpg(image.data);
+                        page.drawImage(pdfImage, {
+                            x: 0,
+                            y: 0,
+                            width: width,
+                            height: height,
+                        });
+
+                        processedCount++;
+                        // 打包阶段进度
+                        updateTask(taskId, { 
+                            progress: 1 + totalImages + processedCount,
+                            stage: 'packaging'
+                        });
+                    }
+
+                    const pdfBytes = await pdfDocument.save();
+                    
+                    // 完成
+                    updateTask(taskId, { 
+                        progress: totalProgress,
+                        stage: 'completed'
+                    });
+                    
+                    return pdfBytes.buffer;
+                })();
+                
+                startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
+            } else {
+                // ZIP/CBZ：使用流式处理函数
+                const buffer = await downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
+                    photo as PhotoWithScrambleId,
+                    (done, total) => {
+                        // 流式处理：进度直接反映已完成的图片数
+                        // 总进度 = 1(获取photo) + 图片数
+                        updateTask(taskId, {
+                            progress: 1 + done,
+                            stage: done < total ? 'packaging' : 'completed'
+                        });
+                    }
+                );
+
+                const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
+                startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
+                
+                // 确保最终状态为 completed
+                updateTask(taskId, {
+                    progress: totalProgress,
+                    stage: 'completed'
+                });
+            }
+        } catch (error) {
+            console.error('下载失败:', error);
+            updateTask(taskId, { 
+                stage: 'error', 
+                error: (error as Error).message,
+                progress: 0,
+                total: 1
+            });
+        }
+    };
+
+    return (
+        <div className="mt-3 space-y-2">
+            <div className="text-gray-500 text-xs">下载格式:</div>
+            <div className="flex gap-2">
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    className="text-xs flex-1"
+                    onPress={() => handleDownload('pdf')}
                 >
-                    <InputGroup className="h-12 w-full flex-1 min-w-0">
-                        <InputGroup.Prefix className="p-0 flex-shrink-0">
-                            <Select
-                                aria-label="搜索类别"
-                                className="w-24 min-w-[96px] h-full"
-                                variant="secondary"
-                                value={category}
-                                onChange={(value) =>
-                                    setCategory(value || "all")
-                                }
-                                placeholder="选择类别"
+                    <FileText size={14} className="mr-1" />
+                    PDF
+                </Button>
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    className="text-xs flex-1"
+                    onPress={() => handleDownload('zip')}
+                >
+                    <FileArchive size={14} className="mr-1" />
+                    ZIP
+                </Button>
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    className="text-xs flex-1"
+                    onPress={() => handleDownload('cbz')}
+                >
+                    <Download size={14} className="mr-1" />
+                    CBZ
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+// Album 详情组件
+function AlbumDetail({ id }: { id: string }) {
+    const { data, isFetching } = useQuery<Album | null>({
+        queryKey: ["album", id],
+        queryFn: () => getAlbum(id),
+        enabled: true,
+        staleTime: 5 * 60 * 1000,
+        gcTime: 10 * 60 * 1000,
+    });
+
+    if (isFetching) {
+        return <div className="p-3 text-sm text-gray-500">加载中...</div>;
+    }
+
+    if (!data) {
+        return <div className="p-3 text-sm text-gray-500">无法加载详情</div>;
+    }
+
+    return (
+        <div className="p-3 bg-gray-50 rounded text-sm space-y-2">
+            <div className="flex justify-between">
+                <span className="text-gray-500">ID:</span>
+                <span>{data.id}</span>
+            </div>
+            <div>
+                <span className="text-gray-500 block mb-1">名称:</span>
+                <span className="break-words">{data.name}</span>
+            </div>
+            <div className="flex justify-between">
+                <span className="text-gray-500">浏览:</span>
+                <span>{data.totalViews}</span>
+            </div>
+            <div className="flex justify-between">
+                <span className="text-gray-500">点赞:</span>
+                <span>{data.likes}</span>
+            </div>
+            {data.tags.length > 0 && (
+                <div>
+                    <span className="text-gray-500">标签:</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                        {data.tags.map((tag) => (
+                            <span
+                                key={tag}
+                                className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs"
                             >
-                                <Select.Trigger className="h-full rounded-none border-none shadow-none bg-transparent px-3 flex items-center justify-center gap-1">
-                                    <Select.Value className="text-center flex-1" />
-                                    <Select.Indicator className="flex-shrink-0" />
+                                {tag}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {data.works.length > 0 && (
+                <div>
+                    <span className="text-gray-500">作品:</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                        {data.works.map((work) => (
+                            <span
+                                key={work}
+                                className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs"
+                            >
+                                {work}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {data.actors.length > 0 && (
+                <div>
+                    <span className="text-gray-500">角色:</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                        {data.actors.map((actor) => (
+                            <span
+                                key={actor}
+                                className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs"
+                            >
+                                {actor}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {data.author.length > 0 && (
+                <div>
+                    <span className="text-gray-500">作者:</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                        {data.author.map((a) => (
+                            <span
+                                key={a}
+                                className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-xs"
+                            >
+                                {a}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+            {data.series && data.series.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                    <div className="text-xs text-orange-600 bg-orange-50 p-2 rounded">
+                        此为合集，暂不支持批量下载全部章节
+                    </div>
+                    {(() => {
+                        const firstChapter = data.series[0];
+                        return firstChapter ? (
+                            <DownloadButtons 
+                                id={firstChapter.id} 
+                                name={`${data.name} - ${firstChapter.name}`} 
+                            />
+                        ) : null;
+                    })()}
+                </div>
+            ) : (
+                <DownloadButtons id={data.id} name={data.name} />
+            )}
+        </div>
+    );
+}
+
+// 主组件
+export default function Home() {
+    const [query, setQuery] = useState("");
+    const [category, setCategory] = useState<"0" | "1" | "2" | "3" | "4">("0");
+    const [orderBy, setOrderBy] = useState<"mr" | "mv" | "mp" | "tf">("mr");
+    const [timeFilter, setTimeFilter] = useState<"a" | "t" | "w" | "m">("a");
+    const [queryError, setQueryError] = useState<string | null>(null);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [page, setPage] = useState(1);
+    const [searchParams, setSearchParams] = useState<{ query: string; page: number; category: string; orderBy: string; time: string } | null>(null);
+    const [tasks, setTasks] = useState<DownloadTask[]>([]);
+    const [showTaskPanel, setShowTaskPanel] = useState(false);
+    const listRef = useRef<HTMLDivElement>(null);
+
+    // 任务管理函数
+    const addTask = useCallback((task: Omit<DownloadTask, 'id'>) => {
+        const newTask: DownloadTask = { ...task, id: `${Date.now()}_${Math.random()}` };
+        setTasks(prev => [...prev, newTask]);
+        setShowTaskPanel(true);
+        return newTask.id;
+    }, []);
+
+    const updateTask = useCallback((id: string, updates: Partial<DownloadTask>) => {
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    }, []);
+
+    const removeTask = useCallback((id: string) => {
+        setTasks(prev => prev.filter(t => t.id !== id));
+    }, []);
+
+    const clearCompleted = useCallback(() => {
+        setTasks(prev => prev.filter(t => t.stage !== 'completed' && t.stage !== 'error'));
+    }, []);
+
+    const taskContextValue = {
+        tasks,
+        addTask,
+        updateTask,
+        removeTask,
+        clearCompleted,
+    };
+
+    const { data, isFetching } = useQuery<SearchResult>({
+        queryKey: ["search", searchParams?.query, searchParams?.page, searchParams?.category, searchParams?.orderBy, searchParams?.time],
+        queryFn: () =>
+            search(searchParams!.query, {
+                mainTag: parseInt(searchParams!.category) as 1 | 2 | 3 | 4,
+                page: searchParams!.page,
+                orderBy: searchParams!.orderBy as "mr" | "mv" | "mp" | "tf",
+                time: searchParams!.time as "a" | "t" | "w" | "m",
+            }),
+        enabled: !!searchParams,
+        staleTime: 0,
+        gcTime: 0,
+        placeholderData: keepPreviousData,
+    });
+
+    const totalCount = data?.total ? parseInt(data.total) : 0;
+    const itemsPerPage = 20;
+    const totalPages = Math.ceil(totalCount / itemsPerPage);
+    const hasNextPage = page < totalPages;
+    const hasPrevPage = page > 1;
+
+    const redirectAid = data && "redirect_aid" in data && data.redirect_aid ? data.redirect_aid : null;
+    const hasResults = data && "content" in data && data.content.length > 0;
+
+    const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setQuery(e.target.value);
+        if (queryError) {
+            setQueryError(null);
+        }
+    };
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!query.trim()) {
+            setQueryError("请填写搜索内容");
+            return;
+        }
+        performSearch();
+    };
+
+    const performSearch = () => {
+        if (!query.trim()) return;
+        setPage(1);
+        setExpandedId(null);
+        setSearchParams({ query, page: 1, category, orderBy, time: timeFilter });
+    };
+
+    const handlePageChange = (newPage: number) => {
+        setPage(newPage);
+        setExpandedId(null);
+        setSearchParams({ query, page: newPage, category, orderBy, time: timeFilter });
+        if (listRef.current) {
+            listRef.current.scrollTop = 0;
+        }
+    };
+
+    return (
+        <TaskContext.Provider value={taskContextValue}>
+            <div className="fixed inset-0 flex flex-col items-center pt-4 px-4">
+                {/* 任务面板 */}
+                {showTaskPanel && <TaskPanel onClose={() => { setShowTaskPanel(false); clearCompleted(); }} />}
+
+                {/* 顶部间距（当有任务面板时） */}
+                <div className={showTaskPanel && tasks.length > 0 ? "h-12" : ""} />
+
+                <div className="w-full max-w-xl flex flex-col h-full">
+                    {/* Search Bar - 始终显示 */}
+                    <form onSubmit={handleSubmit} className="shrink-0 mb-4">
+                        <InputGroup className="h-12 w-full" isInvalid={!!queryError}>
+                            <InputGroup.Prefix className="p-0 flex-shrink-0">
+                                <Select
+                                    aria-label="搜索类别"
+                                    className="w-24 min-w-[96px] h-full"
+                                    variant="secondary"
+                                    value={category}
+                                    onChange={(value) => {
+                                        const newCategory = (value as "0" | "1" | "2" | "3" | "4") ?? "0";
+                                        setCategory(newCategory);
+                                        if (query.trim()) {
+                                            setPage(1);
+                                            setExpandedId(null);
+                                            setSearchParams({ query, page: 1, category: newCategory, orderBy, time: timeFilter });
+                                        }
+                                    }}
+                                    placeholder="选择类别"
+                                    isDisabled={isFetching}
+                                >
+                                    <Select.Trigger className="h-full rounded-none border-none shadow-none bg-transparent px-3 flex items-center justify-center gap-1">
+                                        <Select.Value className="text-center flex-1" />
+                                        <Select.Indicator className="flex-shrink-0" />
+                                    </Select.Trigger>
+                                    <Select.Popover>
+                                        <ListBox>
+                                            <ListBox.Item id="0" textValue="全部">
+                                                全部
+                                            </ListBox.Item>
+                                            <ListBox.Item id="1" textValue="作品名称">
+                                                作品名称
+                                            </ListBox.Item>
+                                            <ListBox.Item id="2" textValue="作者">
+                                                作者
+                                            </ListBox.Item>
+                                            <ListBox.Item id="3" textValue="标签">
+                                                标签
+                                            </ListBox.Item>
+                                            <ListBox.Item id="4" textValue="角色">
+                                                角色
+                                            </ListBox.Item>
+                                        </ListBox>
+                                    </Select.Popover>
+                                </Select>
+                            </InputGroup.Prefix>
+                            <InputGroup.Input
+                                placeholder="搜索内容..."
+                                name="query"
+                                value={query}
+                                onChange={handleQueryChange}
+                                className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white]"
+                                disabled={isFetching}
+                            />
+                            <InputGroup.Suffix className="p-0 flex-shrink-0">
+                                <Button
+                                    type="submit"
+                                    className="rounded-none px-4 flex-shrink-0"
+                                    style={{ height: '48px' }}
+                                    variant="primary"
+                                    isDisabled={isFetching}
+                                >
+                                    <SearchIcon size={18} />
+                                </Button>
+                            </InputGroup.Suffix>
+                        </InputGroup>
+                        {queryError && (
+                            <FieldError className="mt-1 ml-1">
+                                {queryError}
+                            </FieldError>
+                        )}
+                        
+                        {/* 排序和时间筛选 */}
+                        <div className="flex gap-2 mt-2">
+                            <Select
+                                aria-label="排序方式"
+                                className="flex-1"
+                                variant="secondary"
+                                value={orderBy}
+                                onChange={(value) => {
+                                    const newOrderBy = (value as "mr" | "mv" | "mp" | "tf") ?? "mr";
+                                    setOrderBy(newOrderBy);
+                                    if (query.trim()) {
+                                        setPage(1);
+                                        setExpandedId(null);
+                                        setSearchParams({ query, page: 1, category, orderBy: newOrderBy, time: timeFilter });
+                                    }
+                                }}
+                                isDisabled={isFetching}
+                            >
+                                <Select.Trigger className="h-10 text-sm">
+                                    <Select.Value />
+                                    <Select.Indicator />
                                 </Select.Trigger>
                                 <Select.Popover>
                                     <ListBox>
-                                        <ListBox.Item
-                                            id="all"
-                                            textValue="全部"
-                                        >
-                                            全部
+                                        <ListBox.Item id="mr" textValue="最新发布">
+                                            最新发布
                                         </ListBox.Item>
-                                        <ListBox.Item
-                                            id="work"
-                                            textValue="作品名称"
-                                        >
-                                            作品名称
+                                        <ListBox.Item id="mv" textValue="最多浏览">
+                                            最多浏览
                                         </ListBox.Item>
-                                        <ListBox.Item
-                                            id="author"
-                                            textValue="作者"
-                                        >
-                                            作者
+                                        <ListBox.Item id="mp" textValue="最多图片">
+                                            最多图片
                                         </ListBox.Item>
-                                        <ListBox.Item
-                                            id="tag"
-                                            textValue="标签"
-                                        >
-                                            标签
-                                        </ListBox.Item>
-                                        <ListBox.Item
-                                            id="actor"
-                                            textValue="角色"
-                                        >
-                                            角色
+                                        <ListBox.Item id="tf" textValue="最多喜欢">
+                                            最多喜欢
                                         </ListBox.Item>
                                     </ListBox>
                                 </Select.Popover>
                             </Select>
-                        </InputGroup.Prefix>
-                        <InputGroup.Input
-                            placeholder="搜索内容..."
-                            name="query"
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            className="flex-1 min-w-0"
-                        />
-                        <InputGroup.Suffix className="p-0 flex-shrink-0">
-                            <Button
-                                type="submit"
-                                className="h-full rounded-none px-4 flex-shrink-0"
-                                variant="primary"
+                            
+                            <Select
+                                aria-label="时间范围"
+                                className="flex-1"
+                                variant="secondary"
+                                value={timeFilter}
+                                onChange={(value) => {
+                                    const newTime = (value as "a" | "t" | "w" | "m") ?? "a";
+                                    setTimeFilter(newTime);
+                                    if (query.trim()) {
+                                        setPage(1);
+                                        setExpandedId(null);
+                                        setSearchParams({ query, page: 1, category, orderBy, time: newTime });
+                                    }
+                                }}
+                                isDisabled={isFetching}
                             >
-                                <SearchIcon size={18} />
-                            </Button>
-                        </InputGroup.Suffix>
-                    </InputGroup>
-                </form>
+                                <Select.Trigger className="h-10 text-sm">
+                                    <Select.Value />
+                                    <Select.Indicator />
+                                </Select.Trigger>
+                                <Select.Popover>
+                                    <ListBox>
+                                        <ListBox.Item id="a" textValue="全部时间">
+                                            全部时间
+                                        </ListBox.Item>
+                                        <ListBox.Item id="t" textValue="今天">
+                                            今天
+                                        </ListBox.Item>
+                                        <ListBox.Item id="w" textValue="本周">
+                                            本周
+                                        </ListBox.Item>
+                                        <ListBox.Item id="m" textValue="本月">
+                                            本月
+                                        </ListBox.Item>
+                                    </ListBox>
+                                </Select.Popover>
+                            </Select>
+                        </div>
+                    </form>
+
+                    {/* 直接匹配的本子 */}
+                    {redirectAid && (
+                        <div className="shrink-0 mb-4 border rounded bg-blue-50">
+                            <div className="p-2 bg-blue-100 rounded-t text-sm font-medium text-blue-800">
+                                搜索到直接匹配的本子
+                            </div>
+                            <AlbumDetail id={redirectAid} />
+                        </div>
+                    )}
+
+                    {/* 搜索结果列表 - 占据剩余空间 */}
+                    {hasResults && (
+                        <div 
+                            ref={listRef}
+                            className={`flex-1 overflow-y-auto min-h-0 mb-4 relative ${isFetching ? 'pointer-events-none overflow-hidden' : ''}`}
+                        >
+                            {isFetching && (
+                                <div className="absolute inset-0 bg-white/70 flex items-start justify-center pt-20 z-10">
+                                    <div className="flex items-center gap-2 text-gray-600">
+                                        <div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+                                        <span className="text-sm">加载中...</span>
+                                    </div>
+                                </div>
+                            )}
+                            <div className="space-y-1">
+                                {data.content.map((item) => {
+                                    const isExpanded = expandedId === item.id;
+                                    return (
+                                        <div key={item.id} className="border rounded">
+                                            <div
+                                                className="flex items-center gap-2 p-2 hover:bg-gray-100 cursor-pointer text-sm w-full"
+                                                onClick={() =>
+                                                    setExpandedId(
+                                                        isExpanded ? null : item.id
+                                                    )
+                                                }
+                                                title={item.name}
+                                            >
+                                                <span className="text-gray-500 text-xs w-16 shrink-0">
+                                                    #{item.id}
+                                                </span>
+                                                <span className="font-medium truncate flex-1">
+                                                    {item.name}
+                                                </span>
+                                                <span className="text-gray-600 text-xs shrink-0 mr-2">
+                                                    {item.author}
+                                                </span>
+                                                <span className="text-gray-400">
+                                                    {isExpanded ? "▲" : "▼"}
+                                                </span>
+                                            </div>
+                                            {isExpanded && <AlbumDetail id={item.id} />}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 无结果提示 */}
+                    {data && "content" in data && data.content.length === 0 && !redirectAid && (
+                        <div className="flex-1 flex items-center justify-center text-gray-500 text-sm">
+                            没有找到相关结果
+                        </div>
+                    )}
+
+                    {/* 翻页 Bar - 固定在底部 */}
+                    {totalCount > 0 && (
+                        <div className="shrink-0 py-3 border-t">
+                            <div className="flex items-center justify-center gap-1 mb-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="px-2 text-xs"
+                                    isDisabled={page === 1 || isFetching}
+                                    onPress={() => handlePageChange(1)}
+                                >
+                                    首页
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="px-2 text-xs"
+                                    isDisabled={!hasPrevPage || isFetching}
+                                    onPress={() => handlePageChange(page - 1)}
+                                >
+                                    上页
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="px-2 text-xs"
+                                    isDisabled={!hasNextPage || isFetching}
+                                    onPress={() => handlePageChange(page + 1)}
+                                >
+                                    下页
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="px-2 text-xs"
+                                    isDisabled={page === totalPages || isFetching}
+                                    onPress={() => handlePageChange(totalPages)}
+                                >
+                                    尾页
+                                </Button>
+                            </div>
+                            <div className="text-center text-gray-500 text-xs">
+                                {totalCount}条·{page}/{totalPages}页
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
-        </div>
+        </TaskContext.Provider>
     );
 }

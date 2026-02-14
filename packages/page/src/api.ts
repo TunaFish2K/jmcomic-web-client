@@ -4,7 +4,12 @@ import {
     type PhotoWithScrambleId,
 } from "@tiny-client/shared";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string;
+const rawBackendUrl = import.meta.env.VITE_BACKEND_URL as string;
+// 开发环境：将 localhost 替换为当前访问的 hostname（支持内网访问）
+// 生产环境：直接使用配置的 URL
+const BACKEND_URL = import.meta.env.DEV && rawBackendUrl?.includes("localhost")
+    ? rawBackendUrl.replace("localhost", window.location.hostname)
+    : rawBackendUrl;
 
 export async function search(
     query: string,
