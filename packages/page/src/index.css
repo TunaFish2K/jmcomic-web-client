@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @utility wrap-break-word {
     overflow-wrap: break-word;
 }
@@ -14,6 +16,12 @@ body,
     height: 100%;
     margin: 0;
     padding: 0;
+}
+
+html.dark,
+html.dark body {
+    background-color: #111827; /* gray-900 */
+    color-scheme: dark;
 }
 
 /* 扫描当前包的源码 */
