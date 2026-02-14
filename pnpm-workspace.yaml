@@ -1,2 +1,11 @@
 packages:
-  - "packages/*"
+  - packages/*
+
+ignoredBuiltDependencies:
+  - sharp
+
+onlyBuiltDependencies:
+  - '@heroui/shared-utils'
+  - esbuild
+  - sharp
+  - workerd
