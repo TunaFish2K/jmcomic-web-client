@@ -640,7 +640,7 @@ export default function Home() {
                                 name="query"
                                 value={query}
                                 onChange={handleQueryChange}
-                                className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
+                                className="flex-1 min-w-0 [&:-webkit-autofill]:h-full"
                                 disabled={isFetching}
                             />
                             <InputGroup.Suffix className="p-0 flex-shrink-0">

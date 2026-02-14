@@ -31,6 +31,24 @@ html.dark body {
     color-scheme: dark;
 }
 
+/* 重置浏览器 autofill 样式 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px white inset !important;
+    -webkit-text-fill-color: inherit !important;
+    caret-color: inherit !important;
+    border-color: inherit !important;
+}
+
+html.dark input:-webkit-autofill,
+html.dark input:-webkit-autofill:hover,
+html.dark input:-webkit-autofill:focus,
+html.dark input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 1000px #030712 inset !important;
+}
+
 /* 扫描当前包的源码 */
 @source "./**/*.{js,ts,jsx,tsx}";
 /* 扫描 HeroUI 的源码 */
