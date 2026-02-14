@@ -49,7 +49,7 @@ export default {
 				if (!id) return new Response('Missing album id', { status: 400, headers: corsHeaders });
 
 				const result = await client.getAlbum(id);
-				if (result === null) return new Response('album not found', { status: 400, headers: corsHeaders });
+				if (result === null) return new Response('album not found', { status: 404, headers: corsHeaders });
 				return Response.json(result, { headers: corsHeaders });
 			}
 
@@ -58,7 +58,7 @@ export default {
 				if (!id) return new Response('Missing photo id', { status: 400, headers: corsHeaders });
 
 				const result = await client.getPhotoWithScrambleId(id);
-				if (result === null) return new Response('photo not found', { status: 400, headers: corsHeaders });
+				if (result === null) return new Response('photo not found', { status: 404, headers: corsHeaders });
 				return Response.json(result, { headers: corsHeaders });
 			}
 
