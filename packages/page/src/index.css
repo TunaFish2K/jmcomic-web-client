@@ -1,3 +1,22 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@utility wrap-break-word {
+    overflow-wrap: break-word;
+}
+
+@import "@heroui/styles";
+
+html,
+body,
+#root {
+    min-width: 0 !important;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+}
+
+/* 扫描当前包的源码 */
+@source "./**/*.{js,ts,jsx,tsx}";
+/* 扫描 HeroUI 的源码 */
+@source "../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";
