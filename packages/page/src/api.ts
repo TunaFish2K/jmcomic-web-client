@@ -1,4 +1,8 @@
-import { type SearchResult, type Album, type PhotoWithScrambleId } from "@tiny-client/shared";
+import {
+    type SearchResult,
+    type Album,
+    type PhotoWithScrambleId,
+} from "@tiny-client/shared";
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL as string;
 
@@ -37,6 +41,7 @@ export async function getAlbum(id: string) {
     const url = new URL(`/album/${id}`, BACKEND_URL);
     const res = await fetch(url);
     if (!res.ok) {
+        if (res.status === 404) return null;
         const errorMessage = await res.text();
         throw new Error(
             `${res.status} ${res.statusText}, message: ${errorMessage}`,
@@ -49,6 +54,7 @@ export async function getPhoto(id: string) {
     const url = new URL(`/photo/${id}`, BACKEND_URL);
     const res = await fetch(url);
     if (!res.ok) {
+        if (res.status === 404) return null;
         const errorMessage = await res.text();
         throw new Error(
             `${res.status} ${res.statusText}, message: ${errorMessage}`,
