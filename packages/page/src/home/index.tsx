@@ -5,6 +5,7 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { search, getPhoto, getBatchAlbum } from "../api";
 import type { BatchAlbumItem } from "../api";
 import type { SearchResult, PhotoWithScrambleId } from "@tiny-client/shared";
+import { useSearchParams } from "react-router-dom";
 import {
     startDownload,
     downloadAllImages,
@@ -420,15 +421,21 @@ function AlbumCard({ item, cachedData, onClick }: {
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function Home() {
-    const [query, setQuery] = useState("");
-    const [category, setCategory] = useState<"0" | "1" | "2" | "3" | "4">("0");
-    const [orderBy, setOrderBy] = useState<"mr" | "mv" | "mp" | "tf">("mr");
-    const [timeFilter, setTimeFilter] = useState<"a" | "t" | "w" | "m">("a");
+    // ── URL search params (single source of truth) ───────────────────────────
+    const [urlParams, setUrlParams] = useSearchParams();
+
+    const urlQuery    = urlParams.get('q') ?? '';
+    const urlCategory = (urlParams.get('cat') ?? '0') as "0"|"1"|"2"|"3"|"4";
+    const urlOrderBy  = (urlParams.get('order') ?? 'mr') as "mr"|"mv"|"mp"|"tf";
+    const urlTime     = (urlParams.get('time') ?? 'a') as "a"|"t"|"w"|"m";
+    const urlPage     = parseInt(urlParams.get('page') ?? '1') || 1;
+
+    // local input state (controlled input, not yet submitted)
+    const [query, setQuery]           = useState(urlQuery);
+    const [category, setCategory]     = useState<"0"|"1"|"2"|"3"|"4">(urlCategory);
+    const [orderBy, setOrderBy]       = useState<"mr"|"mv"|"mp"|"tf">(urlOrderBy);
+    const [timeFilter, setTimeFilter] = useState<"a"|"t"|"w"|"m">(urlTime);
     const [queryError, setQueryError] = useState<string | null>(null);
-    const [page, setPage] = useState(1);
-    const [searchParams, setSearchParams] = useState<{
-        query: string; page: number; category: string; orderBy: string; time: string;
-    } | null>(null);
     const [tasks, setTasks] = useState<DownloadTask[]>([]);
     const [showTaskPanel, setShowTaskPanel] = useState(false);
     const [modalAlbumId, setModalAlbumId] = useState<string | null>(null);
@@ -482,16 +489,16 @@ export default function Home() {
 
     const taskContextValue = { tasks, addTask, updateTask, removeTask, clearCompleted };
 
-    // ── search query ─────────────────────────────────────────────────────────
+    // ── search query — driven by URL params ──────────────────────────────────
     const { data, isFetching } = useQuery<SearchResult>({
-        queryKey: ["search", searchParams?.query, searchParams?.page, searchParams?.category, searchParams?.orderBy, searchParams?.time],
-        queryFn: () => search(searchParams!.query, {
-            mainTag: parseInt(searchParams!.category) as 1 | 2 | 3 | 4,
-            page: searchParams!.page,
-            orderBy: searchParams!.orderBy as "mr" | "mv" | "mp" | "tf",
-            time: searchParams!.time as "a" | "t" | "w" | "m",
+        queryKey: ["search", urlQuery, urlPage, urlCategory, urlOrderBy, urlTime],
+        queryFn: () => search(urlQuery, {
+            mainTag: parseInt(urlCategory) as 1 | 2 | 3 | 4,
+            page: urlPage,
+            orderBy: urlOrderBy,
+            time: urlTime,
         }),
-        enabled: !!searchParams,
+        enabled: !!urlQuery,
         staleTime: 0,
         gcTime: 0,
         placeholderData: keepPreviousData,
@@ -532,11 +539,18 @@ export default function Home() {
     const totalCount = data?.total ? parseInt(data.total) : 0;
     const itemsPerPage = 20;
     const totalPages = Math.ceil(totalCount / itemsPerPage);
-    const hasNextPage = page < totalPages;
-    const hasPrevPage = page > 1;
+    const hasNextPage = urlPage < totalPages;
+    const hasPrevPage = urlPage > 1;
 
     const redirectAid = data && "redirect_aid" in data && data.redirect_aid ? data.redirect_aid : null;
     const hasResults = data && "content" in data && data.content.length > 0;
+
+    // helper: write all search params to URL at once
+    const pushSearch = useCallback((
+        q: string, cat: string, ord: string, time: string, pg: number
+    ) => {
+        setUrlParams({ q, cat, order: ord, time, page: String(pg) }, { replace: false });
+    }, [setUrlParams]);
 
     const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setQuery(e.target.value);
@@ -545,9 +559,8 @@ export default function Home() {
 
     const performSearch = () => {
         if (!query.trim()) return;
-        setPage(1);
         setModalAlbumId(null);
-        setSearchParams({ query, page: 1, category, orderBy, time: timeFilter });
+        pushSearch(query, category, orderBy, timeFilter, 1);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -557,9 +570,8 @@ export default function Home() {
     };
 
     const handlePageChange = (newPage: number) => {
-        setPage(newPage);
         setModalAlbumId(null);
-        setSearchParams({ query, page: newPage, category, orderBy, time: timeFilter });
+        pushSearch(urlQuery, urlCategory, urlOrderBy, urlTime, newPage);
         listRef.current?.scrollTo({ top: 0 });
     };
 
@@ -592,13 +604,10 @@ export default function Home() {
                                     className="w-24 min-w-[96px] h-full"
                                     variant="secondary"
                                     value={category}
-                                    onChange={(value) => {
+                                     onChange={(value) => {
                                         const v = (value as "0" | "1" | "2" | "3" | "4") ?? "0";
                                         setCategory(v);
-                                        if (query.trim()) {
-                                            setPage(1);
-                                            setSearchParams({ query, page: 1, category: v, orderBy, time: timeFilter });
-                                        }
+                                        if (query.trim()) pushSearch(query, v, orderBy, timeFilter, 1);
                                     }}
                                     placeholder="选择类别"
                                     isDisabled={isFetching}
@@ -648,7 +657,7 @@ export default function Home() {
                                 onChange={(value) => {
                                     const v = (value as "mr" | "mv" | "mp" | "tf") ?? "mr";
                                     setOrderBy(v);
-                                    if (query.trim()) { setPage(1); setSearchParams({ query, page: 1, category, orderBy: v, time: timeFilter }); }
+                                    if (query.trim()) pushSearch(urlQuery, category, v, timeFilter, 1);
                                 }}
                                 isDisabled={isFetching}
                             >
@@ -668,7 +677,7 @@ export default function Home() {
                                 onChange={(value) => {
                                     const v = (value as "a" | "t" | "w" | "m") ?? "a";
                                     setTimeFilter(v);
-                                    if (query.trim()) { setPage(1); setSearchParams({ query, page: 1, category, orderBy, time: v }); }
+                                    if (query.trim()) pushSearch(urlQuery, category, orderBy, v, 1);
                                 }}
                                 isDisabled={isFetching}
                             >
@@ -762,15 +771,15 @@ export default function Home() {
                         <div className="shrink-0 py-3 border-t dark:border-gray-700">
                             <div className="flex items-center justify-center gap-1 mb-2">
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={page === 1 || isFetching} onPress={() => handlePageChange(1)}>首页</Button>
+                                    isDisabled={urlPage === 1 || isFetching} onPress={() => handlePageChange(1)}>首页</Button>
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={!hasPrevPage || isFetching} onPress={() => handlePageChange(page - 1)}>上页</Button>
+                                    isDisabled={!hasPrevPage || isFetching} onPress={() => handlePageChange(urlPage - 1)}>上页</Button>
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={!hasNextPage || isFetching} onPress={() => handlePageChange(page + 1)}>下页</Button>
+                                    isDisabled={!hasNextPage || isFetching} onPress={() => handlePageChange(urlPage + 1)}>下页</Button>
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={page === totalPages || isFetching} onPress={() => handlePageChange(totalPages)}>尾页</Button>
+                                    isDisabled={urlPage === totalPages || isFetching} onPress={() => handlePageChange(totalPages)}>尾页</Button>
                             </div>
-                            <div className="text-center text-gray-500 dark:text-gray-400 text-xs">{totalCount}条·{page}/{totalPages}页</div>
+                            <div className="text-center text-gray-500 dark:text-gray-400 text-xs">{totalCount}条·{urlPage}/{totalPages}页</div>
                         </div>
                     )}
                 </div>
