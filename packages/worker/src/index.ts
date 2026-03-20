@@ -18,20 +18,11 @@ export default {
 	async fetch(request): Promise<Response> {
 		const url = new URL(request.url);
 
-		// CORS headers
-
 		if (request.method === 'OPTIONS') {
 			return new Response(null, { headers: corsHeaders });
 		}
 
 		try {
-			/*
-			// Initialize client with fastest available domain
-			console.log('Starting domain check...');
-			const domain = await getFastestAvailableBaseURL();
-			console.log('Fastest domain found:', domain);
-			*/
-
 			// API Routes
 			if (url.pathname === '/search') {
 				const query = url.searchParams.get('query');
@@ -48,7 +39,7 @@ export default {
 				return Response.json(result, { headers: corsHeaders });
 			}
 
-			if (url.pathname.startsWith('/album')) {
+			if (url.pathname.startsWith('/album/')) {
 				const id = url.pathname.split('/').pop();
 				if (!id) return new Response('Missing album id', { status: 400, headers: corsHeaders });
 
@@ -59,7 +50,7 @@ export default {
 				return Response.json(result, { headers: corsHeaders });
 			}
 
-			if (url.pathname.startsWith('/photo')) {
+			if (url.pathname.startsWith('/photo/')) {
 				const id = url.pathname.split('/').pop();
 				if (!id) return new Response('Missing photo id', { status: 400, headers: corsHeaders });
 
@@ -68,6 +59,38 @@ export default {
 				const result = await client.getPhotoWithScrambleId(id);
 				if (result === null) return new Response('photo not found', { status: 404, headers: corsHeaders });
 				return Response.json(result, { headers: corsHeaders });
+			}
+
+			if (url.pathname === '/batch-album') {
+				const idsParam = url.searchParams.get('ids');
+				if (!idsParam) return new Response("Missing query 'ids'", { status: 400, headers: corsHeaders });
+
+				const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
+				if (ids.length === 0) return new Response('Empty ids', { status: 400, headers: corsHeaders });
+				if (ids.length > 20) return new Response('Too many ids, max 20', { status: 400, headers: corsHeaders });
+
+				const client = await getClient();
+
+				const results = await Promise.all(
+					ids.map(async (albumId) => {
+						try {
+							// fetch album and photo concurrently
+							const [album, photo] = await Promise.all([
+								client.getAlbum(albumId),
+								client.getPhotoWithScrambleId(albumId),
+							]);
+							if (album === null || photo === null) {
+								return { albumId, album: null, photo: null, error: 'not found' };
+							}
+							return { albumId, album, photo };
+						} catch (e) {
+							const err = e as Error;
+							return { albumId, album: null, photo: null, error: err.message };
+						}
+					}),
+				);
+
+				return Response.json(results, { headers: corsHeaders });
 			}
 
 			return new Response('Not found', { status: 404, headers: corsHeaders });

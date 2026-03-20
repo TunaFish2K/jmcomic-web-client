@@ -67,3 +67,21 @@ export async function getPhoto(id: string) {
     }
     return (await res.json()) as PhotoWithScrambleId;
 }
+
+export type BatchAlbumItem =
+    | { albumId: string; album: Album; photo: PhotoWithScrambleId; error?: never }
+    | { albumId: string; album: null; photo: null; error: string };
+
+export async function getBatchAlbum(ids: string[]): Promise<BatchAlbumItem[]> {
+    if (ids.length === 0) return [];
+    const url = new URL('/batch-album', BACKEND_URL);
+    url.searchParams.set('ids', ids.join(','));
+    const res = await fetch(url);
+    if (!res.ok) {
+        const errorMessage = await res.text();
+        throw new Error(
+            `${res.status} ${res.statusText}, message: ${errorMessage}`,
+        );
+    }
+    return (await res.json()) as BatchAlbumItem[];
+}
