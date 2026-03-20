@@ -2,7 +2,7 @@ import pLimit from "p-limit";
 import md5 from "crypto-js/md5";
 import encodingHex from "crypto-js/enc-hex";
 import type { PhotoWithScrambleId } from "./client";
-import { AsyncZipDeflate, Zip } from "fflate";
+import { ZipPassThrough, Zip } from "fflate";
 import { PDFDocument } from "pdf-lib";
 import { getCachedImage, setCachedImage, generateImageCacheKey } from "./cache";
 
@@ -254,10 +254,9 @@ export function downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
                             await setCachedImage(cacheKey, jpegData);
                         }
 
-                        // 4. 立即写入 ZIP
-                        const file = new AsyncZipDeflate(
+                        // 4. 立即写入 ZIP（JPEG 已压缩，直接 store 无需 deflate）
+                        const file = new ZipPassThrough(
                             `${i}`.padStart(filenameSize, "0") + ".jpg",
-                            { level: 6 },
                         );
                         zip.add(file);
                         file.push(new Uint8Array(jpegData), true);
