@@ -502,13 +502,16 @@ export default function Home() {
             time: urlTime,
         }),
         enabled: !!urlQuery,
-        staleTime: 0,
-        gcTime: 0,
+        staleTime: 5 * 60 * 1000,   // don't refetch the same query within 5 min
+        gcTime: 10 * 60 * 1000,     // keep cached results for 10 min
         placeholderData: keepPreviousData,
     });
 
     // ── in-memory album cache (survives page changes within same session) ────
     const [albumCache, setAlbumCache] = useState<Map<string, BatchAlbumItem>>(new Map());
+    // Keep a ref so the batch effect always reads the latest cache without re-running
+    const albumCacheRef = useRef<Map<string, BatchAlbumItem>>(albumCache);
+    useEffect(() => { albumCacheRef.current = albumCache; }, [albumCache]);
 
     // Track which album IDs are currently visible in the viewport
     const visibleIdsRef = useRef<Set<string>>(new Set());
@@ -549,8 +552,16 @@ export default function Home() {
         };
     }, [data]);
 
+    // Stable key: the sorted album IDs for the current result set.
+    // Using this instead of `data` avoids re-running when TanStack Query
+    // returns a new object reference for an identical result (e.g. background refetch).
+    const resultIdsKey = data && 'content' in data
+        ? data.content.map(i => i.id).join(',')
+        : '';
+
     // Fetch batch album data — visible cards first, then the rest; retry on failure
     useEffect(() => {
+        if (!resultIdsKey) return;
         if (!data || !('content' in data) || data.content.length === 0) return;
 
         let cancelled = false;
@@ -586,7 +597,8 @@ export default function Home() {
             if (cancelled) return;
 
             const allIds = data.content.map(item => item.id);
-            const cached = albumCache;
+            // Read cache from ref to get the latest value without adding it as a dependency
+            const cached = albumCacheRef.current;
 
             // Split into visible (priority) vs non-visible, skip already-cached
             const visible: string[] = [];
@@ -609,7 +621,7 @@ export default function Home() {
         run();
         return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [data]);
+    }, [resultIdsKey]);
 
     // ── pagination ───────────────────────────────────────────────────────────
     const totalCount = data?.total ? parseInt(data.total) : 0;
