@@ -554,7 +554,7 @@ export default function Home() {
         if (!data || !('content' in data) || data.content.length === 0) return;
 
         let cancelled = false;
-        const CHUNK = 20;
+        const CHUNK = 16; // 2 fixed + 3 per ID ≤ 50 free-tier subrequest limit
         const MAX_RETRIES = 3;
 
         const fetchWithRetry = async (ids: string[]) => {

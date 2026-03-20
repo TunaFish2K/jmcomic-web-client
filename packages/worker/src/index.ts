@@ -67,7 +67,8 @@ export default {
 
 			const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
 			if (ids.length === 0) return new Response('Empty ids', { status: 400, headers: corsHeaders });
-			if (ids.length > 20) return new Response('Too many ids, max 20', { status: 400, headers: corsHeaders });
+			// 2 fixed reqs (domain + /setting) + 3 per ID; free tier cap = 50 → max 16 IDs
+			if (ids.length > 16) return new Response('Too many ids, max 16', { status: 400, headers: corsHeaders });
 
 			// getClient() is called once but its failure is caught per-item so one bad
 			// upstream domain never turns the whole batch into a 500.
