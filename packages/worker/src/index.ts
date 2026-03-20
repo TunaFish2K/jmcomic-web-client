@@ -61,37 +61,44 @@ export default {
 				return Response.json(result, { headers: corsHeaders });
 			}
 
-			if (url.pathname === '/batch-album') {
-				const idsParam = url.searchParams.get('ids');
-				if (!idsParam) return new Response("Missing query 'ids'", { status: 400, headers: corsHeaders });
+		if (url.pathname === '/batch-album') {
+			const idsParam = url.searchParams.get('ids');
+			if (!idsParam) return new Response("Missing query 'ids'", { status: 400, headers: corsHeaders });
 
-				const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
-				if (ids.length === 0) return new Response('Empty ids', { status: 400, headers: corsHeaders });
-				if (ids.length > 20) return new Response('Too many ids, max 20', { status: 400, headers: corsHeaders });
+			const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
+			if (ids.length === 0) return new Response('Empty ids', { status: 400, headers: corsHeaders });
+			if (ids.length > 20) return new Response('Too many ids, max 20', { status: 400, headers: corsHeaders });
 
-				const client = await getClient();
+			// getClient() is called once but its failure is caught per-item so one bad
+			// upstream domain never turns the whole batch into a 500.
+			let clientPromise: ReturnType<typeof getClient> | null = null;
+			const getSharedClient = () => {
+				if (!clientPromise) clientPromise = getClient();
+				return clientPromise;
+			};
 
-				const results = await Promise.all(
-					ids.map(async (albumId) => {
-						try {
-							// fetch album and photo concurrently
-							const [album, photo] = await Promise.all([
-								client.getAlbum(albumId),
-								client.getPhotoWithScrambleId(albumId),
-							]);
-							if (album === null || photo === null) {
-								return { albumId, album: null, photo: null, error: 'not found' };
-							}
-							return { albumId, album, photo };
-						} catch (e) {
-							const err = e as Error;
-							return { albumId, album: null, photo: null, error: err.message };
+			const results = await Promise.all(
+				ids.map(async (albumId) => {
+					try {
+						const client = await getSharedClient();
+						// fetch album and photo concurrently
+						const [album, photo] = await Promise.all([
+							client.getAlbum(albumId),
+							client.getPhotoWithScrambleId(albumId),
+						]);
+						if (album === null || photo === null) {
+							return { albumId, album: null, photo: null, error: 'not found' };
 						}
-					}),
-				);
+						return { albumId, album, photo };
+					} catch (e) {
+						const err = e as Error;
+						return { albumId, album: null, photo: null, error: err.message };
+					}
+				}),
+			);
 
-				return Response.json(results, { headers: corsHeaders });
-			}
+			return Response.json(results, { headers: corsHeaders });
+		}
 
 			return new Response('Not found', { status: 404, headers: corsHeaders });
 		} catch (e) {

@@ -381,15 +381,18 @@ function AlbumModal({ albumId, cachedData, onClose }: {
 
 // ─── Search result card ──────────────────────────────────────────────────────
 
-function AlbumCard({ item, cachedData, onClick }: {
+function AlbumCard({ item, cachedData, onClick, cardRef }: {
     item: { id: string; name: string; author: string };
     cachedData: BatchAlbumItem | undefined;
     onClick: () => void;
+    cardRef?: (el: HTMLDivElement | null) => void;
 }) {
     const photo = cachedData?.photo ?? null;
 
     return (
         <div
+            ref={cardRef}
+            data-album-id={item.id}
             className="border dark:border-gray-700 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow bg-white dark:bg-gray-900 flex flex-col"
             onClick={onClick}
         >
@@ -507,32 +510,105 @@ export default function Home() {
     // ── in-memory album cache (survives page changes within same session) ────
     const [albumCache, setAlbumCache] = useState<Map<string, BatchAlbumItem>>(new Map());
 
+    // Track which album IDs are currently visible in the viewport
+    const visibleIdsRef = useRef<Set<string>>(new Set());
+    // Ref to the card elements for IntersectionObserver
+    const cardRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
+
+    // Register / unregister a card element
+    const getCardRef = useCallback((id: string) => (el: HTMLDivElement | null) => {
+        if (el) cardRefsMap.current.set(id, el);
+        else cardRefsMap.current.delete(id);
+    }, []);
+
+    // Observe card visibility whenever `data` changes (new search results)
     useEffect(() => {
         if (!data || !('content' in data) || data.content.length === 0) return;
 
-        const ids = data.content.map(item => item.id);
-        const CHUNK = 20;
-        let cancelled = false;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    const id = (entry.target as HTMLElement).dataset.albumId;
+                    if (!id) continue;
+                    if (entry.isIntersecting) visibleIdsRef.current.add(id);
+                    else visibleIdsRef.current.delete(id);
+                }
+            },
+            { threshold: 0.1 },
+        );
 
-        (async () => {
-            for (let i = 0; i < ids.length; i += CHUNK) {
-                if (cancelled) break;
-                const chunk = ids.slice(i, i + CHUNK);
+        // Observe all current cards (give DOM a tick to render)
+        const tid = setTimeout(() => {
+            for (const el of cardRefsMap.current.values()) observer.observe(el);
+        }, 0);
+
+        return () => {
+            clearTimeout(tid);
+            observer.disconnect();
+            visibleIdsRef.current.clear();
+        };
+    }, [data]);
+
+    // Fetch batch album data — visible cards first, then the rest; retry on failure
+    useEffect(() => {
+        if (!data || !('content' in data) || data.content.length === 0) return;
+
+        let cancelled = false;
+        const CHUNK = 20;
+        const MAX_RETRIES = 3;
+
+        const fetchWithRetry = async (ids: string[]) => {
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                if (cancelled) return;
                 try {
-                    const results = await getBatchAlbum(chunk);
-                    if (cancelled) break;
+                    const results = await getBatchAlbum(ids);
+                    if (cancelled) return;
                     setAlbumCache(prev => {
                         const next = new Map(prev);
                         for (const item of results) next.set(item.albumId, item);
                         return next;
                     });
+                    return; // success
                 } catch (e) {
-                    console.error('批量获取失败:', e);
+                    if (attempt < MAX_RETRIES - 1) {
+                        // exponential backoff: 500ms, 1000ms, 2000ms
+                        await new Promise(r => setTimeout(r, 500 * 2 ** attempt));
+                    } else {
+                        console.warn('批量获取失败（已重试）:', e);
+                    }
                 }
             }
-        })();
+        };
 
+        const run = async () => {
+            // Give IntersectionObserver time to fire before we decide priority order
+            await new Promise(r => setTimeout(r, 50));
+            if (cancelled) return;
+
+            const allIds = data.content.map(item => item.id);
+            const cached = albumCache;
+
+            // Split into visible (priority) vs non-visible, skip already-cached
+            const visible: string[] = [];
+            const rest: string[] = [];
+            for (const id of allIds) {
+                if (cached.has(id)) continue;
+                if (visibleIdsRef.current.has(id)) visible.push(id);
+                else rest.push(id);
+            }
+
+            const ordered = [...visible, ...rest];
+            if (ordered.length === 0) return;
+
+            for (let i = 0; i < ordered.length; i += CHUNK) {
+                if (cancelled) break;
+                await fetchWithRetry(ordered.slice(i, i + CHUNK));
+            }
+        };
+
+        run();
         return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [data]);
 
     // ── pagination ───────────────────────────────────────────────────────────
@@ -753,6 +829,7 @@ export default function Home() {
                                         item={item}
                                         cachedData={albumCache.get(item.id)}
                                         onClick={() => setModalAlbumId(item.id)}
+                                        cardRef={getCardRef(item.id)}
                                     />
                                 ))}
                             </div>
