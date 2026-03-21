@@ -179,6 +179,7 @@ export async function reverseImageBySlice(
 export function downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
     photo: PhotoWithScrambleId,
     onProgress?: (done: number, total: number) => void,
+    concurrency: number = 5,
 ) {
     return new Promise<ArrayBuffer>((resolve, reject) => {
         const chunks: Uint8Array[] = [];
@@ -204,70 +205,74 @@ export function downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
             }
         });
 
-        // 流式处理：下载一张，解密，压缩，写入
         (async () => {
             try {
                 const total = photo.images.length;
                 const filenameSize = total.toString().length;
                 let processed = 0;
+                const limit = pLimit(concurrency);
 
-                for (let i = 0; i < photo.images.length; i++) {
-                    const imageInfo = photo.images[i];
-                    
-                    try {
-                        // 1. 下载单张图片
-                        const downloadResult = await downloadImage(imageInfo);
-                        
-                        if (downloadResult.data === null) {
-                            console.error(`跳过图片 ${imageInfo.name}: 下载失败`);
-                            processed += 1;
-                            onProgress?.(processed, total);
-                            continue;
-                        }
+                // Download + decrypt all images in parallel, preserving index order
+                const decrypted = await Promise.all(
+                    photo.images.map((imageInfo, i) =>
+                        limit(async () => {
+                            try {
+                                // Check cache first
+                                const cacheKey = generateImageCacheKey(photo.id, imageInfo.name);
+                                const cached = await getCachedImage(cacheKey);
+                                if (cached) {
+                                    processed += 1;
+                                    onProgress?.(processed, total);
+                                    return { i, data: cached };
+                                }
 
-                        // 检查缓存
-                        const cacheKey = generateImageCacheKey(photo.id, imageInfo.name);
-                        let jpegData = await getCachedImage(cacheKey);
-                        
-                        if (!jpegData) {
-                            // 2. 解密
-                            const sliceCount = getSliceCount(
-                                photo.scrambleId,
-                                parseInt(photo.id),
-                                imageInfo.name,
-                            );
-                            const decrypted = await reverseImageBySlice(
-                                downloadResult.data,
-                                sliceCount,
-                            );
+                                const downloadResult = await downloadImage(imageInfo);
+                                if (downloadResult.data === null) {
+                                    console.error(`跳过图片 ${imageInfo.name}: 下载失败`);
+                                    processed += 1;
+                                    onProgress?.(processed, total);
+                                    return { i, data: null };
+                                }
 
-                            // 3. 转换为 JPEG
-                            jpegData = await convertToJpeg(decrypted.data);
-                            if (!jpegData) {
-                                console.error(`跳过图片 ${imageInfo.name}: 转换失败`);
+                                const sliceCount = getSliceCount(
+                                    photo.scrambleId,
+                                    parseInt(photo.id),
+                                    imageInfo.name,
+                                );
+                                const reversedData = await reverseImageBySlice(
+                                    downloadResult.data,
+                                    sliceCount,
+                                );
+                                const jpegData = await convertToJpeg(reversedData.data);
+                                if (!jpegData) {
+                                    console.error(`跳过图片 ${imageInfo.name}: 转换失败`);
+                                    processed += 1;
+                                    onProgress?.(processed, total);
+                                    return { i, data: null };
+                                }
+
+                                await setCachedImage(cacheKey, jpegData);
                                 processed += 1;
                                 onProgress?.(processed, total);
-                                continue;
+                                return { i, data: jpegData };
+                            } catch (error) {
+                                console.error(`处理图片 ${imageInfo.name} 失败:`, error);
+                                processed += 1;
+                                onProgress?.(processed, total);
+                                return { i, data: null };
                             }
-                            
-                            // 保存到缓存
-                            await setCachedImage(cacheKey, jpegData);
-                        }
+                        })
+                    )
+                );
 
-                        // 4. 立即写入 ZIP（JPEG 已压缩，直接 store 无需 deflate）
-                        const file = new ZipPassThrough(
-                            `${i}`.padStart(filenameSize, "0") + ".jpg",
-                        );
-                        zip.add(file);
-                        file.push(new Uint8Array(jpegData), true);
-                        
-                        processed += 1;
-                        onProgress?.(processed, total);
-                    } catch (error) {
-                        console.error(`处理图片 ${imageInfo.name} 失败:`, error);
-                        processed += 1;
-                        onProgress?.(processed, total);
-                    }
+                // Write into ZIP in index order
+                for (const { i, data } of decrypted) {
+                    if (data === null) continue;
+                    const file = new ZipPassThrough(
+                        `${i}`.padStart(filenameSize, "0") + ".jpg",
+                    );
+                    zip.add(file);
+                    file.push(new Uint8Array(data), true);
                 }
 
                 zip.end();

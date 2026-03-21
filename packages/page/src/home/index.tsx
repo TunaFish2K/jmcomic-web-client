@@ -239,6 +239,7 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
                             progress: 1 + done,
                             stage: done < total ? 'packaging' : 'completed',
                         }),
+                        5,
                     );
                     const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
                     startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
