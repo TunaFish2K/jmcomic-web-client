@@ -19,6 +19,9 @@ import pLimit from "p-limit";
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
 const coverLimit = pLimit(6);
 
+// Global concurrency limiter for download tasks (shared across all active downloads)
+const downloadLimit = pLimit(2);
+
 // ─── Cover image (decrypt in browser) ───────────────────────────────────────
 
 function CoverImage({ coverUrl, scrambleId, albumId, className }: {
@@ -175,71 +178,72 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
         );
         if (existingTask) return;
 
-        let taskId = '';
-        try {
-            taskId = addTask({ albumId: id, name, format, stage: 'downloading', progress: 0, total: 1 });
+        const taskId = addTask({ albumId: id, name, format, stage: 'downloading', progress: 0, total: 1 });
 
-            const photo = await getPhoto(id);
-            if (!photo) throw new Error('无法获取图片数据');
+        downloadLimit(async () => {
+            try {
+                const photo = await getPhoto(id);
+                if (!photo) throw new Error('无法获取图片数据');
 
-            const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
-            const totalImages = photo.images.length;
-            const totalProgress = format === 'pdf' ? 1 + totalImages * 2 : 1 + totalImages;
+                const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
+                const totalImages = photo.images.length;
+                const totalProgress = format === 'pdf' ? 1 + totalImages * 2 : 1 + totalImages;
 
-            updateTask(taskId, { total: totalProgress, progress: 1 });
+                updateTask(taskId, { total: totalProgress, progress: 1 });
 
-            if (format === 'pdf') {
-                const buffer = await (async () => {
-                    const pdfDocument = await PDFDocument.create();
-                    let processedCount = 0;
+                if (format === 'pdf') {
+                    const buffer = await (async () => {
+                        const pdfDocument = await PDFDocument.create();
+                        let processedCount = 0;
 
-                    const downloadedImages = await downloadAllImages(
-                        photo.images, 20,
-                        (done) => updateTask(taskId, { progress: 1 + done, stage: 'downloading' }),
-                        photo.id,
-                        (photo as PhotoWithScrambleId).scrambleId,
-                    );
+                        const downloadedImages = await downloadAllImages(
+                            photo.images, 5,
+                            (done) => updateTask(taskId, { progress: 1 + done, stage: 'downloading' }),
+                            photo.id,
+                            (photo as PhotoWithScrambleId).scrambleId,
+                        );
 
-                    updateTask(taskId, { stage: 'packaging' });
+                        updateTask(taskId, { stage: 'packaging' });
 
-                    for (let i = 0; i < downloadedImages.length; i++) {
-                        const image = downloadedImages[i];
-                        processedCount++;
-                        if (image.data === null) {
+                        for (let i = 0; i < downloadedImages.length; i++) {
+                            const image = downloadedImages[i];
+                            processedCount++;
+                            if (image.data === null) {
+                                updateTask(taskId, { progress: 1 + totalImages + processedCount, stage: 'packaging' });
+                                continue;
+                            }
+                            const bitmap = await createImageBitmap(new Blob([image.data]));
+                            const width = bitmap.width;
+                            const height = bitmap.height;
+                            bitmap.close();
+                            const page = pdfDocument.addPage([width, height]);
+                            const pdfImage = await pdfDocument.embedJpg(image.data);
+                            page.drawImage(pdfImage, { x: 0, y: 0, width, height });
                             updateTask(taskId, { progress: 1 + totalImages + processedCount, stage: 'packaging' });
-                            continue;
                         }
-                        const bitmap = await createImageBitmap(new Blob([image.data]));
-                        const width = bitmap.width;
-                        const height = bitmap.height;
-                        bitmap.close();
-                        const page = pdfDocument.addPage([width, height]);
-                        const pdfImage = await pdfDocument.embedJpg(image.data);
-                        page.drawImage(pdfImage, { x: 0, y: 0, width, height });
-                        updateTask(taskId, { progress: 1 + totalImages + processedCount, stage: 'packaging' });
-                    }
 
-                    const pdfBytes = await pdfDocument.save();
+                        const pdfBytes = await pdfDocument.save();
+                        updateTask(taskId, { progress: totalProgress, stage: 'completed' });
+                        return pdfBytes.buffer;
+                    })();
+                    startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
+                } else {
+                    const buffer = await downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
+                        photo as PhotoWithScrambleId,
+                        (done, total) => updateTask(taskId, {
+                            progress: 1 + done,
+                            stage: done < total ? 'packaging' : 'completed',
+                        }),
+                    );
+                    const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
+                    startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
                     updateTask(taskId, { progress: totalProgress, stage: 'completed' });
-                    return pdfBytes.buffer;
-                })();
-                startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
-            } else {
-                const buffer = await downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
-                    photo as PhotoWithScrambleId,
-                    (done, total) => updateTask(taskId, {
-                        progress: 1 + done,
-                        stage: done < total ? 'packaging' : 'completed',
-                    }),
-                );
-                const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
-                startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
-                updateTask(taskId, { progress: totalProgress, stage: 'completed' });
+                }
+            } catch (error) {
+                console.error('下载失败:', error);
+                updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
             }
-        } catch (error) {
-            console.error('下载失败:', error);
-            updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
-        }
+        });
     };
 
     return (
