@@ -14,6 +14,10 @@ import {
     reverseImageBySlice,
 } from "@tiny-client/shared";
 import { PDFDocument } from "pdf-lib";
+import pLimit from "p-limit";
+
+// Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
+const coverLimit = pLimit(6);
 
 // ─── Cover image (decrypt in browser) ───────────────────────────────────────
 
@@ -29,7 +33,8 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
     useEffect(() => {
         let cancelled = false;
         let created: string | null = null;
-        (async () => {
+        coverLimit(async () => {
+            if (cancelled) return;
             try {
                 const res = await fetch(coverUrl);
                 const buffer = await res.arrayBuffer();
@@ -44,7 +49,7 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
             } catch {
                 if (!cancelled) setFailed(true);
             }
-        })();
+        });
         return () => {
             cancelled = true;
             if (created) URL.revokeObjectURL(created);
