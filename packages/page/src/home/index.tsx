@@ -552,42 +552,42 @@ export default function Home() {
         };
     }, [data]);
 
-    // Stable key: the sorted album IDs for the current result set.
+    // Stable key: content IDs + redirect_aid for the current result set.
     // Using this instead of `data` avoids re-running when TanStack Query
     // returns a new object reference for an identical result (e.g. background refetch).
     const resultIdsKey = data && 'content' in data
-        ? data.content.map(i => i.id).join(',')
+        ? [
+            ...data.content.map(i => i.id),
+            ...('redirect_aid' in data && data.redirect_aid ? [data.redirect_aid] : []),
+          ].join(',')
         : '';
 
-    // Fetch batch album data — visible cards first, then the rest; retry on failure
+    // Fetch batch album data — visible cards first, then the rest.
+    // Keeps retrying any IDs that returned an error until all succeed or cancelled.
     useEffect(() => {
         if (!resultIdsKey) return;
-        if (!data || !('content' in data) || data.content.length === 0) return;
+        if (!data || !('content' in data)) return;
 
         let cancelled = false;
-        const CHUNK = 16; // 2 fixed + 3 per ID ≤ 50 free-tier subrequest limit
-        const MAX_RETRIES = 3;
+        const CHUNK = 16;    // 2 fixed + 3 per ID ≤ 50 free-tier subrequest limit
+        const CONCURRENCY = 2; // max simultaneous chunk requests
+        const RETRY_DELAY = 1500; // ms before re-queuing failed IDs
 
-        const fetchWithRetry = async (ids: string[]) => {
-            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-                if (cancelled) return;
-                try {
-                    const results = await getBatchAlbum(ids);
-                    if (cancelled) return;
-                    setAlbumCache(prev => {
-                        const next = new Map(prev);
-                        for (const item of results) next.set(item.albumId, item);
-                        return next;
-                    });
-                    return; // success
-                } catch (e) {
-                    if (attempt < MAX_RETRIES - 1) {
-                        // exponential backoff: 500ms, 1000ms, 2000ms
-                        await new Promise(r => setTimeout(r, 500 * 2 ** attempt));
-                    } else {
-                        console.warn('批量获取失败（已重试）:', e);
-                    }
-                }
+        // Send one chunk; returns IDs that came back with an error field
+        const fetchChunk = async (ids: string[]): Promise<string[]> => {
+            try {
+                const results = await getBatchAlbum(ids);
+                if (cancelled) return [];
+                setAlbumCache(prev => {
+                    const next = new Map(prev);
+                    for (const item of results) next.set(item.albumId, item);
+                    return next;
+                });
+                // IDs whose worker-side fetch failed get re-queued
+                return results.filter(r => r.error).map(r => r.albumId);
+            } catch {
+                // Network / CF 520 — treat whole chunk as failed
+                return ids;
             }
         };
 
@@ -596,25 +596,57 @@ export default function Home() {
             await new Promise(r => setTimeout(r, 50));
             if (cancelled) return;
 
-            const allIds = data.content.map(item => item.id);
-            // Read cache from ref to get the latest value without adding it as a dependency
-            const cached = albumCacheRef.current;
+            // All IDs for this result: content + direct-match redirect
+            const redirectAid = 'redirect_aid' in data && data.redirect_aid ? data.redirect_aid : null;
+            const allIds = [
+                ...data.content.map(item => item.id),
+                ...(redirectAid ? [redirectAid] : []),
+            ];
 
-            // Split into visible (priority) vs non-visible, skip already-cached
-            const visible: string[] = [];
-            const rest: string[] = [];
-            for (const id of allIds) {
-                if (cached.has(id)) continue;
-                if (visibleIdsRef.current.has(id)) visible.push(id);
-                else rest.push(id);
-            }
+            // IDs still needing a successful fetch (not yet in cache, or errored)
+            const pending = new Set(
+                allIds.filter(id => {
+                    const cached = albumCacheRef.current.get(id);
+                    return !cached || !!cached.error;
+                })
+            );
+            if (pending.size === 0) return;
 
-            const ordered = [...visible, ...rest];
-            if (ordered.length === 0) return;
+            while (pending.size > 0 && !cancelled) {
+                // Priority: visible first, then the rest
+                const visible: string[] = [];
+                const rest: string[] = [];
+                for (const id of pending) {
+                    if (visibleIdsRef.current.has(id)) visible.push(id);
+                    else rest.push(id);
+                }
+                const ordered = [...visible, ...rest];
 
-            for (let i = 0; i < ordered.length; i += CHUNK) {
+                // Split into chunks and dispatch up to CONCURRENCY at a time
+                const chunks: string[][] = [];
+                for (let i = 0; i < ordered.length; i += CHUNK) {
+                    chunks.push(ordered.slice(i, i + CHUNK));
+                }
+
+                // Process chunks with limited concurrency
+                const failed: string[] = [];
+                for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+                    if (cancelled) break;
+                    const batch = chunks.slice(i, i + CONCURRENCY);
+                    const results = await Promise.all(batch.map(fetchChunk));
+                    for (const ids of results) failed.push(...ids);
+                }
+
                 if (cancelled) break;
-                await fetchWithRetry(ordered.slice(i, i + CHUNK));
+
+                // Update pending: remove successes, keep failures
+                for (const id of ordered) pending.delete(id);
+                for (const id of failed) pending.add(id);
+
+                if (pending.size > 0) {
+                    // Wait before retrying to avoid hammering CF on 520s
+                    await new Promise(r => setTimeout(r, RETRY_DELAY));
+                }
             }
         };
 
