@@ -31,26 +31,34 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
     className?: string;
 }) {
     const [objectUrl, setObjectUrl] = useState<string | null>(null);
-    const [failed, setFailed] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
         let created: string | null = null;
         coverLimit(async () => {
-            if (cancelled) return;
-            try {
-                const res = await fetch(coverUrl);
-                const buffer = await res.arrayBuffer();
-                const filename = coverUrl.split('/').pop() ?? '';
-                const slices = getSliceCount(scrambleId, parseInt(albumId), filename);
-                const { data } = slices > 0
-                    ? await reverseImageBySlice(buffer, slices)
-                    : { data: buffer };
-                const blob = new Blob([data], { type: 'image/jpeg' });
-                created = URL.createObjectURL(blob);
-                if (!cancelled) setObjectUrl(created);
-            } catch {
-                if (!cancelled) setFailed(true);
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s (cap), then give up
+            const MAX_DELAY = 32_000;
+            let delay = 1_000;
+            while (!cancelled) {
+                try {
+                    const res = await fetch(coverUrl);
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const buffer = await res.arrayBuffer();
+                    const filename = coverUrl.split('/').pop() ?? '';
+                    const slices = getSliceCount(scrambleId, parseInt(albumId), filename);
+                    const { data } = slices > 0
+                        ? await reverseImageBySlice(buffer, slices)
+                        : { data: buffer };
+                    const blob = new Blob([data], { type: 'image/jpeg' });
+                    created = URL.createObjectURL(blob);
+                    if (!cancelled) setObjectUrl(created);
+                    return; // success
+                } catch {
+                    if (cancelled) return;
+                    await new Promise(r => setTimeout(r, delay));
+                    if (cancelled) return;
+                    delay = Math.min(delay * 2, MAX_DELAY);
+                }
             }
         });
         return () => {
@@ -60,9 +68,6 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [coverUrl, scrambleId, albumId]);
 
-    if (failed) return (
-        <div className={`bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-gray-300 dark:text-gray-600 text-xs ${className ?? ''}`}>✕</div>
-    );
     if (!objectUrl) return (
         <div className={`bg-gray-100 dark:bg-gray-800 animate-pulse ${className ?? ''}`} />
     );
@@ -570,6 +575,22 @@ export default function Home() {
             ...('redirect_aid' in data && data.redirect_aid ? [data.redirect_aid] : []),
           ].join(',')
         : '';
+
+    // Evict stale entries when the result set changes (page nav, new search)
+    // to prevent unbounded memory growth across many page turns.
+    useEffect(() => {
+        if (!resultIdsKey) return;
+        const currentIds = new Set(resultIdsKey.split(',').filter(Boolean));
+        setAlbumCache(prev => {
+            let changed = false;
+            const next = new Map(prev);
+            for (const id of prev.keys()) {
+                if (!currentIds.has(id)) { next.delete(id); changed = true; }
+            }
+            return changed ? next : prev;
+        });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [resultIdsKey]);
 
     // Fetch batch album data — visible cards first, then the rest.
     // Keeps retrying any IDs that returned an error until all succeed or cancelled.
