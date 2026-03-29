@@ -7,7 +7,7 @@ async function runTests() {
   try {
     // 1. Test Search
     console.log("👉 Testing /search...");
-    const searchRes = await fetch(`${BASE_URL}/search?q=blue`);
+    const searchRes = await fetch(`${BASE_URL}/search?query=blue`);
     if (!searchRes.ok)
       throw new Error(
         `Search request failed: ${searchRes.status} ${searchRes.statusText}`,
@@ -15,6 +15,15 @@ async function runTests() {
 
     const searchData = await searchRes.json();
     console.log("✅ Search OK. Found:", searchData.total, "results.");
+
+    // 1.5 Test batch-album parameter validation
+    console.log("👉 Testing /batch-album validation...");
+    const batchBadRes = await fetch(`${BASE_URL}/batch-album`);
+    if (batchBadRes.status !== 400)
+      throw new Error(
+        `Batch validation failed: expected 400, got ${batchBadRes.status}`,
+      );
+    console.log("✅ Batch validation OK.");
 
     let albumId = "555555"; // Default ID if search fails to return content
     if (searchData.content && searchData.content.length > 0) {

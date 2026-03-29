@@ -1,7 +1,7 @@
 import {
     getClientDataAndCreateClient,
     getFastestAvailableBaseURL,
-} from "../src/modules/client";
+} from "@tiny-client/shared/client";
 
 async function start() {
     const baseURL = await getFastestAvailableBaseURL();
