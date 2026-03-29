@@ -6,6 +6,11 @@ import { ZipPassThrough, Zip } from "fflate";
 import { PDFDocument } from "pdf-lib";
 import { getCachedImage, setCachedImage, generateImageCacheKey } from "./cache";
 
+type NamedPhoto = {
+    name: string;
+    photo: PhotoWithScrambleId;
+};
+
 async function downloadImage({ name, url }: { name: string; url: string }) {
     try {
         const res = await fetch(url);
@@ -46,6 +51,10 @@ async function convertToJpeg(imageData: ArrayBuffer): Promise<ArrayBuffer | null
         console.error(`图片转换为 JPEG 失败: ${errorMsg}`);
         return null;
     }
+}
+
+function sanitizeArchiveSegment(name: string) {
+    return name.replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_").trim() || "untitled";
 }
 
 export async function downloadAllImages(
@@ -283,6 +292,82 @@ export function downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
     });
 }
 
+export function downloadAndDecryptImagesOfPhotosThenWriteIntoZipFile(
+    photos: NamedPhoto[],
+    onProgress?: (done: number, total: number) => void,
+    concurrency: number = 5,
+    layout: "folders" | "flat" = "folders",
+) {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+        const chunks: Uint8Array[] = [];
+        const total = photos.reduce((sum, { photo }) => sum + photo.images.length, 0);
+        const chapterDigits = String(Math.max(photos.length, 1)).length;
+        let completed = 0;
+
+        const zip = new Zip((err, data, final) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+            chunks.push(data);
+            if (final) {
+                const totalLength = chunks.reduce(
+                    (acc, chunk) => acc + chunk.length,
+                    0,
+                );
+                const result = new Uint8Array(totalLength);
+                let offset = 0;
+                for (const chunk of chunks) {
+                    result.set(chunk, offset);
+                    offset += chunk.length;
+                }
+                resolve(result.buffer);
+            }
+        });
+
+        (async () => {
+            try {
+                for (let photoIndex = 0; photoIndex < photos.length; photoIndex++) {
+                    const { name, photo } = photos[photoIndex];
+                    const chapterPrefix = `${String(photoIndex + 1).padStart(chapterDigits, "0")}-${sanitizeArchiveSegment(name)}`;
+                    const imageDigits = String(Math.max(photo.images.length, 1)).length;
+                    let previousDone = 0;
+
+                    const downloadedImages = await downloadAllImages(
+                        photo.images,
+                        concurrency,
+                        (done) => {
+                            completed += done - previousDone;
+                            previousDone = done;
+                            onProgress?.(completed, total);
+                        },
+                        photo.id,
+                        photo.scrambleId,
+                    );
+
+                    for (let imageIndex = 0; imageIndex < downloadedImages.length; imageIndex++) {
+                        const image = downloadedImages[imageIndex];
+                        if (image.data === null) continue;
+
+                        const imageFileName = `${String(imageIndex + 1).padStart(imageDigits, "0")}.jpg`;
+                        const entryName = layout === "folders"
+                            ? `${chapterPrefix}/${imageFileName}`
+                            : `${chapterPrefix}-${imageFileName}`;
+
+                        const file = new ZipPassThrough(entryName);
+                        zip.add(file);
+                        file.push(new Uint8Array(image.data), true);
+                    }
+                }
+
+                zip.end();
+            } catch (err) {
+                reject(err);
+            }
+        })();
+    });
+}
+
 export async function downloadAndDecryptImagesOfPhotoThenWriteIntoPDFFile(
     photo: PhotoWithScrambleId,
     onProgress?: (done: number, total: number) => void,
@@ -339,6 +424,64 @@ export async function downloadAndDecryptImagesOfPhotoThenWriteIntoPDFFile(
         }
 
         onProgress?.(processed, total);
+    }
+
+    return (await pdfDocument.save()).buffer;
+}
+
+export async function downloadAndDecryptImagesOfPhotosThenWriteIntoPDFFile(
+    photos: NamedPhoto[],
+    onProgress?: (done: number, total: number) => void,
+    concurrency: number = 20,
+) {
+    const pdfDocument = await PDFDocument.create();
+    const totalImages = photos.reduce((sum, { photo }) => sum + photo.images.length, 0);
+    const total = totalImages * 2;
+    let processed = 0;
+
+    for (const { photo } of photos) {
+        let previousDone = 0;
+        const downloadedImages = await downloadAllImages(
+            photo.images,
+            concurrency,
+            (done) => {
+                processed += done - previousDone;
+                previousDone = done;
+                onProgress?.(processed, total);
+            },
+            photo.id,
+            photo.scrambleId,
+        );
+
+        for (const image of downloadedImages) {
+            processed += 1;
+
+            if (image.data === null) {
+                onProgress?.(processed, total);
+                continue;
+            }
+
+            try {
+                const bitmap = await createImageBitmap(new Blob([image.data]));
+                const width = bitmap.width;
+                const height = bitmap.height;
+                bitmap.close();
+
+                const pdfImage = await pdfDocument.embedJpg(image.data);
+                const page = pdfDocument.addPage([width, height]);
+                page.drawImage(pdfImage, {
+                    x: 0,
+                    y: 0,
+                    width,
+                    height,
+                });
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                console.error(`跳过图片 ${image.name}: 合并 PDF 失败 - ${errorMsg}`);
+            }
+
+            onProgress?.(processed, total);
+        }
     }
 
     return (await pdfDocument.save()).buffer;

@@ -4,12 +4,59 @@ import {
     type PhotoWithScrambleId,
 } from "@tiny-client/shared";
 
+export type BatchError = {
+    message: string;
+    stage: 'client_init' | 'get_album' | 'get_photo' | 'get_scramble_id' | 'unknown';
+    domain: string | null;
+    reference: string | null;
+    retryable: boolean;
+};
+
 const rawBackendUrl = import.meta.env.VITE_BACKEND_URL as string;
 // 开发环境：将 localhost 替换为当前访问的 hostname（支持内网访问）
 // 生产环境：直接使用配置的 URL
 const BACKEND_URL = import.meta.env.DEV && rawBackendUrl?.includes("localhost")
     ? rawBackendUrl.replace("localhost", window.location.hostname)
     : rawBackendUrl;
+
+const PHOTO_RETRY_DELAYS_MS = [500, 1500, 3000];
+
+function shouldRetryPhotoRequest(status: number) {
+    return status === 429 || status >= 500;
+}
+
+function sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchPhotoJsonWithRetry<T>(url: URL, allowNotFound = false): Promise<T | null> {
+    for (let attempt = 0; ; attempt++) {
+        let res: Response;
+        try {
+            res = await fetch(url);
+        } catch (error) {
+            if (attempt >= PHOTO_RETRY_DELAYS_MS.length) throw error;
+            await sleep(PHOTO_RETRY_DELAYS_MS[attempt]);
+            continue;
+        }
+
+        if (!res.ok) {
+            if (allowNotFound && res.status === 404) return null;
+
+            const errorMessage = await res.text();
+            if (attempt < PHOTO_RETRY_DELAYS_MS.length && shouldRetryPhotoRequest(res.status)) {
+                await sleep(PHOTO_RETRY_DELAYS_MS[attempt]);
+                continue;
+            }
+
+            throw new Error(
+                `${res.status} ${res.statusText}, message: ${errorMessage}`,
+            );
+        }
+
+        return (await res.json()) as T;
+    }
+}
 
 export async function search(
     query: string,
@@ -57,20 +104,23 @@ export async function getAlbum(id: string) {
 
 export async function getPhoto(id: string) {
     const url = new URL(`/photo/${id}`, BACKEND_URL);
-    const res = await fetch(url);
-    if (!res.ok) {
-        if (res.status === 404) return null;
-        const errorMessage = await res.text();
-        throw new Error(
-            `${res.status} ${res.statusText}, message: ${errorMessage}`,
-        );
-    }
-    return (await res.json()) as PhotoWithScrambleId;
+    return await fetchPhotoJsonWithRetry<PhotoWithScrambleId>(url, true);
+}
+
+export type BatchPhotoItem =
+    | { photoId: string; photo: PhotoWithScrambleId; error?: never }
+    | { photoId: string; photo: null; error: BatchError };
+
+export async function getBatchPhoto(ids: string[]): Promise<BatchPhotoItem[]> {
+    if (ids.length === 0) return [];
+    const url = new URL('/batch-photo', BACKEND_URL);
+    url.searchParams.set('ids', ids.join(','));
+    return (await fetchPhotoJsonWithRetry<BatchPhotoItem[]>(url)) ?? [];
 }
 
 export type BatchAlbumItem =
-    | { albumId: string; album: Album; photo: PhotoWithScrambleId; error?: never }
-    | { albumId: string; album: null; photo: null; error: string };
+    | { albumId: string; album: Album; photo: PhotoWithScrambleId | null; error?: never }
+    | { albumId: string; album: null; photo: null; error: BatchError };
 
 export async function getBatchAlbum(ids: string[]): Promise<BatchAlbumItem[]> {
     if (ids.length === 0) return [];

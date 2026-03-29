@@ -53,12 +53,10 @@ async function openDB(): Promise<IDBDatabase> {
     
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
-        let didUpgrade = false;
         
         request.onerror = () => reject(request.error);
         
         request.onupgradeneeded = (event) => {
-            didUpgrade = true;
             const database = (event.target as IDBOpenDBRequest).result;
             if (!database.objectStoreNames.contains(STORE_NAME)) {
                 const store = database.createObjectStore(STORE_NAME, { keyPath: 'key' });

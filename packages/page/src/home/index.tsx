@@ -2,14 +2,16 @@ import { useState, useRef, createContext, useContext, useCallback, useEffect } f
 import { Button, InputGroup, Select, ListBox, FieldError } from "@heroui/react";
 import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, Sun, Moon, Monitor } from "lucide-react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { search, getPhoto, getBatchAlbum } from "../api";
-import type { BatchAlbumItem } from "../api";
+import { search, getPhoto, getBatchAlbum, getBatchPhoto } from "../api";
+import type { BatchAlbumItem, BatchError } from "../api";
 import type { SearchResult, PhotoWithScrambleId } from "@tiny-client/shared";
 import { useSearchParams } from "react-router-dom";
 import {
     startDownload,
     downloadAllImages,
     downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile,
+    downloadAndDecryptImagesOfPhotosThenWriteIntoZipFile,
+    downloadAndDecryptImagesOfPhotosThenWriteIntoPDFFile,
     getSliceCount,
     reverseImageBySlice,
 } from "@tiny-client/shared";
@@ -22,6 +24,9 @@ const coverLimit = pLimit(6);
 // Global concurrency limiter for download tasks (shared across all active downloads)
 const downloadLimit = pLimit(2);
 
+const BATCH_PHOTO_CHUNK_SIZE = 20;
+const BATCH_PHOTO_RETRY_DELAYS_MS = [1000, 2500];
+
 // ─── Cover image (decrypt in browser) ───────────────────────────────────────
 
 function CoverImage({ coverUrl, scrambleId, albumId, className }: {
@@ -31,15 +36,16 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
     className?: string;
 }) {
     const [objectUrl, setObjectUrl] = useState<string | null>(null);
+    const [failed, setFailed] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
         let created: string | null = null;
+        setObjectUrl(null);
+        setFailed(false);
         coverLimit(async () => {
-            // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s (cap), then give up
-            const MAX_DELAY = 32_000;
-            let delay = 1_000;
-            while (!cancelled) {
+            const RETRY_DELAYS = [400, 1000, 2000];
+            for (let attempt = 0; attempt <= RETRY_DELAYS.length && !cancelled; attempt++) {
                 try {
                     const res = await fetch(coverUrl);
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -51,13 +57,18 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
                         : { data: buffer };
                     const blob = new Blob([data], { type: 'image/jpeg' });
                     created = URL.createObjectURL(blob);
-                    if (!cancelled) setObjectUrl(created);
-                    return; // success
+                    if (!cancelled) {
+                        setObjectUrl(created);
+                        setFailed(false);
+                    }
+                    return;
                 } catch {
                     if (cancelled) return;
-                    await new Promise(r => setTimeout(r, delay));
-                    if (cancelled) return;
-                    delay = Math.min(delay * 2, MAX_DELAY);
+                    if (attempt === RETRY_DELAYS.length) {
+                        setFailed(true);
+                        return;
+                    }
+                    await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
                 }
             }
         });
@@ -68,10 +79,17 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [coverUrl, scrambleId, albumId]);
 
-    if (!objectUrl) return (
+    if (!objectUrl || failed) return (
         <div className={`bg-gray-100 dark:bg-gray-800 animate-pulse ${className ?? ''}`} />
     );
-    return <img src={objectUrl} alt="" className={`object-cover ${className ?? ''}`} />;
+    return (
+        <img
+            src={objectUrl}
+            alt=""
+            className={`object-cover ${className ?? ''}`}
+            onError={() => setFailed(true)}
+        />
+    );
 }
 
 // ─── Download task types & context ──────────────────────────────────────────
@@ -86,6 +104,184 @@ type DownloadTask = {
     total: number;
     error?: string;
 };
+
+type DownloadFormat = DownloadTask['format'];
+
+type DownloadTarget = {
+    id: string;
+    name: string;
+    order: number;
+};
+
+type BatchMode = 'individual' | 'combined';
+
+function sanitizeFilename(name: string) {
+    return name.replace(/[<>:"/\\|?*]/g, '_');
+}
+
+function parseSeriesOrder(value: string | number | undefined) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function formatBatchError(error: BatchError) {
+    const details = [
+        error.stage !== 'unknown' ? `阶段: ${error.stage}` : null,
+        error.domain ? `域名: ${error.domain}` : null,
+        error.reference ? `引用: ${error.reference}` : null,
+    ].filter(Boolean).join(' | ');
+
+    return details ? `${error.message} (${details})` : error.message;
+}
+
+async function getPhotosInChunks(targets: DownloadTarget[], chunkSize: number = BATCH_PHOTO_CHUNK_SIZE) {
+    const photoMap = new Map<string, PhotoWithScrambleId>();
+    let pendingTargets = [...targets];
+
+    for (let attempt = 0; attempt <= BATCH_PHOTO_RETRY_DELAYS_MS.length && pendingTargets.length > 0; attempt++) {
+        const chunks: DownloadTarget[][] = [];
+        for (let i = 0; i < pendingTargets.length; i += chunkSize) {
+            chunks.push(pendingTargets.slice(i, i + chunkSize));
+        }
+
+        const failedIds = new Set<string>();
+        for (const chunk of chunks) {
+            const batch = await getBatchPhoto(chunk.map((target) => target.id));
+            for (const item of batch) {
+                if (item.photo) photoMap.set(item.photoId, item.photo);
+                else failedIds.add(item.photoId);
+            }
+        }
+
+        pendingTargets = pendingTargets.filter((target) => !photoMap.has(target.id));
+        if (pendingTargets.length === 0) break;
+        if (attempt === BATCH_PHOTO_RETRY_DELAYS_MS.length) break;
+
+        // Only retry chapters that still failed in this round.
+        pendingTargets = pendingTargets.filter((target) => failedIds.has(target.id));
+        await new Promise((resolve) => setTimeout(resolve, BATCH_PHOTO_RETRY_DELAYS_MS[attempt]));
+    }
+
+    return targets.map((target) => {
+        const photo = photoMap.get(target.id);
+        if (!photo) {
+            throw new Error(`无法获取章节 ${target.name} 的图片数据`);
+        }
+        return {
+            name: target.name,
+            photo,
+        };
+    });
+}
+
+async function buildSingleDownload(
+    target: DownloadTarget,
+    format: DownloadFormat,
+    updateTask: (updates: Partial<DownloadTask>) => void,
+    prefetchedPhoto?: PhotoWithScrambleId,
+) {
+    const photo = prefetchedPhoto ?? await getPhoto(target.id);
+    if (!photo) throw new Error('无法获取图片数据');
+
+    const safeName = sanitizeFilename(target.name);
+    const totalImages = photo.images.length;
+    const totalProgress = format === 'pdf' ? 1 + totalImages * 2 : 1 + totalImages;
+
+    updateTask({ total: totalProgress, progress: 1 });
+
+    if (format === 'pdf') {
+        const buffer = await (async () => {
+            const pdfDocument = await PDFDocument.create();
+            let processedCount = 0;
+
+            const downloadedImages = await downloadAllImages(
+                photo.images,
+                5,
+                (done) => updateTask({ progress: 1 + done, stage: 'downloading' }),
+                photo.id,
+                (photo as PhotoWithScrambleId).scrambleId,
+            );
+
+            updateTask({ stage: 'packaging' });
+
+            for (let i = 0; i < downloadedImages.length; i++) {
+                const image = downloadedImages[i];
+                processedCount++;
+                if (image.data === null) {
+                    updateTask({ progress: 1 + totalImages + processedCount, stage: 'packaging' });
+                    continue;
+                }
+                const bitmap = await createImageBitmap(new Blob([image.data]));
+                const width = bitmap.width;
+                const height = bitmap.height;
+                bitmap.close();
+                const page = pdfDocument.addPage([width, height]);
+                const pdfImage = await pdfDocument.embedJpg(image.data);
+                page.drawImage(pdfImage, { x: 0, y: 0, width, height });
+                updateTask({ progress: 1 + totalImages + processedCount, stage: 'packaging' });
+            }
+
+            const pdfBytes = await pdfDocument.save();
+            updateTask({ progress: totalProgress, stage: 'completed' });
+            return pdfBytes.buffer;
+        })();
+        startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
+    } else {
+        const buffer = await downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
+            photo as PhotoWithScrambleId,
+            (done, total) => updateTask({
+                progress: 1 + done,
+                stage: done < total ? 'packaging' : 'completed',
+            }),
+            5,
+        );
+        const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
+        startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
+        updateTask({ progress: totalProgress, stage: 'completed' });
+    }
+}
+
+async function buildCombinedDownload(
+    targets: DownloadTarget[],
+    format: DownloadFormat,
+    archiveName: string,
+    updateTask: (updates: Partial<DownloadTask>) => void,
+) {
+    const photos = await getPhotosInChunks(targets);
+
+    const totalImages = photos.reduce((sum, item) => sum + item.photo.images.length, 0);
+    const totalProgress = 1 + (format === 'pdf' ? totalImages * 2 : totalImages);
+    const safeName = sanitizeFilename(archiveName);
+
+    updateTask({ total: totalProgress, progress: 1, stage: 'downloading' });
+
+    if (format === 'pdf') {
+        const buffer = await downloadAndDecryptImagesOfPhotosThenWriteIntoPDFFile(
+            photos,
+            (done) => updateTask({
+                progress: 1 + done,
+                stage: done < totalImages ? 'downloading' : 'packaging',
+            }),
+            5,
+        );
+        startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
+    } else {
+        const buffer = await downloadAndDecryptImagesOfPhotosThenWriteIntoZipFile(
+            photos,
+            (done) => updateTask({
+                progress: 1 + done,
+                stage: done < totalImages ? 'downloading' : 'packaging',
+            }),
+            5,
+            format === 'cbz' ? 'flat' : 'folders',
+        );
+        const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
+        startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
+    }
+
+    updateTask({ progress: totalProgress, stage: 'completed' });
+}
 
 type TaskContextType = {
     tasks: DownloadTask[];
@@ -174,77 +370,32 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
 
 // ─── Download buttons ────────────────────────────────────────────────────────
 
-function DownloadButtons({ id, name }: { id: string; name: string }) {
+function DownloadButtons({ items, label }: {
+    items: DownloadTarget[];
+    label?: string;
+}) {
     const { tasks, addTask, updateTask } = useTasks();
+    const isBatch = items.length > 1;
+    const orderedItems = [...items].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 
-    const handleDownload = async (format: 'pdf' | 'zip' | 'cbz') => {
-        const existingTask = tasks.find(t =>
-            t.albumId === id && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
+    const queueDownload = (target: DownloadTarget, format: DownloadFormat) => {
+        const existingTask = tasks.find((t) =>
+            t.albumId === target.id && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
         );
         if (existingTask) return;
 
-        const taskId = addTask({ albumId: id, name, format, stage: 'downloading', progress: 0, total: 1 });
+        const taskId = addTask({
+            albumId: target.id,
+            name: target.name,
+            format,
+            stage: 'downloading',
+            progress: 0,
+            total: 1,
+        });
 
         downloadLimit(async () => {
             try {
-                const photo = await getPhoto(id);
-                if (!photo) throw new Error('无法获取图片数据');
-
-                const safeName = name.replace(/[<>:"/\\|?*]/g, '_');
-                const totalImages = photo.images.length;
-                const totalProgress = format === 'pdf' ? 1 + totalImages * 2 : 1 + totalImages;
-
-                updateTask(taskId, { total: totalProgress, progress: 1 });
-
-                if (format === 'pdf') {
-                    const buffer = await (async () => {
-                        const pdfDocument = await PDFDocument.create();
-                        let processedCount = 0;
-
-                        const downloadedImages = await downloadAllImages(
-                            photo.images, 5,
-                            (done) => updateTask(taskId, { progress: 1 + done, stage: 'downloading' }),
-                            photo.id,
-                            (photo as PhotoWithScrambleId).scrambleId,
-                        );
-
-                        updateTask(taskId, { stage: 'packaging' });
-
-                        for (let i = 0; i < downloadedImages.length; i++) {
-                            const image = downloadedImages[i];
-                            processedCount++;
-                            if (image.data === null) {
-                                updateTask(taskId, { progress: 1 + totalImages + processedCount, stage: 'packaging' });
-                                continue;
-                            }
-                            const bitmap = await createImageBitmap(new Blob([image.data]));
-                            const width = bitmap.width;
-                            const height = bitmap.height;
-                            bitmap.close();
-                            const page = pdfDocument.addPage([width, height]);
-                            const pdfImage = await pdfDocument.embedJpg(image.data);
-                            page.drawImage(pdfImage, { x: 0, y: 0, width, height });
-                            updateTask(taskId, { progress: 1 + totalImages + processedCount, stage: 'packaging' });
-                        }
-
-                        const pdfBytes = await pdfDocument.save();
-                        updateTask(taskId, { progress: totalProgress, stage: 'completed' });
-                        return pdfBytes.buffer;
-                    })();
-                    startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
-                } else {
-                    const buffer = await downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
-                        photo as PhotoWithScrambleId,
-                        (done, total) => updateTask(taskId, {
-                            progress: 1 + done,
-                            stage: done < total ? 'packaging' : 'completed',
-                        }),
-                        5,
-                    );
-                    const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
-                    startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
-                    updateTask(taskId, { progress: totalProgress, stage: 'completed' });
-                }
+                await buildSingleDownload(target, format, (updates) => updateTask(taskId, updates));
             } catch (error) {
                 console.error('下载失败:', error);
                 updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
@@ -252,17 +403,237 @@ function DownloadButtons({ id, name }: { id: string; name: string }) {
         });
     };
 
+    const handleDownload = (format: DownloadFormat) => {
+        for (const item of orderedItems) {
+            queueDownload(item, format);
+        }
+    };
+
     return (
         <div className="mt-3 space-y-2">
-            <div className="text-gray-500 dark:text-gray-400 text-xs">下载格式:</div>
+            <div className="text-gray-500 dark:text-gray-400 text-xs">{label ?? '下载格式:'}</div>
             <div className="flex gap-2">
                 <Button size="sm" variant="secondary" className="text-xs flex-1" onPress={() => handleDownload('pdf')}>
-                    <FileText size={14} className="mr-1" />PDF
+                    <FileText size={14} className="mr-1" />{isBatch ? '全部 PDF' : 'PDF'}
                 </Button>
                 <Button size="sm" variant="secondary" className="text-xs flex-1" onPress={() => handleDownload('zip')}>
-                    <FileArchive size={14} className="mr-1" />ZIP
+                    <FileArchive size={14} className="mr-1" />{isBatch ? '全部 ZIP' : 'ZIP'}
                 </Button>
                 <Button size="sm" variant="secondary" className="text-xs flex-1" onPress={() => handleDownload('cbz')}>
+                    <Download size={14} className="mr-1" />{isBatch ? '全部 CBZ' : 'CBZ'}
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+function SeriesDownloadManager({ albumName, items }: {
+    albumName: string;
+    items: DownloadTarget[];
+}) {
+    const { tasks, addTask, updateTask } = useTasks();
+    const [rangeStart, setRangeStart] = useState('1');
+    const [rangeEnd, setRangeEnd] = useState(String(items.length));
+    const [batchMode, setBatchMode] = useState<BatchMode>('individual');
+    const [rangeError, setRangeError] = useState<string | null>(null);
+    const orderedItems = [...items].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+
+    const quickSelectRange = useCallback((start: number, end: number) => {
+        setRangeStart(String(start));
+        setRangeEnd(String(end));
+        setRangeError(null);
+    }, []);
+
+    useEffect(() => {
+        setRangeStart('1');
+        setRangeEnd(String(items.length));
+        setRangeError(null);
+    }, [items.length]);
+
+    const selectedItems = (() => {
+        const start = parseInt(rangeStart, 10);
+        const end = parseInt(rangeEnd, 10);
+        if (!Number.isInteger(start) || !Number.isInteger(end)) return [];
+        if (start < 1 || end < 1 || start > end || end > orderedItems.length) return [];
+        return orderedItems.slice(start - 1, end);
+    })();
+
+    const handleBatchDownload = async (format: DownloadFormat) => {
+        const start = parseInt(rangeStart, 10);
+        const end = parseInt(rangeEnd, 10);
+
+        if (!Number.isInteger(start) || !Number.isInteger(end)) {
+            setRangeError('请输入有效的数字范围');
+            return;
+        }
+        if (start < 1 || end < 1 || start > end || end > orderedItems.length) {
+            setRangeError(`范围需在 1-${orderedItems.length} 之间，且起始不能大于结束`);
+            return;
+        }
+
+        setRangeError(null);
+
+        if (batchMode === 'individual') {
+            const queuedItems = selectedItems.filter((item) => !tasks.find((t) =>
+                t.albumId === item.id && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
+            ));
+            if (queuedItems.length === 0) return;
+
+            let batchPhotos: Awaited<ReturnType<typeof getPhotosInChunks>>;
+            try {
+                batchPhotos = await getPhotosInChunks(queuedItems);
+            } catch (error) {
+                setRangeError((error as Error).message);
+                return;
+            }
+
+            const photoMap = new Map(batchPhotos.map((item) => [item.photo.id, item.photo]));
+
+            for (const item of queuedItems) {
+                const existingTask = tasks.find((t) =>
+                    t.albumId === item.id && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
+                );
+                if (existingTask) continue;
+
+                const taskId = addTask({
+                    albumId: item.id,
+                    name: item.name,
+                    format,
+                    stage: 'downloading',
+                    progress: 0,
+                    total: 1,
+                });
+
+                downloadLimit(async () => {
+                    try {
+                        const photo = photoMap.get(item.id);
+                        if (!photo) throw new Error(`无法获取章节 ${item.name} 的图片数据`);
+                        await buildSingleDownload(item, format, (updates) => updateTask(taskId, updates), photo);
+                    } catch (error) {
+                        console.error('下载失败:', error);
+                        updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+                    }
+                });
+            }
+            return;
+        }
+
+        const combinedTaskName = `${albumName} [${start}-${end}]`;
+        const combinedTaskId = `combined:${selectedItems.map((item) => item.id).join(',')}`;
+        const existingCombinedTask = tasks.find((t) =>
+            t.albumId === combinedTaskId && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
+        );
+        if (existingCombinedTask) return;
+
+        const taskId = addTask({
+            albumId: combinedTaskId,
+            name: combinedTaskName,
+            format,
+            stage: 'downloading',
+            progress: 0,
+            total: 1,
+        });
+
+        downloadLimit(async () => {
+            try {
+                await buildCombinedDownload(
+                    selectedItems,
+                    format,
+                    combinedTaskName,
+                    (updates) => updateTask(taskId, updates),
+                );
+            } catch (error) {
+                console.error('合集下载失败:', error);
+                updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+            }
+        });
+    };
+
+    return (
+        <div className="space-y-3 rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/20 p-3">
+            <div className="text-xs text-blue-700 dark:text-blue-200">
+                可选范围下载。支持逐话分别导出，也支持把所选章节整合为一个文件。
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs text-gray-500 dark:text-gray-400">
+                    起始话数
+                    <input
+                        type="number"
+                        min={1}
+                        max={orderedItems.length}
+                        value={rangeStart}
+                        onChange={(e) => setRangeStart(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                    />
+                </label>
+                <label className="text-xs text-gray-500 dark:text-gray-400">
+                    结束话数
+                    <input
+                        type="number"
+                        min={1}
+                        max={orderedItems.length}
+                        value={rangeEnd}
+                        onChange={(e) => setRangeEnd(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+                    />
+                </label>
+            </div>
+            <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" className="text-xs" onPress={() => quickSelectRange(1, orderedItems.length)}>
+                    全部
+                </Button>
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    className="text-xs"
+                    onPress={() => quickSelectRange(1, Math.min(10, orderedItems.length))}
+                >
+                    前 10 话
+                </Button>
+                <Button
+                    size="sm"
+                    variant="secondary"
+                    className="text-xs"
+                    onPress={() => quickSelectRange(Math.max(1, orderedItems.length - 9), orderedItems.length)}
+                >
+                    后 10 话
+                </Button>
+            </div>
+            <div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">下载方式</div>
+                <div className="flex gap-2">
+                    <Button
+                        size="sm"
+                        variant={batchMode === 'individual' ? 'primary' : 'secondary'}
+                        className="text-xs flex-1"
+                        onPress={() => setBatchMode('individual')}
+                    >
+                        多个文件
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant={batchMode === 'combined' ? 'primary' : 'secondary'}
+                        className="text-xs flex-1"
+                        onPress={() => setBatchMode('combined')}
+                    >
+                        合并为一个
+                    </Button>
+                </div>
+            </div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+                共 {orderedItems.length} 话，当前选择 {selectedItems.length} 话
+            </div>
+            {rangeError && (
+                <div className="text-xs text-red-500">{rangeError}</div>
+            )}
+            <div className="flex gap-2">
+                <Button size="sm" variant="secondary" className="text-xs flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('pdf'); }}>
+                    <FileText size={14} className="mr-1" />PDF
+                </Button>
+                <Button size="sm" variant="secondary" className="text-xs flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('zip'); }}>
+                    <FileArchive size={14} className="mr-1" />ZIP
+                </Button>
+                <Button size="sm" variant="secondary" className="text-xs flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('cbz'); }}>
                     <Download size={14} className="mr-1" />CBZ
                 </Button>
             </div>
@@ -279,6 +650,15 @@ function AlbumModal({ albumId, cachedData, onClose }: {
 }) {
     const album = cachedData?.album ?? null;
     const photo = cachedData?.photo ?? null;
+    const isSeriesAlbum = !!album?.series?.length;
+    const sortedSeries = isSeriesAlbum
+        ? [...album!.series].sort((a, b) => parseSeriesOrder(a.sort) - parseSeriesOrder(b.sort))
+        : [];
+    const statsLabel = isSeriesAlbum
+        ? `${sortedSeries.length} 话`
+        : photo
+            ? `${photo.images.length} 页`
+            : '章节数据待加载';
 
     return (
         /* backdrop */
@@ -318,13 +698,13 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                     {!cachedData ? (
                         <div className="text-gray-400 text-center py-8">加载中...</div>
                     ) : cachedData.error ? (
-                        <div className="text-red-500 text-center py-8">{cachedData.error}</div>
+                        <div className="text-red-500 text-center py-8">{formatBatchError(cachedData.error)}</div>
                     ) : (
                         <>
                             <div className="flex gap-4 text-xs text-gray-500 dark:text-gray-400">
                                 <span>浏览 {album!.totalViews}</span>
                                 <span>点赞 {album!.likes}</span>
-                                <span>{photo!.images.length} 页</span>
+                                <span>{statsLabel}</span>
                             </div>
 
                             {album!.author.length > 0 && (
@@ -371,20 +751,50 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                 </div>
                             )}
 
-                            {album!.series && album!.series.length > 0 ? (
-                                <div className="space-y-2">
-                                    <div className="text-xs text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 p-2 rounded">
-                                        此为合集，暂不支持批量下载全部章节
+                            {isSeriesAlbum ? (
+                                <div className="space-y-3">
+                                    <SeriesDownloadManager
+                                        albumName={album!.name}
+                                        items={sortedSeries
+                                            .map((seriesItem) => ({
+                                                id: seriesItem.id,
+                                                name: `${album!.name} - ${seriesItem.name}`,
+                                                order: parseSeriesOrder(seriesItem.sort),
+                                            }))}
+                                    />
+                                    <div>
+                                        <div className="text-xs text-gray-400 mb-2">章节</div>
+                                        <div className="space-y-3">
+                                            {sortedSeries.map((seriesItem) => (
+                                                <div
+                                                    key={seriesItem.id}
+                                                    className="rounded-lg border border-gray-200 dark:border-gray-700 p-3"
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div className="min-w-0">
+                                                            <div className="text-sm font-medium leading-snug break-words">
+                                                                {seriesItem.name}
+                                                            </div>
+                                                            <div className="text-xs text-gray-400 mt-1">#{seriesItem.id}</div>
+                                                        </div>
+                                                        <div className="text-xs text-gray-400 shrink-0">
+                                                            {seriesItem.sort ? `第 ${seriesItem.sort} 话` : '章节'}
+                                                        </div>
+                                                    </div>
+                                                    <DownloadButtons
+                                                        items={[{
+                                                            id: seriesItem.id,
+                                                            name: `${album!.name} - ${seriesItem.name}`,
+                                                            order: parseSeriesOrder(seriesItem.sort),
+                                                        }]}
+                                                    />
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
-                                    {(() => {
-                                        const first = album!.series[0];
-                                        return first ? (
-                                            <DownloadButtons id={first.id} name={`${album!.name} - ${first.name}`} />
-                                        ) : null;
-                                    })()}
                                 </div>
                             ) : (
-                                <DownloadButtons id={albumId} name={album!.name} />
+                                <DownloadButtons items={[{ id: albumId, name: album!.name, order: 1 }]} />
                             )}
                         </>
                     )}
@@ -600,7 +1010,7 @@ export default function Home() {
         if (!data || !('content' in data)) return;
 
         let cancelled = false;
-        const CHUNK = 16;    // 2 fixed + 3 per ID ≤ 50 free-tier subrequest limit
+        const CHUNK = 15;    // Leave headroom: 2 fixed + 3 per ID, avoid sitting on the 50-request ceiling
         const CONCURRENCY = 2; // max simultaneous chunk requests
         const RETRY_DELAY = 1500; // ms before re-queuing failed IDs
 

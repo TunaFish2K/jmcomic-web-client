@@ -6,19 +6,50 @@ import worker from '../src/index';
 // `Request` to pass to `worker.fetch()`.
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
-describe('Hello World worker', () => {
-	it('responds with Hello World! (unit style)', async () => {
-		const request = new IncomingRequest('http://example.com');
-		// Create an empty context to pass to `worker.fetch()`.
+describe('worker routes', () => {
+	it('returns 400 when /search misses query', async () => {
+		const request = new IncomingRequest('http://example.com/search');
 		const ctx = createExecutionContext();
 		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
 		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+
+		expect(response.status).toBe(400);
+		expect(await response.text()).toBe("Missing query 'query'");
 	});
 
-	it('responds with Hello World! (integration style)', async () => {
-		const response = await SELF.fetch('https://example.com');
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+	it('returns 400 when /batch-album misses ids', async () => {
+		const response = await SELF.fetch('https://example.com/batch-album');
+
+		expect(response.status).toBe(400);
+		expect(await response.text()).toBe("Missing query 'ids'");
+	});
+
+	it('returns 400 when /batch-photo misses ids', async () => {
+		const response = await SELF.fetch('https://example.com/batch-photo');
+
+		expect(response.status).toBe(400);
+		expect(await response.text()).toBe("Missing query 'ids'");
+	});
+
+	it('returns 400 when /batch-photo exceeds safe chunk size', async () => {
+		const ids = Array.from({ length: 21 }, (_, index) => String(index + 1)).join(',');
+		const response = await SELF.fetch(`https://example.com/batch-photo?ids=${ids}`);
+
+		expect(response.status).toBe(400);
+		expect(await response.text()).toBe('Too many ids, max 20');
+	});
+
+	it('returns 400 when /batch-photo ids are empty after trimming', async () => {
+		const response = await SELF.fetch('https://example.com/batch-photo?ids=%20,%20');
+
+		expect(response.status).toBe(400);
+		expect(await response.text()).toBe('Empty ids');
+	});
+
+	it('returns 404 for unknown routes', async () => {
+		const response = await SELF.fetch('https://example.com/not-found');
+
+		expect(response.status).toBe(404);
+		expect(await response.text()).toBe('Not found');
 	});
 });

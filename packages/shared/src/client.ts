@@ -15,6 +15,15 @@ import {
 import pLimit from "p-limit";
 import parse, { parse as parseSetCookie } from "set-cookie-parser";
 
+type EncryptedResponse = {
+  data: string;
+};
+
+async function readEncryptedResponseData(res: Response) {
+  const payload = (await res.json()) as EncryptedResponse;
+  return payload.data;
+}
+
 function getToken(timestampSeconds: number, secret: string) {
   return md5(`${timestampSeconds}${secret}`).toString(encodingHex);
 }
@@ -68,10 +77,13 @@ async function checkDomainStatus(domain: string, timeoutMs: number = 5000) {
       controller.abort();
     }, timeoutMs);
     const startMs = performance.now();
-    await fetch(url, {
-      mode: "no-cors",
+    const init: RequestInit = {
       signal: controller.signal,
-    });
+    };
+    if (typeof (globalThis as { window?: unknown }).window !== "undefined") {
+      (init as RequestInit & { mode?: "no-cors" }).mode = "no-cors";
+    }
+    await fetch(url, init);
     const endMs = performance.now();
     clearTimeout(timeout);
     return {
@@ -138,7 +150,7 @@ export async function getClientData(baseURL: string) {
   const setCookieData = parseSetCookie(setCookie, { map: true });
   const cookie = getCookieHeader(setCookieData);
 
-  const encryptedData = (await res.json()).data as string;
+  const encryptedData = await readEncryptedResponseData(res);
   const decryptedData = decryptResponseData(
     encryptedData,
     getToken(timestampSeconds, SECRET_APP_DATA),
@@ -206,7 +218,7 @@ export class Client {
         Cookie: this.cookie,
       },
     });
-    const encryptedData = (await res.json()).data as string;
+    const encryptedData = await readEncryptedResponseData(res);
     const decryptedData = decryptResponseData(
       encryptedData,
       getToken(timestampSeconds, SECRET_APP_DATA),
@@ -240,7 +252,7 @@ export class Client {
         Cookie: this.cookie,
       },
     });
-    const encryptedData = (await res.json()).data as string;
+    const encryptedData = await readEncryptedResponseData(res);
     const decryptedData = decryptResponseData(
       encryptedData,
       getToken(timestampSeconds, SECRET_APP_DATA),
@@ -301,7 +313,7 @@ export class Client {
         tokenparam: getTokenParam(timestampSeconds, this.version),
       },
     });
-    const encryptedData = ((await res.json()) as { data: string }).data;
+    const encryptedData = await readEncryptedResponseData(res);
     const decryptedData = decryptResponseData(
       encryptedData,
       getToken(timestampSeconds, SECRET_APP_DATA),
