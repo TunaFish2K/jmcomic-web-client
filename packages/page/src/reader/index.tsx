@@ -462,6 +462,9 @@ export default function ReaderPage() {
                 flexShrink: 0,
                 minWidth: 0,
                 minHeight: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }
             : {
                 scrollSnapAlign: 'start',
@@ -470,11 +473,14 @@ export default function ReaderPage() {
                 flex: '0 0 100%',
                 minWidth: 0,
                 minHeight: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               };
           return (
             <div
               key={img.name}
-              className="shrink-0 flex items-center justify-center"
+              className="shrink-0"
               style={pageStyle}
             >
               {url ? (
