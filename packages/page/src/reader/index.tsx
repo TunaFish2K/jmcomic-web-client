@@ -11,12 +11,8 @@ import {
   getReadingProgress,
   saveReadingProgress,
   getLatestChapterProgress,
-  getSeamlessScroll,
-  saveSeamlessScroll,
   getAutoSnap,
   saveAutoSnap,
-  getZoom,
-  saveZoom,
   getBarSide,
   saveBarSide,
 } from './reader-store';
@@ -33,25 +29,6 @@ type ChapterInfo = { id: string; name: string; order: number };
 
 const PRELOAD_AHEAD = 10;
 const PRELOAD_PARALLEL = 5;
-
-function convertToJpeg(imageData: ArrayBuffer): Promise<ArrayBuffer | null> {
-  return new Promise((resolve) => {
-    try {
-      const blob = new Blob([imageData]);
-      createImageBitmap(blob).then((bitmap) => {
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 }).then((jpegBlob) => {
-          jpegBlob.arrayBuffer().then(resolve);
-        });
-      }).catch(() => resolve(null));
-    } catch {
-      resolve(null);
-    }
-  });
-}
 
 async function decryptImageWithRetry(
   url: string,
@@ -81,6 +58,25 @@ async function decryptImageWithRetry(
   return null;
 }
 
+function convertToJpeg(imageData: ArrayBuffer): Promise<ArrayBuffer | null> {
+  return new Promise((resolve) => {
+    try {
+      const blob = new Blob([imageData]);
+      createImageBitmap(blob).then((bitmap) => {
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 }).then((jpegBlob) => {
+          jpegBlob.arrayBuffer().then(resolve);
+        });
+      }).catch(() => resolve(null));
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
 export default function ReaderPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const location = useLocation();
@@ -104,9 +100,7 @@ export default function ReaderPage() {
 
   const [currentChapterId, setCurrentChapterId] = useState(albumId!);
   const [direction, setDirection] = useState<ReadingDirection>(getReadingDirection);
-  const [seamless, setSeamless] = useState(getSeamlessScroll);
   const [autoSnap, setAutoSnap] = useState(getAutoSnap);
-  const [zoom, setZoom] = useState(getZoom);
   const [barSide, setBarSide] = useState(getBarSide);
   const [barVisible, setBarVisible] = useState(true);
   const [showUI, setShowUI] = useState(true);
@@ -134,8 +128,6 @@ export default function ReaderPage() {
   const chapterIndexRef = useRef(currentChapterIndex);
   chapterIndexRef.current = currentChapterIndex;
   const imagesCountRef = useRef(0);
-  const seamlessRef = useRef(seamless);
-  seamlessRef.current = seamless;
   const directionRef = useRef(direction);
   directionRef.current = direction;
 
@@ -215,23 +207,11 @@ export default function ReaderPage() {
     });
   }, []);
 
-  const toggleSeamless = useCallback(() => {
-    setSeamless((prev) => {
-      saveSeamlessScroll(!prev);
-      return !prev;
-    });
-  }, []);
-
   const toggleAutoSnap = useCallback(() => {
     setAutoSnap((prev) => {
       saveAutoSnap(!prev);
       return !prev;
     });
-  }, []);
-
-  const changeZoom = useCallback((value: number) => {
-    setZoom(value);
-    saveZoom(value);
   }, []);
 
   const changeBarSide = useCallback((side: BarSide) => {
@@ -372,44 +352,38 @@ export default function ReaderPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length]);
 
-  // ─── wheel snap ──────────────────────────────────────────────────────────────
+  // ─── wheel ───────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!isRTL) return;
+    if (!isRTL || !photo) return;
     const el = containerRef.current;
     if (!el) return;
 
-    let wheelGuard = false;
-
     const onWheel = (e: WheelEvent) => {
-      if (seamlessRef.current) return;
-      if (wheelGuard) return;
-
       e.preventDefault();
 
-      const totalPages = imagesCountRef.current;
-      if (totalPages === 0) return;
-
-      const dir = e.deltaY > 0 ? 1 : -1;
-      const target = Math.max(0, Math.min(totalPages - 1, currentPageRef.current + dir));
-      if (target === currentPageRef.current) return;
-
-      wheelGuard = true;
-      setCurrentPage(target);
-      scrollToPage(target, 'instant');
-      setTimeout(() => { wheelGuard = false; }, 100);
+      if (Math.abs(e.deltaY) >= 50) {
+        const totalPages = imagesCountRef.current;
+        if (totalPages === 0) return;
+        const dir = e.deltaY > 0 ? 1 : -1;
+        const target = Math.max(0, Math.min(totalPages - 1, currentPageRef.current + dir));
+        if (target !== currentPageRef.current) {
+          setCurrentPage(target);
+          const child = el.children[target] as HTMLElement | undefined;
+          if (child) el.scrollTo({ left: child.offsetLeft, behavior: 'instant' });
+        }
+      } else {
+        el.scrollBy({ left: e.deltaY, behavior: 'auto' });
+      }
     };
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => { el.removeEventListener('wheel', onWheel); };
-  }, [isRTL, scrollToPage, photo]);
+  }, [isRTL, photo]);
 
   // ─── render ──────────────────────────────────────────────────────────────────
 
   const title = album?.name ?? currentChapterId;
-  const snapType = seamless
-    ? (autoSnap ? `${isRTL ? 'x' : 'y'} proximity` : 'none')
-    : (autoSnap ? `${isRTL ? 'x' : 'y'} mandatory` : 'none');
 
   if (!photo) {
     return (
@@ -434,63 +408,51 @@ export default function ReaderPage() {
     position: 'relative',
     overflowX: isRTL ? 'auto' : 'hidden',
     overflowY: isRTL ? 'hidden' : 'auto',
-    scrollSnapType: snapType,
+    scrollSnapType: autoSnap
+      ? (isRTL ? 'x mandatory' : 'y mandatory')
+      : 'none',
+    overscrollBehavior: isRTL ? 'contain' : 'auto',
     display: 'flex',
     flexDirection: isRTL ? 'row' : 'column',
     gap: 0,
     ...barPad,
   };
 
+  const pageStyle: React.CSSProperties = isRTL
+    ? {
+        scrollSnapAlign: 'start',
+        flex: '0 0 100%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }
+    : {
+        scrollSnapAlign: autoSnap ? 'start' : 'none',
+        height: 'auto',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      };
+
   const imgCls = isRTL
     ? 'max-h-full max-w-full h-auto w-auto object-contain'
-    : 'max-h-full max-w-full h-auto w-auto object-contain';
-
-  const imgStyle: React.CSSProperties | undefined = seamless
-    ? (isRTL ? { maxWidth: `${zoom * 100}vw` } : { maxHeight: `${zoom * 100}vh` })
-    : undefined;
+    : 'h-auto w-full object-contain';
 
   return (
     <div className="fixed inset-0 bg-black select-none overflow-hidden">
       <div ref={containerRef} className="h-full w-full" style={scrollDivStyle}>
         {images.map((img, i) => {
           const url = blobMap.get(i);
-          const pageStyle: React.CSSProperties = seamless
-            ? {
-                scrollSnapAlign: autoSnap ? 'start' : 'none',
-                width: 'auto',
-                height: 'auto',
-                flexShrink: 0,
-                minWidth: 0,
-                minHeight: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }
-            : {
-                scrollSnapAlign: 'start',
-                width: '100%',
-                height: '100%',
-                flex: '0 0 100%',
-                minWidth: 0,
-                minHeight: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              };
           return (
-            <div
-              key={img.name}
-              className="shrink-0"
-              style={pageStyle}
-            >
+            <div key={img.name} className="shrink-0" style={pageStyle}>
               {url ? (
-                <img src={url} alt="" draggable={false} className={imgCls} style={imgStyle} />
+                <img src={url} alt="" draggable={false} className={imgCls} />
               ) : (
                 <DecryptedImage
                   image={img}
                   photo={photo}
                   className={imgCls}
-                  style={imgStyle}
                   onLoad={(blobUrl) => {
                     loadedSetRef.current.add(i);
                     inflightRef.current.add(i);
@@ -515,9 +477,7 @@ export default function ReaderPage() {
         direction={direction}
         hasPrevChapter={currentChapterIndex > 0}
         hasNextChapter={currentChapterIndex < sortedChapters.length - 1}
-        seamless={seamless}
         autoSnap={autoSnap}
-        zoom={zoom}
         barSide={barSide}
         barVisible={barVisible}
         onToggleVisibility={() => setShowUI((v) => !v)}
@@ -528,9 +488,7 @@ export default function ReaderPage() {
         onNextChapter={goNextChapter}
         onGoToChapter={goToChapter}
         onToggleDirection={toggleDirection}
-        onToggleSeamless={toggleSeamless}
         onToggleAutoSnap={toggleAutoSnap}
-        onChangeZoom={changeZoom}
         onChangeBarSide={changeBarSide}
         onToggleBarVisible={() => setBarVisible(v => !v)}
       />

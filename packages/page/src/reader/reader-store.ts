@@ -3,14 +3,8 @@ export type BarSide = 'left' | 'right' | 'bottom';
 
 const PROGRESS_PREFIX = 'reading-progress:';
 const DIRECTION_KEY = 'reading-direction';
-const SEAMLESS_KEY = 'reading-seamless';
 const AUTO_SNAP_KEY = 'reading-auto-snap';
-const ZOOM_KEY = 'reading-zoom';
 const BAR_SIDE_KEY = 'reading-bar-side';
-
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2.0;
-const DEFAULT_ZOOM = 1.0;
 
 export type ChapterProgress = {
   albumId: string;
@@ -59,31 +53,12 @@ export function getReadingDirection(): ReadingDirection {
   return 'left-right';
 }
 
-export function saveSeamlessScroll(enabled: boolean) {
-  localStorage.setItem(SEAMLESS_KEY, enabled ? '1' : '0');
-}
-
-export function getSeamlessScroll(): boolean {
-  return localStorage.getItem(SEAMLESS_KEY) === '1';
-}
-
 export function saveAutoSnap(enabled: boolean) {
   localStorage.setItem(AUTO_SNAP_KEY, enabled ? '1' : '0');
 }
 
 export function getAutoSnap(): boolean {
   return localStorage.getItem(AUTO_SNAP_KEY) !== '0';
-}
-
-export function saveZoom(zoom: number) {
-  localStorage.setItem(ZOOM_KEY, String(zoom));
-}
-
-export function getZoom(): number {
-  const raw = localStorage.getItem(ZOOM_KEY);
-  const n = Number(raw);
-  if (Number.isFinite(n) && n >= MIN_ZOOM && n <= MAX_ZOOM) return n;
-  return DEFAULT_ZOOM;
 }
 
 export function saveBarSide(side: BarSide) {

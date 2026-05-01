@@ -47,29 +47,21 @@ function ChapterDrawer({
 
 function SettingsPanel({
   direction,
-  seamless,
   autoSnap,
-  zoom,
   barSide,
   barVisible,
   onToggleDirection,
-  onToggleSeamless,
   onToggleAutoSnap,
-  onChangeZoom,
   onChangeBarSide,
   onToggleBarVisible,
   onClose,
 }: {
   direction: ReadingDirection;
-  seamless: boolean;
   autoSnap: boolean;
-  zoom: number;
   barSide: BarSide;
   barVisible: boolean;
   onToggleDirection: () => void;
-  onToggleSeamless: () => void;
   onToggleAutoSnap: () => void;
-  onChangeZoom: (value: number) => void;
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onClose: () => void;
@@ -99,16 +91,6 @@ function SettingsPanel({
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-gray-300 text-xs">无缝衔接</span>
-          <button
-            onClick={onToggleSeamless}
-            className={`relative w-9 h-5 rounded-full transition-colors ${seamless ? 'bg-blue-500' : 'bg-gray-600'}`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${seamless ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
-
-        <div className="flex items-center justify-between">
           <span className="text-gray-300 text-xs">自动吸附</span>
           <button
             onClick={onToggleAutoSnap}
@@ -116,23 +98,6 @@ function SettingsPanel({
           >
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
-        </div>
-
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-gray-300 text-xs">缩放</span>
-            <span className="text-xs text-gray-400 tabular-nums">{Math.round(zoom * 100)}%</span>
-          </div>
-          <input
-            type="range"
-            min={0.5}
-            max={2}
-            step={0.05}
-            value={zoom}
-            onChange={(e) => onChangeZoom(Number(e.target.value))}
-            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
-            style={{ background: `linear-gradient(to right, #3b82f6 ${((zoom - 0.5) / 1.5) * 100}%, #374151 ${((zoom - 0.5) / 1.5) * 100}%)` }}
-          />
         </div>
 
         <div>
@@ -176,9 +141,7 @@ export function ReaderOverlay({
   direction,
   hasPrevChapter,
   hasNextChapter,
-  seamless,
   autoSnap,
-  zoom,
   barSide,
   barVisible,
   onToggleVisibility,
@@ -189,9 +152,7 @@ export function ReaderOverlay({
   onNextChapter,
   onGoToChapter,
   onToggleDirection,
-  onToggleSeamless,
   onToggleAutoSnap,
-  onChangeZoom,
   onChangeBarSide,
   onToggleBarVisible,
 }: {
@@ -206,9 +167,7 @@ export function ReaderOverlay({
   direction: ReadingDirection;
   hasPrevChapter: boolean;
   hasNextChapter: boolean;
-  seamless: boolean;
   autoSnap: boolean;
-  zoom: number;
   barSide: BarSide;
   barVisible: boolean;
   onToggleVisibility: () => void;
@@ -219,9 +178,7 @@ export function ReaderOverlay({
   onNextChapter: () => void;
   onGoToChapter: (id: string) => void;
   onToggleDirection: () => void;
-  onToggleSeamless: () => void;
   onToggleAutoSnap: () => void;
-  onChangeZoom: (value: number) => void;
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
 }) {
@@ -259,10 +216,9 @@ export function ReaderOverlay({
 
       {visible && showSettings && (
         <SettingsPanel
-          direction={direction} seamless={seamless} autoSnap={autoSnap} zoom={zoom}
+          direction={direction} autoSnap={autoSnap}
           barSide={barSide} barVisible={barVisible}
-          onToggleDirection={onToggleDirection} onToggleSeamless={onToggleSeamless}
-          onToggleAutoSnap={onToggleAutoSnap} onChangeZoom={onChangeZoom}
+          onToggleDirection={onToggleDirection} onToggleAutoSnap={onToggleAutoSnap}
           onChangeBarSide={onChangeBarSide} onToggleBarVisible={onToggleBarVisible}
           onClose={() => setShowSettings(false)}
         />
@@ -287,7 +243,7 @@ export function ReaderOverlay({
         </div>
       </div>
 
-      {/* Info bar — outside slide area via padding on container */}
+      {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
         <div className="absolute bottom-0 left-0 right-0 z-20 h-10 bg-black/90">
           <div className="flex items-center gap-3 px-4 h-full">
@@ -306,6 +262,7 @@ export function ReaderOverlay({
         </div>
       )}
 
+      {/* Info bar — left/right */}
       {barVisible && !isHorizontalBar && (
         <div className={`absolute top-0 bottom-0 z-20 ${barSide === 'right' ? 'right-0' : 'left-0'}`} style={{ width: 40 }}>
           <div className="flex flex-col items-center gap-2 py-4 h-full" style={{ paddingTop: '3.5rem' }}>
