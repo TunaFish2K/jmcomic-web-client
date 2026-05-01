@@ -1,11 +1,11 @@
 import { useState, useRef, createContext, useContext, useCallback, useEffect } from "react";
 import { Button, InputGroup, Select, ListBox, FieldError } from "@heroui/react";
-import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, Sun, Moon, Monitor } from "lucide-react";
+import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, Sun, Moon, Monitor, BookOpen } from "lucide-react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { search, getPhoto, getBatchAlbum, getBatchPhoto } from "../api";
 import type { BatchAlbumItem, BatchError } from "../api";
 import type { SearchResult, PhotoWithScrambleId } from "@tiny-client/shared";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import {
     startDownload,
     downloadAllImages,
@@ -648,6 +648,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
     cachedData: BatchAlbumItem | undefined;
     onClose: () => void;
 }) {
+    const navigate = useNavigate();
     const album = cachedData?.album ?? null;
     const photo = cachedData?.photo ?? null;
     const isSeriesAlbum = !!album?.series?.length;
@@ -781,6 +782,14 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                                             {seriesItem.sort ? `第 ${seriesItem.sort} 话` : '章节'}
                                                         </div>
                                                     </div>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="secondary"
+                                                        className="text-xs w-full mt-2"
+                                                        onPress={() => navigate(`/reader/${seriesItem.id}`, { state: { isSeries: true, seriesItems: sortedSeries.map((s) => ({ id: s.id, name: `${album!.name} - ${s.name}`, order: parseSeriesOrder(s.sort) })) } })}
+                                                    >
+                                                        <BookOpen size={14} className="mr-1" />在线观看
+                                                    </Button>
                                                     <DownloadButtons
                                                         items={[{
                                                             id: seriesItem.id,
@@ -794,7 +803,17 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                     </div>
                                 </div>
                             ) : (
-                                <DownloadButtons items={[{ id: albumId, name: album!.name, order: 1 }]} />
+                                <>
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="text-xs w-full mt-2"
+                                        onPress={() => navigate(`/reader/${albumId}`)}
+                                    >
+                                        <BookOpen size={14} className="mr-1" />在线观看
+                                    </Button>
+                                    <DownloadButtons items={[{ id: albumId, name: album!.name, order: 1 }]} />
+                                </>
                             )}
                         </>
                     )}

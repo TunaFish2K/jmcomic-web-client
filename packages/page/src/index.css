@@ -2,6 +2,15 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+    --animate-shimmer: shimmer 1.8s ease-in-out infinite;
+
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+}
+
 @utility wrap-break-word {
     overflow-wrap: break-word;
 }

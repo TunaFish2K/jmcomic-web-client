@@ -7,5 +7,4 @@ ignoredBuiltDependencies:
 onlyBuiltDependencies:
   - '@heroui/shared-utils'
   - esbuild
-  - sharp
   - workerd
