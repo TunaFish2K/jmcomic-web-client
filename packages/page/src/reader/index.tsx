@@ -160,9 +160,9 @@ export default function ReaderPage() {
     const child = el.children[index] as HTMLElement | undefined;
     if (!child) return;
     if (isRTLRef.current) {
-      el.scrollTo({ left: child.offsetLeft - el.offsetLeft, behavior });
+      el.scrollTo({ left: child.offsetLeft, behavior });
     } else {
-      el.scrollTo({ top: child.offsetTop - el.offsetTop, behavior });
+      el.scrollTo({ top: child.offsetTop, behavior });
     }
   }, []);
 
@@ -375,8 +375,9 @@ export default function ReaderPage() {
   // ─── wheel snap ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (!isRTL) return;
     const el = containerRef.current;
-    if (!el || !isRTL) return;
+    if (!el) return;
 
     let wheelGuard = false;
 
@@ -401,7 +402,7 @@ export default function ReaderPage() {
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => { el.removeEventListener('wheel', onWheel); };
-  }, [isRTL, scrollToPage]);
+  }, [isRTL, scrollToPage, photo]);
 
   // ─── render ──────────────────────────────────────────────────────────────────
 
@@ -430,6 +431,7 @@ export default function ReaderPage() {
   } : {};
 
   const scrollDivStyle: React.CSSProperties = {
+    position: 'relative',
     overflowX: isRTL ? 'auto' : 'hidden',
     overflowY: isRTL ? 'hidden' : 'auto',
     scrollSnapType: snapType,
