@@ -48,20 +48,24 @@ function ChapterDrawer({
 function SettingsPanel({
   direction,
   autoSnap,
+  seamlessMode,
   barSide,
   barVisible,
   onToggleDirection,
   onToggleAutoSnap,
+  onToggleSeamlessMode,
   onChangeBarSide,
   onToggleBarVisible,
   onClose,
 }: {
   direction: ReadingDirection;
   autoSnap: boolean;
+  seamlessMode: boolean;
   barSide: BarSide;
   barVisible: boolean;
   onToggleDirection: () => void;
   onToggleAutoSnap: () => void;
+  onToggleSeamlessMode: () => void;
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onClose: () => void;
@@ -86,7 +90,7 @@ function SettingsPanel({
             onClick={onToggleDirection}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs transition-colors"
           >
-            {isVertical ? <><ArrowDownUp size={14} /> 上下滚动</> : <><ArrowLeftRight size={14} /> 左右翻页</>}
+            {isVertical ? <><ArrowDownUp size={14} /> 上下滚动</> : <><ArrowLeftRight size={14} /> 左右滚动</>}
           </button>
         </div>
 
@@ -94,9 +98,20 @@ function SettingsPanel({
           <span className="text-gray-300 text-xs">自动吸附</span>
           <button
             onClick={onToggleAutoSnap}
-            className={`relative w-9 h-5 rounded-full transition-colors ${autoSnap ? 'bg-blue-500' : 'bg-gray-600'}`}
+            disabled={seamlessMode}
+            className={`relative w-9 h-5 rounded-full transition-colors ${autoSnap ? 'bg-blue-500' : 'bg-gray-600'} ${seamlessMode ? 'opacity-40 cursor-default' : ''}`}
           >
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-gray-300 text-xs">无缝模式</span>
+          <button
+            onClick={onToggleSeamlessMode}
+            className={`relative w-9 h-5 rounded-full transition-colors ${seamlessMode ? 'bg-blue-500' : 'bg-gray-600'}`}
+          >
+            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${seamlessMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
         </div>
 
@@ -142,6 +157,7 @@ export function ReaderOverlay({
   hasPrevChapter,
   hasNextChapter,
   autoSnap,
+  seamlessMode,
   barSide,
   barVisible,
   onToggleVisibility,
@@ -153,8 +169,10 @@ export function ReaderOverlay({
   onGoToChapter,
   onToggleDirection,
   onToggleAutoSnap,
+  onToggleSeamlessMode,
   onChangeBarSide,
   onToggleBarVisible,
+  onScrollByInputStep,
 }: {
   visible: boolean;
   title: string;
@@ -168,6 +186,7 @@ export function ReaderOverlay({
   hasPrevChapter: boolean;
   hasNextChapter: boolean;
   autoSnap: boolean;
+  seamlessMode: boolean;
   barSide: BarSide;
   barVisible: boolean;
   onToggleVisibility: () => void;
@@ -179,8 +198,10 @@ export function ReaderOverlay({
   onGoToChapter: (id: string) => void;
   onToggleDirection: () => void;
   onToggleAutoSnap: () => void;
+  onToggleSeamlessMode: () => void;
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
+  onScrollByInputStep: (step: number) => void;
 }) {
   const [showChapterDrawer, setShowChapterDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -195,10 +216,10 @@ export function ReaderOverlay({
       return;
     }
     if (showChapterDrawer || showSettings) return;
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); onPrevPage(); }
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); onNextPage(); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); onScrollByInputStep(-1); }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); onScrollByInputStep(1); }
     if (e.key === 'f' || e.key === 'F') onToggleVisibility();
-  }, [showChapterDrawer, showSettings, onClose, onPrevPage, onNextPage, onToggleVisibility]);
+  }, [showChapterDrawer, showSettings, onClose, onScrollByInputStep, onToggleVisibility]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -216,9 +237,10 @@ export function ReaderOverlay({
 
       {visible && showSettings && (
         <SettingsPanel
-          direction={direction} autoSnap={autoSnap}
+          direction={direction} autoSnap={autoSnap} seamlessMode={seamlessMode}
           barSide={barSide} barVisible={barVisible}
           onToggleDirection={onToggleDirection} onToggleAutoSnap={onToggleAutoSnap}
+          onToggleSeamlessMode={onToggleSeamlessMode}
           onChangeBarSide={onChangeBarSide} onToggleBarVisible={onToggleBarVisible}
           onClose={() => setShowSettings(false)}
         />

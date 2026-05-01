@@ -5,6 +5,7 @@ const PROGRESS_PREFIX = 'reading-progress:';
 const DIRECTION_KEY = 'reading-direction';
 const AUTO_SNAP_KEY = 'reading-auto-snap';
 const BAR_SIDE_KEY = 'reading-bar-side';
+const SEAMLESS_MODE_KEY = 'reading-seamless-mode';
 
 export type ChapterProgress = {
   albumId: string;
@@ -59,6 +60,14 @@ export function saveAutoSnap(enabled: boolean) {
 
 export function getAutoSnap(): boolean {
   return localStorage.getItem(AUTO_SNAP_KEY) !== '0';
+}
+
+export function saveSeamlessMode(enabled: boolean) {
+  localStorage.setItem(SEAMLESS_MODE_KEY, enabled ? '1' : '0');
+}
+
+export function getSeamlessMode(): boolean {
+  return localStorage.getItem(SEAMLESS_MODE_KEY) === '1';
 }
 
 export function saveBarSide(side: BarSide) {

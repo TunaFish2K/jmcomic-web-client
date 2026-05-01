@@ -9,12 +9,14 @@ import {
   getReadingDirection,
   saveReadingDirection,
   getReadingProgress,
-  saveReadingProgress,
   getLatestChapterProgress,
   getAutoSnap,
   saveAutoSnap,
+  getSeamlessMode,
+  saveSeamlessMode,
   getBarSide,
   saveBarSide,
+  saveReadingProgress,
 } from './reader-store';
 import pLimit from 'p-limit';
 import { getSliceCount, reverseImageBySlice } from '@tiny-client/shared';
@@ -30,11 +32,7 @@ type ChapterInfo = { id: string; name: string; order: number };
 const PRELOAD_AHEAD = 10;
 const PRELOAD_PARALLEL = 5;
 
-async function decryptImageWithRetry(
-  url: string,
-  photoId: string,
-  scrambleId: number,
-): Promise<ArrayBuffer | null> {
+async function decryptImageWithRetry(url: string, photoId: string, scrambleId: number): Promise<ArrayBuffer | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(url);
@@ -101,6 +99,7 @@ export default function ReaderPage() {
   const [currentChapterId, setCurrentChapterId] = useState(albumId!);
   const [direction, setDirection] = useState<ReadingDirection>(getReadingDirection);
   const [autoSnap, setAutoSnap] = useState(getAutoSnap);
+  const [seamlessMode, setSeamlessMode] = useState(getSeamlessMode);
   const [barSide, setBarSide] = useState(getBarSide);
   const [barVisible, setBarVisible] = useState(true);
   const [showUI, setShowUI] = useState(true);
@@ -116,6 +115,11 @@ export default function ReaderPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const loadedSetRef = useRef(new Set<number>());
   const inflightRef = useRef(new Set<number>());
+  const wheelPagingLockRef = useRef(false);
+  const trackpadGestureLockRef = useRef(false);
+  const trackpadDeltaAccumRef = useRef(0);
+  const trackpadGestureTimerRef = useRef<number | null>(null);
+  const horizontalSnapTimerRef = useRef<number | null>(null);
 
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
@@ -128,8 +132,6 @@ export default function ReaderPage() {
   const chapterIndexRef = useRef(currentChapterIndex);
   chapterIndexRef.current = currentChapterIndex;
   const imagesCountRef = useRef(0);
-  const directionRef = useRef(direction);
-  directionRef.current = direction;
 
   const { data: photo } = useQuery({
     queryKey: ['photo', currentChapterId],
@@ -158,11 +160,28 @@ export default function ReaderPage() {
     }
   }, []);
 
+  const scrollByInputStep = useCallback((step: number) => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    if (isRTLRef.current) {
+      const target = Math.max(0, Math.min(imagesCountRef.current - 1, currentPageRef.current + step));
+      if (target !== currentPageRef.current) {
+        setCurrentPage(target);
+        scrollToPage(target, 'smooth');
+      }
+      return;
+    }
+
+    const distance = Math.max(el.clientHeight * 0.9, 1) * step;
+    el.scrollBy({ top: distance, behavior: 'smooth' });
+  }, [scrollToPage]);
+
   const goNextPage = useCallback(() => {
     const page = currentPageRef.current;
     if (page < imagesCountRef.current - 1) {
       setCurrentPage(page + 1);
-      scrollToPage(page + 1);
+      scrollToPage(page + 1, 'smooth');
     }
   }, [scrollToPage]);
 
@@ -170,7 +189,7 @@ export default function ReaderPage() {
     const page = currentPageRef.current;
     if (page > 0) {
       setCurrentPage(page - 1);
-      scrollToPage(page - 1);
+      scrollToPage(page - 1, 'smooth');
     }
   }, [scrollToPage]);
 
@@ -217,6 +236,14 @@ export default function ReaderPage() {
   const changeBarSide = useCallback((side: BarSide) => {
     setBarSide(side);
     saveBarSide(side);
+  }, []);
+
+  const toggleSeamlessMode = useCallback(() => {
+    setSeamlessMode((prev) => {
+      const next = !prev;
+      saveSeamlessMode(next);
+      return next;
+    });
   }, []);
 
   // ─── preloader ───────────────────────────────────────────────────────────────
@@ -272,68 +299,72 @@ export default function ReaderPage() {
     preloadRange(currentPage);
   }, [currentPage, preloadRange, images.length]);
 
-  // ─── scroll observer ─────────────────────────────────────────────────────────
+  // ─── scroll observer (page detection only, no snap) ────────────────────────
 
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el || !photo || images.length === 0) return;
 
-    const saveProgress = (page: number) => {
-      saveReadingProgress({
-        albumId: albumIdRef.current!,
-        chapterId: chapterIdRef.current,
-        chapterIndex: chapterIndexRef.current,
-        page,
-        totalPages: imagesCountRef.current,
-        updatedAt: Date.now(),
-      });
-    };
+    const isHorizontal = isRTL;
+    const snapEnabled = autoSnap && !seamlessMode;
+    const shouldSettleHorizontal = isHorizontal && snapEnabled && window.matchMedia('(pointer: fine)').matches;
 
-    const updatePageFromScroll = () => {
-      const children = el.children;
-      if (children.length === 0) return;
-
-      if (directionRef.current === 'left-right') {
-        const maxScrollLeft = Math.max(el.scrollWidth - el.clientWidth, 0);
-        setScrollProgressPct(maxScrollLeft === 0 ? 0 : Math.round((el.scrollLeft / maxScrollLeft) * 100));
-
-        const centerX = el.scrollLeft + el.clientWidth / 2;
-        let best = 0, bestDist = Infinity;
-        for (let i = 0; i < children.length; i++) {
-          const child = children[i] as HTMLElement;
-          const midX = child.offsetLeft + child.offsetWidth / 2;
-          const dist = Math.abs(centerX - midX);
-          if (dist < bestDist) { bestDist = dist; best = i; }
-        }
-        if (best !== currentPageRef.current) {
-          setCurrentPage(best);
-          saveProgress(best);
-        }
-      } else {
-        const maxScrollTop = Math.max(el.scrollHeight - el.clientHeight, 0);
-        setScrollProgressPct(maxScrollTop === 0 ? 0 : Math.round((el.scrollTop / maxScrollTop) * 100));
-
-        const centerY = el.scrollTop + el.clientHeight / 2;
-        let best = 0, bestDist = Infinity;
-        for (let i = 0; i < children.length; i++) {
-          const child = children[i] as HTMLElement;
-          const midY = child.offsetTop + child.offsetHeight / 2;
-          const dist = Math.abs(centerY - midY);
-          if (dist < bestDist) { bestDist = dist; best = i; }
-        }
-        if (best !== currentPageRef.current) {
-          setCurrentPage(best);
-          saveProgress(best);
-        }
+    const clearHorizontalSnapTimer = () => {
+      if (horizontalSnapTimerRef.current !== null) {
+        window.clearTimeout(horizontalSnapTimerRef.current);
+        horizontalSnapTimerRef.current = null;
       }
     };
 
-    el.addEventListener('scroll', updatePageFromScroll, { passive: true });
+    const settleHorizontalPage = () => {
+      clearHorizontalSnapTimer();
+      const page = currentPageRef.current;
+      const child = el.children[page] as HTMLElement | undefined;
+      if (!child) return;
+      const delta = Math.abs(el.scrollLeft - child.offsetLeft);
+      if (delta > 1) scrollToPage(page, 'smooth');
+    };
+
+    const onScroll = () => {
+      const children = el.children;
+      if (children.length === 0) return;
+      if (isHorizontal) {
+        const max = Math.max(el.scrollWidth - el.clientWidth, 0);
+        setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollLeft / max) * 100));
+        const center = el.scrollLeft + el.clientWidth / 2;
+        let best = 0, bestDist = Infinity;
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i] as HTMLElement;
+          const mid = child.offsetLeft + child.offsetWidth / 2;
+          const dist = Math.abs(center - mid);
+          if (dist < bestDist) { bestDist = dist; best = i; }
+        }
+        if (best !== currentPageRef.current) setCurrentPage(best);
+        if (shouldSettleHorizontal) {
+          clearHorizontalSnapTimer();
+          horizontalSnapTimerRef.current = window.setTimeout(settleHorizontalPage, 120);
+        }
+      } else {
+        const max = Math.max(el.scrollHeight - el.clientHeight, 0);
+        setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollTop / max) * 100));
+        const center = el.scrollTop + el.clientHeight / 2;
+        let best = 0, bestDist = Infinity;
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i] as HTMLElement;
+          const mid = child.offsetTop + child.offsetHeight / 2;
+          const dist = Math.abs(center - mid);
+          if (dist < bestDist) { bestDist = dist; best = i; }
+        }
+        if (best !== currentPageRef.current) setCurrentPage(best);
+      }
+    };
+
+    el.addEventListener('scroll', onScroll, { passive: true });
 
     const progress = getLatestChapterProgress(albumIdRef.current!, sortedChapters.map((c) => c.id));
     if (progress && progress.chapterId !== chapterIdRef.current) {
       setCurrentChapterId(progress.chapterId);
-      return () => { el.removeEventListener('scroll', updatePageFromScroll); };
+      return () => { el.removeEventListener('scroll', onScroll); };
     }
     const stored = getReadingProgress(albumIdRef.current!, chapterIdRef.current);
     const startPage = stored?.page ?? 0;
@@ -343,43 +374,105 @@ export default function ReaderPage() {
       preloadRange(startPage);
     }
     const tid = setTimeout(() => scrollToPage(startPage), 0);
-    requestAnimationFrame(updatePageFromScroll);
+    requestAnimationFrame(onScroll);
 
     return () => {
       clearTimeout(tid);
-      el.removeEventListener('scroll', updatePageFromScroll);
+      clearHorizontalSnapTimer();
+      el.removeEventListener('scroll', onScroll);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length]);
+  }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length, autoSnap, seamlessMode]);
 
-  // ─── wheel ───────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!albumId || !currentChapterId || images.length === 0) return;
+
+    saveReadingProgress({
+      albumId,
+      chapterId: currentChapterId,
+      chapterIndex: Math.max(currentChapterIndex, 0),
+      page: currentPage,
+      totalPages: images.length,
+      updatedAt: Date.now(),
+    });
+  }, [albumId, currentChapterId, currentChapterIndex, currentPage, images.length]);
+
+  // ─── wheel / touchpad scrolling ────────────────────────────────────────────
 
   useEffect(() => {
     if (!isRTL || !photo) return;
     const el = containerRef.current;
     if (!el) return;
 
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-
-      if (Math.abs(e.deltaY) >= 50) {
-        const totalPages = imagesCountRef.current;
-        if (totalPages === 0) return;
-        const dir = e.deltaY > 0 ? 1 : -1;
-        const target = Math.max(0, Math.min(totalPages - 1, currentPageRef.current + dir));
-        if (target !== currentPageRef.current) {
-          setCurrentPage(target);
-          const child = el.children[target] as HTMLElement | undefined;
-          if (child) el.scrollTo({ left: child.offsetLeft, behavior: 'instant' });
-        }
-      } else {
-        el.scrollBy({ left: e.deltaY, behavior: 'auto' });
+    const resetTrackpadGesture = () => {
+      trackpadGestureLockRef.current = false;
+      trackpadDeltaAccumRef.current = 0;
+      if (trackpadGestureTimerRef.current !== null) {
+        window.clearTimeout(trackpadGestureTimerRef.current);
+        trackpadGestureTimerRef.current = null;
       }
     };
 
+    const onWheel = (e: WheelEvent) => {
+      const dominantDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (Math.abs(dominantDelta) < 4) return;
+
+      e.preventDefault();
+
+      const isTrackpad = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 40);
+
+      if (isTrackpad) {
+        trackpadDeltaAccumRef.current += dominantDelta;
+        if (trackpadGestureTimerRef.current !== null) {
+          window.clearTimeout(trackpadGestureTimerRef.current);
+        }
+        trackpadGestureTimerRef.current = window.setTimeout(resetTrackpadGesture, 140);
+
+        if (trackpadGestureLockRef.current || Math.abs(trackpadDeltaAccumRef.current) < 60) {
+          return;
+        }
+
+        trackpadGestureLockRef.current = true;
+        scrollByInputStep(trackpadDeltaAccumRef.current > 0 ? 1 : -1);
+        return;
+      }
+
+      if (wheelPagingLockRef.current) return;
+      wheelPagingLockRef.current = true;
+
+      scrollByInputStep(dominantDelta > 0 ? 1 : -1);
+
+      window.setTimeout(() => {
+        wheelPagingLockRef.current = false;
+      }, 260);
+    };
+
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => { el.removeEventListener('wheel', onWheel); };
-  }, [isRTL, photo]);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      resetTrackpadGesture();
+    };
+  }, [isRTL, photo, scrollByInputStep]);
+
+  // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
+
+  const handleFlipClick = useCallback((e: React.MouseEvent) => {
+    if (showUI) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (isRTL) {
+      const relX = (e.clientX - rect.left) / rect.width;
+      if (relX < 0.33) goPrevPage();
+      else if (relX > 0.67) goNextPage();
+      else setShowUI(true);
+    } else {
+      const relY = (e.clientY - rect.top) / rect.height;
+      if (relY < 0.33) scrollByInputStep(-1);
+      else if (relY > 0.67) scrollByInputStep(1);
+      else setShowUI(true);
+    }
+  }, [showUI, isRTL, goPrevPage, goNextPage, scrollByInputStep]);
 
   // ─── render ──────────────────────────────────────────────────────────────────
 
@@ -408,31 +501,33 @@ export default function ReaderPage() {
     position: 'relative',
     overflowX: isRTL ? 'auto' : 'hidden',
     overflowY: isRTL ? 'hidden' : 'auto',
-    scrollSnapType: autoSnap
-      ? (isRTL ? 'x mandatory' : 'y mandatory')
-      : 'none',
-    overscrollBehavior: isRTL ? 'contain' : 'auto',
     display: 'flex',
     flexDirection: isRTL ? 'row' : 'column',
     gap: 0,
+    scrollSnapType: autoSnap && !seamlessMode ? (isRTL ? 'x mandatory' : 'y mandatory') : 'none',
+    WebkitOverflowScrolling: 'touch',
+    overscrollBehavior: 'contain',
+    touchAction: isRTL ? 'pan-x' : 'pan-y',
     ...barPad,
   };
 
   const pageStyle: React.CSSProperties = isRTL
     ? {
-        scrollSnapAlign: 'start',
         flex: '0 0 100%',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        scrollSnapAlign: autoSnap && !seamlessMode ? 'start' : undefined,
+        scrollSnapStop: autoSnap && !seamlessMode ? 'always' : undefined,
       }
     : {
-        scrollSnapAlign: autoSnap ? 'start' : 'none',
         height: 'auto',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        scrollSnapAlign: autoSnap && !seamlessMode ? 'start' : undefined,
+        scrollSnapStop: autoSnap && !seamlessMode ? 'always' : undefined,
       };
 
   const imgCls = isRTL
@@ -465,6 +560,11 @@ export default function ReaderPage() {
         })}
       </div>
 
+      {/* click-to-flip zone — only active when UI hidden */}
+      {!showUI && (
+        <div className="absolute inset-0 z-10" onClick={handleFlipClick} />
+      )}
+
       <ReaderOverlay
         visible={showUI}
         title={title}
@@ -478,6 +578,7 @@ export default function ReaderPage() {
         hasPrevChapter={currentChapterIndex > 0}
         hasNextChapter={currentChapterIndex < sortedChapters.length - 1}
         autoSnap={autoSnap}
+        seamlessMode={seamlessMode}
         barSide={barSide}
         barVisible={barVisible}
         onToggleVisibility={() => setShowUI((v) => !v)}
@@ -489,8 +590,10 @@ export default function ReaderPage() {
         onGoToChapter={goToChapter}
         onToggleDirection={toggleDirection}
         onToggleAutoSnap={toggleAutoSnap}
+        onToggleSeamlessMode={toggleSeamlessMode}
         onChangeBarSide={changeBarSide}
         onToggleBarVisible={() => setBarVisible(v => !v)}
+        onScrollByInputStep={scrollByInputStep}
       />
     </div>
   );
