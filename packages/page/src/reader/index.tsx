@@ -14,6 +14,8 @@ import {
   saveAutoSnap,
   getSeamlessMode,
   saveSeamlessMode,
+  getLazyRenderRange,
+  saveLazyRenderRange,
   getBarSide,
   saveBarSide,
   saveReadingProgress,
@@ -33,7 +35,6 @@ type ChapterInfo = { id: string; name: string; order: number };
 
 const PRELOAD_AHEAD = 10;
 const PRELOAD_PARALLEL = 5;
-
 async function decryptImageWithRetry(url: string, photoId: string, scrambleId: number): Promise<ArrayBuffer | null> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -117,6 +118,7 @@ export default function ReaderPage() {
   const [direction, setDirection] = useState<ReadingDirection>(getReadingDirection);
   const [autoSnap, setAutoSnap] = useState(getAutoSnap);
   const [seamlessMode, setSeamlessMode] = useState(getSeamlessMode);
+  const [lazyRenderRange, setLazyRenderRange] = useState(getLazyRenderRange);
   const [barSide, setBarSide] = useState(getBarSide);
   const [barVisible, setBarVisible] = useState(true);
   const [showUI, setShowUI] = useState(true);
@@ -262,6 +264,12 @@ export default function ReaderPage() {
       saveSeamlessMode(next);
       return next;
     });
+  }, []);
+
+  const changeLazyRenderRange = useCallback((value: number) => {
+    const next = Math.max(1, Math.min(12, Math.round(value)));
+    setLazyRenderRange(next);
+    saveLazyRenderRange(next);
   }, []);
 
   // ─── preloader ───────────────────────────────────────────────────────────────
@@ -552,15 +560,27 @@ export default function ReaderPage() {
     ? 'max-h-full max-w-full h-auto w-auto object-contain'
     : 'h-auto w-full object-contain';
 
+  const lazyRenderStart = Math.max(0, currentPage - lazyRenderRange);
+  const lazyRenderEnd = Math.min(images.length - 1, currentPage + lazyRenderRange);
+
   return (
     <div className="fixed inset-0 bg-black select-none overflow-hidden">
       <div ref={containerRef} className="h-full w-full" style={scrollDivStyle}>
         {images.map((img, i) => {
           const url = blobMap.get(i);
+          const shouldRenderImage = i >= lazyRenderStart && i <= lazyRenderEnd;
           return (
             <div key={img.name} className="shrink-0" style={pageStyle}>
               {url ? (
                 <img src={url} alt="" draggable={false} className={imgCls} />
+              ) : !shouldRenderImage ? (
+                <div className={`relative overflow-hidden bg-gray-900/60 ${imgCls}`}>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur-sm">
+                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-500/70 border-t-white" />
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <DecryptedImage
                   image={img}
@@ -597,6 +617,7 @@ export default function ReaderPage() {
         hasNextChapter={currentChapterIndex < sortedChapters.length - 1}
         autoSnap={autoSnap}
         seamlessMode={seamlessMode}
+        lazyRenderRange={lazyRenderRange}
         barSide={barSide}
         barVisible={barVisible}
         onToggleVisibility={() => setShowUI((v) => !v)}
@@ -609,6 +630,7 @@ export default function ReaderPage() {
         onToggleDirection={toggleDirection}
         onToggleAutoSnap={toggleAutoSnap}
         onToggleSeamlessMode={toggleSeamlessMode}
+        onChangeLazyRenderRange={changeLazyRenderRange}
         onChangeBarSide={changeBarSide}
         onToggleBarVisible={() => setBarVisible(v => !v)}
         onScrollByInputStep={scrollByInputStep}

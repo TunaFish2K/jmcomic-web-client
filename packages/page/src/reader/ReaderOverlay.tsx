@@ -49,11 +49,13 @@ function SettingsPanel({
   direction,
   autoSnap,
   seamlessMode,
+  lazyRenderRange,
   barSide,
   barVisible,
   onToggleDirection,
   onToggleAutoSnap,
   onToggleSeamlessMode,
+  onChangeLazyRenderRange,
   onChangeBarSide,
   onToggleBarVisible,
   onClose,
@@ -61,11 +63,13 @@ function SettingsPanel({
   direction: ReadingDirection;
   autoSnap: boolean;
   seamlessMode: boolean;
+  lazyRenderRange: number;
   barSide: BarSide;
   barVisible: boolean;
   onToggleDirection: () => void;
   onToggleAutoSnap: () => void;
   onToggleSeamlessMode: () => void;
+  onChangeLazyRenderRange: (value: number) => void;
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onClose: () => void;
@@ -116,6 +120,22 @@ function SettingsPanel({
         </div>
 
         <div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-gray-300 text-xs">懒加载范围</span>
+            <span className="text-gray-400 text-xs">前后各 {lazyRenderRange} 页</span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={12}
+            step={1}
+            value={lazyRenderRange}
+            onChange={(e) => onChangeLazyRenderRange(Number.parseInt(e.target.value, 10))}
+            className="mt-2 h-1.5 w-full cursor-pointer accent-blue-500"
+          />
+        </div>
+
+        <div>
           <span className="text-gray-300 text-xs">信息栏位置</span>
           <div className="grid grid-cols-2 gap-1 mt-1.5">
             {(['left','right'] as BarSide[]).map(s => (
@@ -158,6 +178,7 @@ export function ReaderOverlay({
   hasNextChapter,
   autoSnap,
   seamlessMode,
+  lazyRenderRange,
   barSide,
   barVisible,
   onToggleVisibility,
@@ -170,6 +191,7 @@ export function ReaderOverlay({
   onToggleDirection,
   onToggleAutoSnap,
   onToggleSeamlessMode,
+  onChangeLazyRenderRange,
   onChangeBarSide,
   onToggleBarVisible,
   onScrollByInputStep,
@@ -187,6 +209,7 @@ export function ReaderOverlay({
   hasNextChapter: boolean;
   autoSnap: boolean;
   seamlessMode: boolean;
+  lazyRenderRange: number;
   barSide: BarSide;
   barVisible: boolean;
   onToggleVisibility: () => void;
@@ -199,6 +222,7 @@ export function ReaderOverlay({
   onToggleDirection: () => void;
   onToggleAutoSnap: () => void;
   onToggleSeamlessMode: () => void;
+  onChangeLazyRenderRange: (value: number) => void;
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onScrollByInputStep: (step: number) => void;
@@ -237,10 +261,11 @@ export function ReaderOverlay({
 
       {visible && showSettings && (
         <SettingsPanel
-          direction={direction} autoSnap={autoSnap} seamlessMode={seamlessMode}
+          direction={direction} autoSnap={autoSnap} seamlessMode={seamlessMode} lazyRenderRange={lazyRenderRange}
           barSide={barSide} barVisible={barVisible}
           onToggleDirection={onToggleDirection} onToggleAutoSnap={onToggleAutoSnap}
           onToggleSeamlessMode={onToggleSeamlessMode}
+          onChangeLazyRenderRange={onChangeLazyRenderRange}
           onChangeBarSide={onChangeBarSide} onToggleBarVisible={onToggleBarVisible}
           onClose={() => setShowSettings(false)}
         />

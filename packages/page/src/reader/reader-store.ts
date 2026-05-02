@@ -8,9 +8,11 @@ const DIRECTION_KEY = 'reading-direction';
 const AUTO_SNAP_KEY = 'reading-auto-snap';
 const BAR_SIDE_KEY = 'reading-bar-side';
 const SEAMLESS_MODE_KEY = 'reading-seamless-mode';
+const LAZY_RENDER_RANGE_KEY = 'reading-lazy-render-range';
 const ALBUM_CACHE_PREFIX = 'reader-album-cache:';
 const ALBUM_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const ALBUM_CACHE_MAX_ENTRIES = 100;
+const DEFAULT_LAZY_RENDER_RANGE = 4;
 
 export type ChapterProgress = {
   albumId: string;
@@ -141,6 +143,17 @@ export function saveSeamlessMode(enabled: boolean) {
 
 export function getSeamlessMode(): boolean {
   return localStorage.getItem(SEAMLESS_MODE_KEY) === '1';
+}
+
+export function saveLazyRenderRange(value: number) {
+  const normalized = Math.max(1, Math.min(12, Math.round(value)));
+  localStorage.setItem(LAZY_RENDER_RANGE_KEY, String(normalized));
+}
+
+export function getLazyRenderRange(): number {
+  const raw = Number.parseInt(localStorage.getItem(LAZY_RENDER_RANGE_KEY) ?? '', 10);
+  if (Number.isFinite(raw)) return Math.max(1, Math.min(12, raw));
+  return DEFAULT_LAZY_RENDER_RANGE;
 }
 
 export function saveBarSide(side: BarSide) {

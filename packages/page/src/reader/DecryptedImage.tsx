@@ -30,11 +30,13 @@ export function DecryptedImage({
   photo,
   onLoad,
   className,
+  style,
 }: {
   image: { name: string; url: string };
   photo: PhotoWithScrambleId;
   onLoad?: (blobUrl: string) => void;
   className?: string;
+  style?: React.CSSProperties;
 }) {
   const cacheKey = `${photo.id}/${image.name}`;
   const [blobUrl, setBlobUrl] = useState<string | null>(() => memoryCache.get(cacheKey) ?? null);
@@ -90,8 +92,15 @@ export function DecryptedImage({
   if (failed) return <div className={`bg-gray-800 ${className ?? ''}`} />;
   if (!blobUrl) return (
     <div
-      className={`bg-gray-900 bg-gradient-to-r from-gray-900 via-gray-700 to-gray-900 bg-[length:200%_100%] animate-shimmer ${className ?? ''}`}
-    />
+      className={`relative overflow-hidden bg-gray-900/60 ${className ?? ''}`}
+      style={style}
+    >
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur-sm">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-500/70 border-t-white" />
+        </div>
+      </div>
+    </div>
   );
 
   return (
@@ -99,8 +108,9 @@ export function DecryptedImage({
       src={blobUrl}
       alt=""
       className={className}
+      style={style}
       draggable={false}
-      onLoad={onLoad}
+      onLoad={() => onLoad?.(blobUrl!)}
       onError={() => setFailed(true)}
     />
   );
