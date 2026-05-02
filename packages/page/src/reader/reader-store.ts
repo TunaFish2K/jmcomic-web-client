@@ -1,3 +1,5 @@
+import type { Album } from '@tiny-client/shared';
+
 export type ReadingDirection = 'left-right' | 'top-down';
 export type BarSide = 'left' | 'right' | 'bottom';
 
@@ -6,6 +8,9 @@ const DIRECTION_KEY = 'reading-direction';
 const AUTO_SNAP_KEY = 'reading-auto-snap';
 const BAR_SIDE_KEY = 'reading-bar-side';
 const SEAMLESS_MODE_KEY = 'reading-seamless-mode';
+const ALBUM_CACHE_PREFIX = 'reader-album-cache:';
+const ALBUM_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const ALBUM_CACHE_MAX_ENTRIES = 100;
 
 export type ChapterProgress = {
   albumId: string;
@@ -15,6 +20,74 @@ export type ChapterProgress = {
   totalPages: number;
   updatedAt: number;
 };
+
+type CachedAlbum = {
+  album: Album;
+  updatedAt: number;
+};
+
+function listAlbumCacheKeys() {
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(ALBUM_CACHE_PREFIX)) keys.push(key);
+  }
+  return keys;
+}
+
+export function cleanupAlbumCache() {
+  const now = Date.now();
+  const entries: Array<{ key: string; updatedAt: number }> = [];
+
+  for (const key of listAlbumCacheKeys()) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<CachedAlbum>;
+      if (!parsed.album || typeof parsed.updatedAt !== 'number' || now - parsed.updatedAt > ALBUM_CACHE_TTL_MS) {
+        localStorage.removeItem(key);
+        continue;
+      }
+      entries.push({ key, updatedAt: parsed.updatedAt });
+    } catch {
+      localStorage.removeItem(key);
+    }
+  }
+
+  if (entries.length <= ALBUM_CACHE_MAX_ENTRIES) return;
+
+  entries
+    .sort((a, b) => a.updatedAt - b.updatedAt)
+    .slice(0, entries.length - ALBUM_CACHE_MAX_ENTRIES)
+    .forEach(({ key }) => localStorage.removeItem(key));
+}
+
+export function saveAlbumCache(albumId: string, album: Album) {
+  cleanupAlbumCache();
+  localStorage.setItem(
+    `${ALBUM_CACHE_PREFIX}${albumId}`,
+    JSON.stringify({ album, updatedAt: Date.now() } satisfies CachedAlbum),
+  );
+}
+
+export function getAlbumCache(albumId: string): Album | null {
+  cleanupAlbumCache();
+  const raw = localStorage.getItem(`${ALBUM_CACHE_PREFIX}${albumId}`);
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<CachedAlbum>;
+    if (!parsed.album || typeof parsed.updatedAt !== 'number') {
+      localStorage.removeItem(`${ALBUM_CACHE_PREFIX}${albumId}`);
+      return null;
+    }
+    return parsed.album;
+  } catch {
+    localStorage.removeItem(`${ALBUM_CACHE_PREFIX}${albumId}`);
+    return null;
+  }
+}
 
 export function saveReadingProgress(progress: ChapterProgress) {
   localStorage.setItem(

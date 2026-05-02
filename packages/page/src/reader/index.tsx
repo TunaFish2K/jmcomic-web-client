@@ -17,6 +17,8 @@ import {
   getBarSide,
   saveBarSide,
   saveReadingProgress,
+  getAlbumCache,
+  saveAlbumCache,
 } from './reader-store';
 import pLimit from 'p-limit';
 import { getSliceCount, reverseImageBySlice } from '@tiny-client/shared';
@@ -79,6 +81,8 @@ export default function ReaderPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
+  const initialAlbumRef = useRef(location.state?.album ?? (albumId ? getAlbumCache(albumId) : null));
+  const initialPhotoRef = useRef(location.state?.photo ?? null);
 
   const isSeries = location.state?.isSeries === true;
   const seriesItems = (location.state?.seriesItems as ChapterInfo[] | undefined) ?? [];
@@ -87,7 +91,20 @@ export default function ReaderPage() {
     queryKey: ['album', albumId],
     queryFn: () => getAlbum(albumId!),
     enabled: !!albumId,
+    initialData: initialAlbumRef.current,
   });
+
+  useEffect(() => {
+    initialAlbumRef.current = location.state?.album ?? (albumId ? getAlbumCache(albumId) : null);
+  }, [albumId, location.state]);
+
+  useEffect(() => {
+    initialPhotoRef.current = location.state?.photo ?? null;
+  }, [location.state]);
+
+  useEffect(() => {
+    if (albumId && album) saveAlbumCache(albumId, album);
+  }, [albumId, album]);
 
   const sortedChapters: ChapterInfo[] = useMemo(() =>
     isSeries && seriesItems.length > 0
@@ -137,6 +154,7 @@ export default function ReaderPage() {
     queryKey: ['photo', currentChapterId],
     queryFn: () => getPhoto(currentChapterId),
     enabled: !!currentChapterId,
+    initialData: currentChapterId === albumId ? initialPhotoRef.current : undefined,
   });
 
   const images = photo?.images ?? [];

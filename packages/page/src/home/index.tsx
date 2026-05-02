@@ -17,6 +17,7 @@ import {
 } from "@tiny-client/shared";
 import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
+import { saveAlbumCache } from "../reader/reader-store";
 
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
 const coverLimit = pLimit(6);
@@ -661,6 +662,10 @@ function AlbumModal({ albumId, cachedData, onClose }: {
             ? `${photo.images.length} 页`
             : '章节数据待加载';
 
+    useEffect(() => {
+        if (album) saveAlbumCache(albumId, album);
+    }, [album, albumId]);
+
     return (
         /* backdrop */
         <div
@@ -786,7 +791,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                                         size="sm"
                                                         variant="secondary"
                                                         className="text-xs w-full mt-2"
-                                                        onPress={() => navigate(`/reader/${seriesItem.id}`, { state: { isSeries: true, seriesItems: sortedSeries.map((s) => ({ id: s.id, name: `${album!.name} - ${s.name}`, order: parseSeriesOrder(s.sort) })) } })}
+                                                        onPress={() => navigate(`/reader/${seriesItem.id}`, { state: { isSeries: true, album, seriesItems: sortedSeries.map((s) => ({ id: s.id, name: `${album!.name} - ${s.name}`, order: parseSeriesOrder(s.sort) })) } })}
                                                     >
                                                         <BookOpen size={14} className="mr-1" />在线观看
                                                     </Button>
@@ -808,7 +813,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                         size="sm"
                                         variant="secondary"
                                         className="text-xs w-full mt-2"
-                                        onPress={() => navigate(`/reader/${albumId}`)}
+                                        onPress={() => navigate(`/reader/${albumId}`, { state: { album, photo } })}
                                     >
                                         <BookOpen size={14} className="mr-1" />在线观看
                                     </Button>
