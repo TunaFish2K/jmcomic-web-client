@@ -1195,7 +1195,7 @@ export default function Home() {
                                         if (query.trim()) pushSearch(query, v, orderBy, timeFilter, 1);
                                     }}
                                     placeholder="选择类别"
-                                    isDisabled={isFetching}
+                                    
                                 >
                                     <Select.Trigger className="h-full rounded-none border-none shadow-none bg-transparent px-3 flex items-center justify-center gap-1">
                                         <Select.Value className="text-center flex-1" />
@@ -1218,14 +1218,14 @@ export default function Home() {
                                 value={query}
                                 onChange={handleQueryChange}
                                 className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
-                                disabled={isFetching}
+                                
                             />
                             <InputGroup.Suffix className="p-0 flex-shrink-0">
                                 <Button
                                     type="submit"
                                     className="rounded-none px-4 flex-shrink-0"
                                     style={{ height: '48px' }}
-                                    variant="primary"
+variant="primary"
                                     isDisabled={isFetching}
                                 >
                                     <SearchIcon size={18} />
@@ -1244,7 +1244,7 @@ export default function Home() {
                                     setOrderBy(v);
                                     if (query.trim()) pushSearch(urlQuery, category, v, timeFilter, 1);
                                 }}
-                                isDisabled={isFetching}
+                                
                             >
                                 <Select.Trigger className="h-10 text-sm"><Select.Value /><Select.Indicator /></Select.Trigger>
                                 <Select.Popover>
@@ -1264,7 +1264,7 @@ export default function Home() {
                                     setTimeFilter(v);
                                     if (query.trim()) pushSearch(urlQuery, category, orderBy, v, 1);
                                 }}
-                                isDisabled={isFetching}
+                                
                             >
                                 <Select.Trigger className="h-10 text-sm"><Select.Value /><Select.Indicator /></Select.Trigger>
                                 <Select.Popover>
