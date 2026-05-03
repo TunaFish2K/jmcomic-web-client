@@ -43,8 +43,8 @@ export default defineConfig({
       },
       manifest: {
         name: 'JM Web Client',
-        short_name: 'JMComic',
-        description: '禁漫天堂 Web 客户端',
+        short_name: 'JM',
+        description: 'JM第三方客户端',
         theme_color: '#ffffff',
         background_color: '#ffffff',
         display: 'standalone',
