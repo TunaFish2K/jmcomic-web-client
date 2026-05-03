@@ -1,76 +1,119 @@
 # jmcomic-web-client
 
-## 需求
+禁漫动漫在线阅读与下载客户端。
 
-### 自动后端域名获取
+## 功能
 
-### 搜索
+- **搜索**: 支持按作品名、作者、标签、角色搜索，过滤与排序
+- **在线阅读**: 支持横向/纵向阅读模式，自动吸附/无缝模式切换
+- **章节管理**: 多章节话数快速导航
+- **本地缓存**: 阅读进度与偏好设置本地持久化
 
-如果搜索存在的车牌号，结果为仅有对应本子。
+## 技术栈
 
-搜索对象：本子标题，来源作品，作者，标签，登场人物。
+- **前端**: React 19 + Vite + TailwindCSS + React Router + TanStack Query
+- **后端**: Cloudflare Workers (Hono)
+- **部署**: Cloudflare Pages (前端) + Cloudflare Workers (后端 API)
 
-排序：最新，最多点阅，最多图片，最多爱心。
+## 快速部署
 
-时间筛选：全部，今天，这周，这个月。
+### 前端 (page)
 
-分类筛选（次要目标）
+前端通过 GitHub Actions 自动部署到 Cloudflare Pages。
 
-### 本子
+1. 在 Cloudflare Dashboard 创建 pages 项目，关联 GitHub 仓库
+2. 构建命令: `pnpm run page:build`
+3. 输出目录: `packages/page/dist`
 
-要查询并展示的内容：标题，作者，标签，封面，所有话。
+首次推送后自动触发部署，之后每次 push 到 main 分支都会自动部署。
 
-### 章节
+### 后端 (worker)
 
-支持下载并解密，以`pdf`，`zip`，或`cbz`格式导出。
+后端需要手动部署。
 
-### 搜索页面
-可以输入搜索词；可以选择搜索对象，排序，时间限制。  
+```bash
+# 进入 worker 目录
+cd packages/worker
 
-在搜索页面展示搜索结果，在顶部和底部显示翻页控件。
+# 部署
+wrangler deploy
+```
 
-搜索结果包含标题，作者，编号。以紧凑形式排列。
-## 实现计划
+首次部署前需要配置 `wrangler.toml` 或环境变量：
 
-可能会随着开发过程中的评估改变。
+```bash
+# 方式一: 环境变量
+export CF_API_TOKEN="你的 Cloudflare API Token"
+export CF_ACCOUNT_ID="你的 Account ID"
 
-### 阶段一 禁漫客户端
+# 方式二: 直接部署交互式配置
+wrangler deploy
+```
 
-- [x] 客户端封装
-    - [x] 存储请求共用数据，提供基础功能的函数
-- [x] 解密与认证模块
-    - [x] 存储用于生成以下内容的secrets
-    - [x] 发送请求时头部需要的`token`和`tokenparam`
-    - [x] 使用`aes-256-ecb`与`token`对请求结果进行解密
-- [x] 可用域名获取
-    - [x] 从CDN读取加密数据
-    - [x] 用解密模块获得可用域名
-        - 密钥为md5(SECRET_DOMAIN_SERVER)
-    - [x] 测试可用域名
-- [x] 通用数据的获取
-    - [x] 通过认证模块请求`/setting`获取数据并用解密模块解密（下面不再赘述）
-    - [x] 保存当前版本，图片CDN，Cookie
-- [x] 搜索功能的编写
-    - [x] 将用户搜索参数转为查询，先支持搜索对象，排序和时间筛选
-    - [x] 调用查询接口
-    - [x] 列出查询结果
-- [x] 查询本子
-    - [x] 调用接口获得返回内容
-    - [x] 提取上述需要展示的内容并返回
-- [x] 章节的查询与下载
-    - [x] 调用接口获得返回内容
-    - [x] 得到标题，编号，每页的文件名和拼接的URL，scrambleId
+部署完成后会返回 worker 域名，格式为 `https://xxx.workers.dev`。
 
-### 阶段二 数据处理
+## 本地开发
 
-- [x] 下载章节中的图片，排除无法下载的图片（比如不能跨域的gif）
-- [x] 根据章节的id和scrambleId计算图片被切成了多少份（sliceCount）
-- [x] 根据sliceCount复原图片
-- [x] 将图片打包为pdf
-- [x] 将图片打包为zip
-- [x] 实现下载文件接口
+```bash
+# 安装依赖
+pnpm install
 
-### 阶段三 前端
-- [ ] 配置路由
-- [ ] 搜索页面
-    - [ ]
+# 同时启动 worker 和 page (推荐)
+pnpm run dev
+
+# 或只启动 page
+pnpm run page:dev
+```
+
+.env 配置示例：
+
+```bash
+# .env 文件 (page 目录)
+VITE_BACKEND_URL=http://localhost:8787
+```
+
+## 项目结构
+
+```
+jmcomic-web-client/
+├── packages/
+│   ├── page/           # 前端页面 (React + Vite)
+│   │   ├── src/
+│   │   │   ├── home/   # 搜索主页
+│   │   │   ├── reader/ # 阅读器
+│   │   │   └── api.ts  # API 调用
+│   │   └── dist/       # 构建输出
+│   │
+│   └── worker/         # 后端 API (Cloudflare Workers + Hono)
+│       ├── src/
+│       │   ├── index.ts
+│       │   ├── api/    # API 路由
+│       │   ├── lib/    # 工具函数
+│       │   └── pages/  # HTML 页面路由
+│       └── wrangler.toml
+│
+├── scripts/             # 构建脚本
+└── package.json        # Workspace 配置
+```
+
+## 设置项
+
+阅读器支持以下设置（本地持久化）：
+
+| 设置项 | 说明 | 默认值 |
+|------|------|--------|
+| 阅读方向 | 横向翻页 / 纵向滚动 | 横向翻页 |
+| 自动吸附 | 强制每页停靠 | 开启 |
+| 无缝模式 | 连续滚动，不吸附 | 关闭 |
+| 懒加载范围 | 前后加载页数 | 4 页 |
+| 信息栏位置 | 底部 / 左侧 / 右侧 | 底部 |
+
+## 已知限制
+
+- 部分地区可能无法访问图片 CDN
+- 下载功能需要浏览器支持 Service Worker / Web Worker
+- 部分复杂漫画可能出现解密失败
+
+## License
+
+MIT
