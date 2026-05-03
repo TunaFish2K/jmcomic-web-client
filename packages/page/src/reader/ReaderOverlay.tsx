@@ -33,7 +33,7 @@ function ChapterDrawer({
               key={ch.id}
               onClick={() => { onGoTo(ch.id); onClose(); }}
               className={`w-full text-left px-4 py-3 text-sm border-b border-gray-800 hover:bg-gray-800 transition-colors ${
-                ch.id === currentChapterId ? 'text-blue-400 bg-gray-800' : 'text-gray-300'
+                ch.id === currentChapterId ? 'text-brand-400 bg-gray-800' : 'text-gray-300'
               }`}
             >
               <span className="line-clamp-1">{ch.name}</span>
@@ -103,7 +103,7 @@ function SettingsPanel({
           <button
             onClick={onToggleAutoSnap}
             disabled={seamlessMode}
-            className={`relative w-9 h-5 rounded-full transition-colors ${autoSnap ? 'bg-blue-500' : 'bg-gray-600'} ${seamlessMode ? 'opacity-40 cursor-default' : ''}`}
+            className={`relative w-9 h-5 rounded-full transition-colors ${autoSnap ? 'bg-brand-500' : 'bg-gray-600'} ${seamlessMode ? 'opacity-40 cursor-default' : ''}`}
           >
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
@@ -113,7 +113,7 @@ function SettingsPanel({
           <span className="text-gray-300 text-xs">无缝模式</span>
           <button
             onClick={onToggleSeamlessMode}
-            className={`relative w-9 h-5 rounded-full transition-colors ${seamlessMode ? 'bg-blue-500' : 'bg-gray-600'}`}
+            className={`relative w-9 h-5 rounded-full transition-colors ${seamlessMode ? 'bg-brand-500' : 'bg-gray-600'}`}
           >
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${seamlessMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
@@ -131,7 +131,7 @@ function SettingsPanel({
             step={1}
             value={lazyRenderRange}
             onChange={(e) => onChangeLazyRenderRange(Number.parseInt(e.target.value, 10))}
-            className="mt-2 h-1.5 w-full cursor-pointer accent-blue-500"
+            className="mt-2 h-1.5 w-full cursor-pointer accent-brand-500"
           />
         </div>
 
@@ -139,13 +139,13 @@ function SettingsPanel({
           <span className="text-gray-300 text-xs">信息栏位置</span>
           <div className="grid grid-cols-2 gap-1 mt-1.5">
             {(['left','right'] as BarSide[]).map(s => (
-              <button key={s} onClick={() => onChangeBarSide(s)} className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${barSide === s ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+              <button key={s} onClick={() => onChangeBarSide(s)} className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${barSide === s ? 'bg-brand-500/20 text-brand-400' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
                 {s === 'left' ? <MoveLeft size={12} /> : <MoveRight size={12} />}
                 {s === 'left' ? '左侧' : '右侧'}
               </button>
             ))}
             {(['bottom'] as BarSide[]).map(s => (
-              <button key={s} onClick={() => onChangeBarSide(s)} className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${barSide === s ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+              <button key={s} onClick={() => onChangeBarSide(s)} className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${barSide === s ? 'bg-brand-500/20 text-brand-400' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
                 <MoveDown size={12} />
                 下方
               </button>
@@ -155,7 +155,7 @@ function SettingsPanel({
 
         <div className="flex items-center justify-between">
           <span className="text-gray-300 text-xs">信息栏可见</span>
-          <button onClick={onToggleBarVisible} className={`relative w-9 h-5 rounded-full transition-colors ${barVisible ? 'bg-blue-500' : 'bg-gray-600'}`}>
+          <button onClick={onToggleBarVisible} className={`relative w-9 h-5 rounded-full transition-colors ${barVisible ? 'bg-brand-500' : 'bg-gray-600'}`}>
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${barVisible ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
         </div>
@@ -285,7 +285,7 @@ export function ReaderOverlay({
             {chapters.length > 1 && (
               <button onClick={() => setShowChapterDrawer(true)} className="text-white/80 hover:text-white p-1" title="章节列表"><Bookmark size={18} /></button>
             )}
-            <button onClick={() => setShowSettings(v => !v)} className={`p-1 transition-colors ${showSettings ? 'text-blue-400' : 'text-white/80 hover:text-white'}`} title="阅读设置"><Settings size={18} /></button>
+            <button onClick={() => setShowSettings(v => !v)} className={`p-1 transition-colors ${showSettings ? 'text-brand-400' : 'text-white/80 hover:text-white'}`} title="阅读设置"><Settings size={18} /></button>
           </div>
         </div>
       </div>
@@ -300,7 +300,7 @@ export function ReaderOverlay({
               <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="下一话"><ChevronRight size={16} /></button>
             </div>
             <div className="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 rounded-full transition-all duration-200" style={{ width: `${progressPct}%` }} />
+              <div className="h-full bg-brand-500 rounded-full transition-all duration-200" style={{ width: `${progressPct}%` }} />
             </div>
             <div className="flex items-center gap-1 text-white/40 text-xs shrink-0">
               <ChevronUp size={12} /><ChevronDown size={12} />
@@ -319,7 +319,7 @@ export function ReaderOverlay({
               <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="上一话"><ChevronUp size={14} /></button>
             </div>
             <div className="w-1 flex-1 bg-gray-700 rounded-full overflow-hidden">
-              <div className="w-full bg-blue-500 rounded-full transition-all duration-200" style={{ height: `${progressPct}%` }} />
+              <div className="w-full bg-brand-500 rounded-full transition-all duration-200" style={{ height: `${progressPct}%` }} />
             </div>
             <div className="flex flex-col items-center gap-0.5 text-white/40 text-xs">
               <ChevronLeft size={10} /><ChevronRight size={10} />

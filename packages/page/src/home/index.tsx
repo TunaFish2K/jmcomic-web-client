@@ -312,7 +312,7 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
     const stageText = (s: DownloadTask['stage']) =>
         ({ downloading: '下载图片', packaging: '打包中', completed: '完成', error: '错误' })[s];
     const stageColor = (s: DownloadTask['stage']) =>
-        ({ downloading: 'bg-blue-500', packaging: 'bg-yellow-500', completed: 'bg-green-500', error: 'bg-red-500' })[s];
+        ({ downloading: 'bg-brand-500', packaging: 'bg-yellow-500', completed: 'bg-green-500', error: 'bg-red-500' })[s];
 
     if (tasks.length === 0) return null;
 
@@ -551,8 +551,8 @@ function SeriesDownloadManager({ albumName, items }: {
     };
 
     return (
-        <div className="space-y-3 rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/20 p-3">
-            <div className="text-xs text-blue-700 dark:text-blue-200">
+        <div className="space-y-3 rounded-lg border border-brand-200 dark:border-brand-900/60 bg-brand-50/70 dark:bg-brand-950/20 p-3">
+            <div className="text-xs text-brand-700 dark:text-brand-200">
                 可选范围下载。支持逐话分别导出，也支持把所选章节整合为一个文件。
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -729,7 +729,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                     <div className="text-xs text-gray-400 mb-1">标签</div>
                                     <div className="flex flex-wrap gap-1">
                                         {album!.tags.map(t => (
-                                            <span key={t} className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded text-xs">{t}</span>
+                                            <span key={t} className="px-2 py-0.5 bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded text-xs">{t}</span>
                                         ))}
                                     </div>
                                 </div>
@@ -1293,10 +1293,10 @@ variant="primary"
 
                     {/* ── direct match ── */}
                     {redirectAid && (
-                        <div className="shrink-0 mb-3 border dark:border-gray-700 rounded-lg bg-blue-50 dark:bg-blue-900/30 overflow-hidden">
-                            <div className="p-2 bg-blue-100 dark:bg-blue-900/40 text-sm font-medium text-blue-800 dark:text-blue-200">搜索到直接匹配的本子</div>
+                        <div className="shrink-0 mb-3 border dark:border-gray-700 rounded-lg bg-brand-50 dark:bg-brand-900/30 overflow-hidden">
+                            <div className="p-2 bg-brand-100 dark:bg-brand-900/40 text-sm font-medium text-brand-800 dark:text-brand-200">搜索到直接匹配的本子</div>
                             <div
-                                className="p-3 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                className="p-3 cursor-pointer hover:bg-brand-50 dark:hover:bg-brand-900/20"
                                 onClick={() => setModalAlbumId(redirectAid)}
                             >
                                 <div className="flex gap-3 items-center">
@@ -1326,7 +1326,7 @@ variant="primary"
                             {isFetching && (
                                 <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-start justify-center pt-20 z-10">
                                     <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                                        <div className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin" />
+                                        <div className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-brand-500 rounded-full animate-spin" />
                                         <span className="text-sm">加载中...</span>
                                     </div>
                                 </div>

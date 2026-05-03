@@ -3,6 +3,19 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+    --color-brand: #00dd99;
+    --color-brand-50: #e6fff9;
+    --color-brand-100: #b3ffe8;
+    --color-brand-200: #80ffd7;
+    --color-brand-300: #4dffc6;
+    --color-brand-400: #1affb5;
+    --color-brand-500: #00dd99;
+    --color-brand-600: #00b880;
+    --color-brand-700: #008a5e;
+    --color-brand-800: #005c3c;
+    --color-brand-900: #002e1e;
+    --color-brand-950: #00170f;
+
     --animate-shimmer: shimmer 1.8s ease-in-out infinite;
 
     @keyframes shimmer {
