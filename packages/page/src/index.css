@@ -3,6 +3,31 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+    --color-gray-50: oklch(98.5% 0.001 106.423);
+    --color-gray-100: oklch(97% 0.001 106.424);
+    --color-gray-200: oklch(92.3% 0.003 48.717);
+    --color-gray-300: oklch(86.9% 0.005 56.366);
+    --color-gray-400: oklch(70.9% 0.01 56.259);
+    --color-gray-500: oklch(55.3% 0.013 58.071);
+    --color-gray-600: oklch(44.4% 0.011 73.639);
+    --color-gray-700: oklch(37.4% 0.01 67.558);
+    --color-gray-800: oklch(26.8% 0.007 34.298);
+    --color-gray-900: oklch(21.6% 0.006 56.043);
+    --color-gray-950: oklch(14.7% 0.004 49.25);
+
+    --color-primary: #00dd99;
+    --color-primary-50: #e6fff9;
+    --color-primary-100: #b3ffe8;
+    --color-primary-200: #80ffd7;
+    --color-primary-300: #4dffc6;
+    --color-primary-400: #1affb5;
+    --color-primary-500: #00dd99;
+    --color-primary-600: #00b880;
+    --color-primary-700: #008a5e;
+    --color-primary-800: #005c3c;
+    --color-primary-900: #002e1e;
+    --color-primary-950: #00170f;
+
     --color-brand: #00dd99;
     --color-brand-50: #e6fff9;
     --color-brand-100: #b3ffe8;
@@ -30,17 +55,6 @@
 
 @import "@heroui/styles";
 
-/* Input focus ring override */
-[data-heroui-input-group][data-focus-visible] {
-    --tw-ring-color: var(--color-brand-500) !important;
-}
-
-input:focus {
-    outline: none;
-    --tw-ring-color: var(--color-brand-500);
-    box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)), var(--tw-ring-shadow);
-}
-
 html,
 body,
 #root {
@@ -52,15 +66,41 @@ body,
 }
 
 html {
-    background-color: #f3f4f6;
+    background-color: oklch(97% 0.001 106.424);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
 
 html.dark,
 html.dark body {
-    background-color: #030712;
-    color: #f3f4f6;
+    --color-primary: #00b884;
+    --color-primary-50: #d9fff3;
+    --color-primary-100: #a6f5d8;
+    --color-primary-200: #73e8bf;
+    --color-primary-300: #40d9a5;
+    --color-primary-400: #12c98f;
+    --color-primary-500: #00b884;
+    --color-primary-600: #00966c;
+    --color-primary-700: #007050;
+    --color-primary-800: #004d37;
+    --color-primary-900: #002e21;
+    --color-primary-950: #00170f;
+
+    --color-brand: #00b884;
+    --color-brand-50: #d9fff3;
+    --color-brand-100: #a6f5d8;
+    --color-brand-200: #73e8bf;
+    --color-brand-300: #40d9a5;
+    --color-brand-400: #12c98f;
+    --color-brand-500: #00b884;
+    --color-brand-600: #00966c;
+    --color-brand-700: #007050;
+    --color-brand-800: #004d37;
+    --color-brand-900: #002e21;
+    --color-brand-950: #00170f;
+
+    background-color: oklch(14.7% 0.004 49.25);
+    color: oklch(98.5% 0.001 106.423);
     color-scheme: dark;
 }
 
@@ -79,7 +119,7 @@ html.dark input:-webkit-autofill,
 html.dark input:-webkit-autofill:hover,
 html.dark input:-webkit-autofill:focus,
 html.dark input:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 1000px #030712 inset !important;
+    -webkit-box-shadow: 0 0 0 1000px oklch(14.7% 0.004 49.25) inset !important;
 }
 
 /* 扫描当前包的源码 */

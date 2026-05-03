@@ -371,6 +371,9 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
 
 // ─── Download buttons ────────────────────────────────────────────────────────
 
+const previewActionButtonClass = "text-xs flex-1 border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 data-[hovered=true]:bg-brand-100 dark:border-brand-900/60 dark:bg-brand-950/30 dark:text-brand-300 dark:hover:bg-brand-900/40 dark:data-[hovered=true]:bg-brand-900/40";
+const previewFullActionButtonClass = "text-xs w-full mt-2 border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100 data-[hovered=true]:bg-brand-100 dark:border-brand-900/60 dark:bg-brand-950/30 dark:text-brand-300 dark:hover:bg-brand-900/40 dark:data-[hovered=true]:bg-brand-900/40";
+
 function DownloadButtons({ items, label }: {
     items: DownloadTarget[];
     label?: string;
@@ -414,13 +417,13 @@ function DownloadButtons({ items, label }: {
         <div className="mt-3 space-y-2">
             <div className="text-gray-500 dark:text-gray-400 text-xs">{label ?? '下载格式:'}</div>
             <div className="flex gap-2">
-                <Button size="sm" variant="secondary" className="text-xs flex-1" onPress={() => handleDownload('pdf')}>
+                <Button size="sm" variant="secondary" className={previewActionButtonClass} onPress={() => handleDownload('pdf')}>
                     <FileText size={14} className="mr-1" />{isBatch ? '全部 PDF' : 'PDF'}
                 </Button>
-                <Button size="sm" variant="secondary" className="text-xs flex-1" onPress={() => handleDownload('zip')}>
+                <Button size="sm" variant="secondary" className={previewActionButtonClass} onPress={() => handleDownload('zip')}>
                     <FileArchive size={14} className="mr-1" />{isBatch ? '全部 ZIP' : 'ZIP'}
                 </Button>
-                <Button size="sm" variant="secondary" className="text-xs flex-1" onPress={() => handleDownload('cbz')}>
+                <Button size="sm" variant="secondary" className={previewActionButtonClass} onPress={() => handleDownload('cbz')}>
                     <Download size={14} className="mr-1" />{isBatch ? '全部 CBZ' : 'CBZ'}
                 </Button>
             </div>
@@ -729,7 +732,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                     <div className="text-xs text-gray-400 mb-1">标签</div>
                                     <div className="flex flex-wrap gap-1">
                                         {album!.tags.map(t => (
-                                            <span key={t} className="px-2 py-0.5 bg-brand-100 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300 rounded text-xs">{t}</span>
+                                            <span key={t} className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded text-xs">{t}</span>
                                         ))}
                                     </div>
                                 </div>
@@ -790,7 +793,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                                     <Button
                                                         size="sm"
                                                         variant="secondary"
-                                                        className="text-xs w-full mt-2"
+                                                        className={previewFullActionButtonClass}
                                                         onPress={() => navigate(`/reader/${seriesItem.id}`, { state: { isSeries: true, album, seriesItems: sortedSeries.map((s) => ({ id: s.id, name: `${album!.name} - ${s.name}`, order: parseSeriesOrder(s.sort) })) } })}
                                                     >
                                                         <BookOpen size={14} className="mr-1" />在线观看
@@ -812,7 +815,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                     <Button
                                         size="sm"
                                         variant="secondary"
-                                        className="text-xs w-full mt-2"
+                                        className={previewFullActionButtonClass}
                                         onPress={() => navigate(`/reader/${albumId}`, { state: { album, photo } })}
                                     >
                                         <BookOpen size={14} className="mr-1" />在线观看
@@ -1182,7 +1185,7 @@ export default function Home() {
 
                     {/* ── search bar ── */}
                     <form onSubmit={handleSubmit} className="shrink-0 mb-3">
-                        <InputGroup className="h-12 w-full" isInvalid={!!queryError}>
+                        <InputGroup className="h-12 w-full focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500" isInvalid={!!queryError}>
                             <InputGroup.Prefix className="p-0 flex-shrink-0">
                                 <Select
                                     aria-label="搜索类别"
@@ -1223,9 +1226,9 @@ export default function Home() {
                             <InputGroup.Suffix className="p-0 flex-shrink-0">
                                 <Button
                                     type="submit"
-                                    className="rounded-none px-4 flex-shrink-0"
+                                    className="rounded-none px-4 flex-shrink-0 bg-brand-500 text-white hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700"
                                     style={{ height: '48px' }}
-variant="primary"
+                                    variant="primary"
                                     isDisabled={isFetching}
                                 >
                                     <SearchIcon size={18} />
