@@ -289,7 +289,20 @@ export function ReaderOverlay({
     return Math.round(pct * (totalPages - 1));
   }, [totalPages]);
 
+  const tooltipTimerRef = useRef<number | null>(null);
+
+  const showTooltipTemporarily = useCallback(() => {
+    if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = window.setTimeout(() => {
+      setDragging(false);
+      setDisplayPage(null);
+      dragPageRef.current = -1;
+      tooltipTimerRef.current = null;
+    }, 800);
+  }, []);
+
   const onDragStart = useCallback((clientX: number, clientY: number) => {
+    if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
     setDragging(true);
     const page = pageFromEvent(clientX, clientY);
     dragPageRef.current = page;
@@ -305,12 +318,10 @@ export function ReaderOverlay({
   }, [pageFromEvent, onSeekPage]);
 
   const onDragEnd = useCallback(() => {
-    setDragging(false);
     const page = dragPageRef.current;
     if (page >= 0) onSeekPage?.(page);
-    dragPageRef.current = -1;
-    setDisplayPage(null);
-  }, [onSeekPage]);
+    showTooltipTemporarily();
+  }, [onSeekPage, showTooltipTemporarily]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -333,17 +344,30 @@ export function ReaderOverlay({
     };
   }, [dragging, onDragMove, onDragEnd]);
 
-  // ─── Page dots ─────────────────────────────────────────────────
+  // ─── Adaptive page dots ────────────────────────────────────────
+  const [maxDots, setMaxDots] = useState(30);
+  useEffect(() => {
+    const update = () => setMaxDots(window.innerWidth < 640 ? 10 : 30);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
+    };
+  }, []);
+
   const dotPositions = useMemo(() => {
     if (totalPages < 2) return [];
-    const maxDots = 30;
     const step = Math.max(1, Math.floor(totalPages / maxDots));
     const last = totalPages - 1;
     const dots: number[] = [0];
     for (let i = step; i < last; i += step) dots.push(i);
     if (dots[dots.length - 1] !== last) dots.push(last);
     return dots;
-  }, [totalPages]);
+  }, [totalPages, maxDots]);
 
   // ────────────────────────────────────────────────────────────────
 
