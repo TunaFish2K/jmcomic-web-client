@@ -287,6 +287,20 @@ export function ReaderOverlay({
     }, 800);
   }, []);
 
+  const onDragMove = useCallback((clientX: number, clientY: number) => {
+    const page = pageFromEvent(clientX, clientY);
+    if (page === dragPageRef.current) return;
+    dragPageRef.current = page;
+    setDisplayPage(page);
+    onSeekPage?.(page);
+  }, [pageFromEvent, onSeekPage]);
+
+  const onDragEnd = useCallback(() => {
+    const page = dragPageRef.current;
+    if (page >= 0) onSeekPage?.(page);
+    showTooltipTemporarily();
+  }, [onSeekPage, showTooltipTemporarily]);
+
   const onDragStart = useCallback((clientX: number, clientY: number) => {
     if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
     setDragging(true);
@@ -313,20 +327,6 @@ export function ReaderOverlay({
     window.addEventListener('touchmove', onMove, { passive: true });
     window.addEventListener('touchend', onEnd);
   }, [pageFromEvent, onDragMove, onDragEnd]);
-
-  const onDragMove = useCallback((clientX: number, clientY: number) => {
-    const page = pageFromEvent(clientX, clientY);
-    if (page === dragPageRef.current) return;
-    dragPageRef.current = page;
-    setDisplayPage(page);
-    onSeekPage?.(page);
-  }, [pageFromEvent, onSeekPage]);
-
-  const onDragEnd = useCallback(() => {
-    const page = dragPageRef.current;
-    if (page >= 0) onSeekPage?.(page);
-    showTooltipTemporarily();
-  }, [onSeekPage, showTooltipTemporarily]);
 
   // ─── Adaptive page dots ────────────────────────────────────────
   const [maxDots, setMaxDots] = useState(30);
