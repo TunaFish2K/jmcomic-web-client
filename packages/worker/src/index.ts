@@ -7,6 +7,24 @@ const BATCH_PHOTO_UPSTREAM_CONCURRENCY = 4;
 const BATCH_ALBUM_UPSTREAM_CONCURRENCY = 3;
 const CLIENT_DOMAIN_RETRY_COUNT = 3;
 
+// ─── In-memory album data cache ──────────────────────────────────
+const ALBUM_CACHE_TTL_MS = 60_000;
+const albumDataCache = new Map<string, { data: unknown; ts: number }>();
+
+function cacheGet<T>(key: string): T | undefined {
+	const entry = albumDataCache.get(key);
+	if (!entry) return undefined;
+	if (Date.now() - entry.ts > ALBUM_CACHE_TTL_MS) {
+		albumDataCache.delete(key);
+		return undefined;
+	}
+	return entry.data as T;
+}
+
+function cacheSet(key: string, data: unknown) {
+	albumDataCache.set(key, { data, ts: Date.now() });
+}
+
 type WorkerBatchErrorStage = 'client_init' | 'get_album' | 'get_photo' | 'get_scramble_id' | 'unknown';
 
 type WorkerBatchError = {
@@ -186,7 +204,7 @@ async function fetchAlbumWithRetry(
 
 // Simple router
 export default {
-	async fetch(request: Request, _env: Env, _ctx: ExecutionContext): Promise<Response> {
+	async fetch(request: Request, _env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 
 		if (request.method === 'OPTIONS') {
@@ -207,6 +225,45 @@ export default {
 					time: (url.searchParams.get('time') as any) || 'a',
 					mainTag: (Number(url.searchParams.get('mainTag')) as any) || 0,
 				});
+
+				// ── Warmup: prefetch album data in background ──────
+				if (url.searchParams.get('warmup') === '1') {
+					const sr = result as any;
+					const warmupIds: string[] = [];
+					if (sr.content?.length > 0) warmupIds.push(...sr.content.map((item: any) => item.id));
+					if (sr.redirect_aid) warmupIds.push(sr.redirect_aid);
+
+					if (warmupIds.length > 0) {
+						const uncachedIds = warmupIds.filter(
+							(id: string) => !albumDataCache.has(id) || Date.now() - albumDataCache.get(id)!.ts > ALBUM_CACHE_TTL_MS,
+						);
+
+						if (uncachedIds.length > 0) {
+							const chunks: string[][] = [];
+							for (let i = 0; i < uncachedIds.length; i += BATCH_ALBUM_MAX_IDS) {
+								chunks.push(uncachedIds.slice(i, i + BATCH_ALBUM_MAX_IDS));
+							}
+
+							const selfBaseUrl = `${url.protocol}//${url.host}`;
+
+							ctx.waitUntil(
+								(async () => {
+									try {
+										await mapWithConcurrency(chunks, BATCH_ALBUM_UPSTREAM_CONCURRENCY, async (chunk) => {
+											const batchUrl = new URL('/batch-album', selfBaseUrl);
+											batchUrl.searchParams.set('ids', chunk.join(','));
+											const res = await fetch(batchUrl.toString());
+											if (!res.ok) console.warn('Warmup batch-album failed', res.status, await res.text());
+										});
+									} catch (err) {
+										console.error('Warmup error:', err);
+									}
+								})(),
+							);
+						}
+					}
+				}
+
 				return Response.json(result, { headers: corsHeaders });
 			}
 
@@ -280,9 +337,21 @@ export default {
 
 			const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
 			if (ids.length === 0) return new Response('Empty ids', { status: 400, headers: corsHeaders });
-			// Keep headroom here too: 2 fixed (domain server + /setting) + 3 per ID.
 			if (ids.length > BATCH_ALBUM_MAX_IDS) {
 				return new Response(`Too many ids, max ${BATCH_ALBUM_MAX_IDS}`, { status: 400, headers: corsHeaders });
+			}
+
+			// ── Check in-memory cache ────────────────────────────
+			type BatchAlbumItem = { albumId: string; album: unknown; photo: unknown; error?: WorkerBatchError };
+			const cached: BatchAlbumItem[] = [];
+			const remainingIds: string[] = [];
+			for (const id of ids) {
+				const entry = cacheGet<BatchAlbumItem>(id);
+				if (entry) cached.push(entry);
+				else remainingIds.push(id);
+			}
+			if (remainingIds.length === 0) {
+				return Response.json(cached, { headers: corsHeaders });
 			}
 
 			// getClient() is called once but its failure is caught per-item so one bad
@@ -298,8 +367,8 @@ export default {
 				return retryClientPromise;
 			};
 
-			const results = await mapWithConcurrency(
-				ids,
+			const freshResults = await mapWithConcurrency(
+				remainingIds,
 				BATCH_ALBUM_UPSTREAM_CONCURRENCY,
 				async (albumId) => {
 					try {
@@ -314,7 +383,12 @@ export default {
 				},
 			);
 
-			return Response.json(results, { headers: corsHeaders });
+			// ── Write fresh results to cache ─────────────────────
+			for (const item of freshResults) {
+				if (!item.error && item.album !== null) cacheSet(item.albumId, item);
+			}
+
+			return Response.json([...cached, ...freshResults], { headers: corsHeaders });
 		}
 
 			return new Response('Not found', { status: 404, headers: corsHeaders });

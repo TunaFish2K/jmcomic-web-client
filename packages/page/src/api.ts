@@ -79,6 +79,7 @@ export async function search(
     url.searchParams.set("orderBy", options.orderBy);
     url.searchParams.set("time", options.time);
     url.searchParams.set("mainTag", options.mainTag.toString());
+    url.searchParams.set("warmup", "1");
     const res = await fetch(url);
     if (!res.ok) {
         const errorMessage = await res.text();
