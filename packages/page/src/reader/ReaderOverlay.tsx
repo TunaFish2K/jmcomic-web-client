@@ -428,20 +428,20 @@ export function ReaderOverlay({
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
             >
+              {totalPages > 1 && dotPositions.map((p, i) => {
+                const leftPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
+                const isBefore = p <= activePage;
+                return (
+                  <div
+                    key={i}
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
+                    style={{ left: `${leftPct}%` }}
+                  >
+                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
+                  </div>
+                );
+              })}
               <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                {totalPages > 1 && dotPositions.map((p, i) => {
-                  const leftPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
-                  const isBefore = p <= activePage;
-                  return (
-                    <div
-                      key={i}
-                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
-                      style={{ left: `${leftPct}%` }}
-                    >
-                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
-                    </div>
-                  );
-                })}
                 <div
                   className="h-full bg-brand-500 rounded-full relative flex items-center"
                   style={{
@@ -475,20 +475,20 @@ export function ReaderOverlay({
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
             >
+              {totalPages > 1 && dotPositions.map((p, i) => {
+                const topPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
+                const isBefore = p <= activePage;
+                return (
+                  <div
+                    key={i}
+                    className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10"
+                    style={{ top: `${topPct}%` }}
+                  >
+                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
+                  </div>
+                );
+              })}
               <div className="w-2 mx-1.5 h-full bg-gray-700/50 rounded-full overflow-hidden">
-                {totalPages > 1 && dotPositions.map((p, i) => {
-                  const topPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
-                  const isBefore = p <= activePage;
-                  return (
-                    <div
-                      key={i}
-                      className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10"
-                      style={{ top: `${topPct}%` }}
-                    >
-                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
-                    </div>
-                  );
-                })}
                 <div
                   className="w-full bg-brand-500 rounded-full relative flex justify-center"
                   style={{
