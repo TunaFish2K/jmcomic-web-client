@@ -440,15 +440,16 @@ export function ReaderOverlay({
               >
                 <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-brand-500 rounded-full relative flex items-center"
+                      className="h-full bg-brand-500 rounded-full"
                       style={{
                         width: `${activePct}%`,
                         transition: dragging ? 'none' : undefined,
                       }}
-                    >
-                      <div className="absolute right-0 w-5 h-5 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
-                    </div>
+                    />
                   </div>
+                <div className="absolute w-5 h-5 bg-brand-500 rounded-full shadow-md opacity-100 ring-2 ring-brand-700/30 pointer-events-none"
+                  style={{ left: `${activePct}%`, top: '50%', transform: 'translate(-50%, -50%)' }}
+                />
               </div>
             </div>
           </div>
@@ -476,15 +477,16 @@ export function ReaderOverlay({
             >
               <div className="w-2 mx-1.5 h-full bg-gray-700/50 rounded-full overflow-hidden">
                 <div
-                  className="w-full bg-brand-500 rounded-full relative flex justify-center"
+                  className="w-full bg-brand-500 rounded-full"
                   style={{
                     height: `${activePct}%`,
                     transition: dragging ? 'none' : undefined,
                   }}
-                >
-                  <div className="absolute bottom-0 w-5 h-5 bg-brand-500 rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 opacity-100 ring-2 ring-brand-700/30" />
-                </div>
+                />
               </div>
+              <div className="absolute w-5 h-5 bg-brand-500 rounded-full shadow-md opacity-100 ring-2 ring-brand-700/30 pointer-events-none"
+                style={{ top: `${activePct}%`, left: '50%', transform: 'translate(-50%, -50%)' }}
+              />
             </div>
         </div>
       </div>
