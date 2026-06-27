@@ -194,6 +194,14 @@ export default function ReaderPage() {
     }
   }, []);
 
+  const seekPage = useCallback((page: number) => {
+    const total = imagesCountRef.current;
+    if (total === 0) return;
+    const clamped = Math.max(0, Math.min(total - 1, page));
+    setCurrentPage(clamped);
+    scrollToPage(clamped, 'instant');
+  }, [scrollToPage]);
+
   const scrollByInputStep = useCallback((step: number) => {
     const el = containerRef.current;
     if (!el) return;
@@ -648,6 +656,7 @@ export default function ReaderPage() {
         onChangeBarSide={changeBarSide}
         onToggleBarVisible={() => setBarVisible(v => !v)}
         onScrollByInputStep={scrollByInputStep}
+        onSeekPage={seekPage}
       />
     </div>
   );

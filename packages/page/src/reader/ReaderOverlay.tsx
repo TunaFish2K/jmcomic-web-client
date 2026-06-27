@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, MoveDown, MoveLeft, MoveRight } from 'lucide-react';
 import type { ReadingDirection, BarSide } from './reader-store';
 
@@ -195,6 +195,7 @@ export function ReaderOverlay({
   onChangeBarSide,
   onToggleBarVisible,
   onScrollByInputStep,
+  onSeekPage,
 }: {
   visible: boolean;
   title: string;
@@ -226,11 +227,91 @@ export function ReaderOverlay({
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onScrollByInputStep: (step: number) => void;
+  onSeekPage?: (page: number) => void;
 }) {
   const [showChapterDrawer, setShowChapterDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
   const progressPct = scrollProgressPct;
+
+  // ─── Seek drag ─────────────────────────────────────────────────
+  const progressRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragPageRef = useRef(-1);
+  const [displayPage, setDisplayPage] = useState<number | null>(null);
+
+  const activePage = dragging && displayPage !== null ? displayPage : currentPage;
+  const activePct = totalPages > 1 ? (activePage / (totalPages - 1)) * 100 : 0;
+
+  const pageFromEvent = useCallback((clientX: number, clientY: number) => {
+    const el = progressRef.current;
+    if (!el || totalPages < 2) return 0;
+    const rect = el.getBoundingClientRect();
+    const isHorizontal = rect.width > rect.height;
+    const pct = Math.max(0, Math.min(1,
+      isHorizontal
+        ? (clientX - rect.left) / rect.width
+        : (clientY - rect.top) / rect.height,
+    ));
+    return Math.round(pct * (totalPages - 1));
+  }, [totalPages]);
+
+  const onDragStart = useCallback((clientX: number, clientY: number) => {
+    setDragging(true);
+    const page = pageFromEvent(clientX, clientY);
+    dragPageRef.current = page;
+    setDisplayPage(page);
+  }, [pageFromEvent]);
+
+  const onDragMove = useCallback((clientX: number, clientY: number) => {
+    const page = pageFromEvent(clientX, clientY);
+    if (page === dragPageRef.current) return;
+    dragPageRef.current = page;
+    setDisplayPage(page);
+  }, [pageFromEvent]);
+
+  const onDragEnd = useCallback(() => {
+    setDragging(false);
+    const page = dragPageRef.current;
+    if (page >= 0) onSeekPage?.(page);
+    dragPageRef.current = -1;
+    setDisplayPage(null);
+  }, [onSeekPage]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const pos = 'touches' in e
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        : { x: e.clientX, y: e.clientY };
+      onDragMove(pos.x, pos.y);
+    };
+    const onEnd = () => onDragEnd();
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onEnd);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+    };
+  }, [dragging, onDragMove, onDragEnd]);
+
+  // ─── Page dots ─────────────────────────────────────────────────
+  const dotPositions = useMemo(() => {
+    if (totalPages < 2) return [];
+    const maxDots = 30;
+    const step = Math.max(1, Math.floor(totalPages / maxDots));
+    const last = totalPages - 1;
+    const dots: number[] = [0];
+    for (let i = step; i < last; i += step) dots.push(i);
+    if (dots[dots.length - 1] !== last) dots.push(last);
+    return dots;
+  }, [totalPages]);
+
+  // ────────────────────────────────────────────────────────────────
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -296,11 +377,35 @@ export function ReaderOverlay({
           <div className="flex items-center gap-3 px-4 h-full">
             <div className="flex items-center gap-1 shrink-0">
               <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一话"><ChevronLeft size={16} /></button>
-              <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{currentPage + 1}/{totalPages}</span>
+              <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{activePage + 1}/{totalPages}</span>
               <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="下一话"><ChevronRight size={16} /></button>
             </div>
-            <div className="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
-              <div className="h-full bg-brand-500 rounded-full transition-all duration-200" style={{ width: `${progressPct}%` }} />
+            <div
+              ref={progressRef}
+              className="flex-1 h-2 bg-gray-700/50 rounded-full overflow-hidden cursor-pointer relative group"
+              onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
+              onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+            >
+              {totalPages > 1 && dotPositions.map((p, i) => {
+                const leftPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
+                const isBefore = p <= activePage;
+                return (
+                  <div
+                    key={i}
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
+                    style={{ left: `${leftPct}%` }}
+                  >
+                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
+                  </div>
+                );
+              })}
+              <div
+                className="h-full bg-brand-500 rounded-full relative"
+                style={{
+                  width: `${activePct}%`,
+                  transition: dragging ? 'none' : undefined,
+                }}
+              />
             </div>
             <div className="flex items-center gap-1 text-white/40 text-xs shrink-0">
               <ChevronUp size={12} /><ChevronDown size={12} />
@@ -315,11 +420,35 @@ export function ReaderOverlay({
           <div className="flex flex-col items-center gap-2 py-4 h-full" style={{ paddingTop: '3.5rem' }}>
             <div className="flex flex-col-reverse items-center gap-0.5">
               <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="下一话"><ChevronDown size={14} /></button>
-              <span className="text-white/60 text-[10px] tabular-nums" style={{ writingMode: 'vertical-rl' }}>{currentPage + 1}/{totalPages}</span>
+              <span className="text-white/60 text-[10px] tabular-nums" style={{ writingMode: 'vertical-rl' }}>{activePage + 1}/{totalPages}</span>
               <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="上一话"><ChevronUp size={14} /></button>
             </div>
-            <div className="w-1 flex-1 bg-gray-700 rounded-full overflow-hidden">
-              <div className="w-full bg-brand-500 rounded-full transition-all duration-200" style={{ height: `${progressPct}%` }} />
+            <div
+              ref={progressRef}
+              className="w-2 flex-1 bg-gray-700/50 rounded-full overflow-hidden cursor-pointer relative group"
+              onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
+              onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+            >
+              {totalPages > 1 && dotPositions.map((p, i) => {
+                const topPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
+                const isBefore = p <= activePage;
+                return (
+                  <div
+                    key={i}
+                    className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10"
+                    style={{ top: `${topPct}%` }}
+                  >
+                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
+                  </div>
+                );
+              })}
+              <div
+                className="w-full bg-brand-500 rounded-full relative"
+                style={{
+                  height: `${activePct}%`,
+                  transition: dragging ? 'none' : undefined,
+                }}
+              />
             </div>
             <div className="flex flex-col items-center gap-0.5 text-white/40 text-xs">
               <ChevronLeft size={10} /><ChevronRight size={10} />
