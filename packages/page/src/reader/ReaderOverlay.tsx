@@ -406,6 +406,13 @@ export function ReaderOverlay({
         </div>
       </div>
 
+      {/* Floating page indicator — top-center during drag */}
+      <div className={`absolute top-1/4 left-1/2 -translate-x-1/2 z-50 pointer-events-none transition-all duration-150 ${dragging ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
+        <div className="bg-gray-900/85 backdrop-blur-md text-white text-3xl font-bold px-5 py-3 rounded-2xl shadow-2xl whitespace-nowrap ring-1 ring-white/10">
+          {activePage + 1}<span className="text-gray-400 text-xl font-normal mx-1">/</span>{totalPages}
+        </div>
+      </div>
+
       {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
         <div className="absolute bottom-0 left-0 right-0 z-20 h-10 bg-black/90">
@@ -417,19 +424,11 @@ export function ReaderOverlay({
             </div>
             <div
               ref={progressRef}
-              className="flex-1 h-2 cursor-pointer relative group"
+              className="flex-1 h-5 cursor-pointer relative group -my-1.5"
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
             >
-              <div
-                className={`absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity ${dragging ? 'opacity-100' : 'opacity-0'}`}
-                style={{ left: `${activePct}%` }}
-              >
-                <div className="bg-gray-900/90 backdrop-blur text-white text-xs font-semibold px-2 py-1 rounded-lg whitespace-nowrap shadow-lg">
-                  {activePage + 1}/{totalPages}
-                </div>
-              </div>
-              <div className="h-full bg-gray-700/50 rounded-full overflow-hidden">
+              <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                 {totalPages > 1 && dotPositions.map((p, i) => {
                   const leftPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
                   const isBefore = p <= activePage;
@@ -439,7 +438,7 @@ export function ReaderOverlay({
                       className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
                       style={{ left: `${leftPct}%` }}
                     >
-                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
+                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
                     </div>
                   );
                 })}
@@ -450,7 +449,7 @@ export function ReaderOverlay({
                     transition: dragging ? 'none' : undefined,
                   }}
                 >
-                  <div className="absolute right-0 w-3.5 h-3.5 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
+                  <div className="absolute right-0 w-4 h-4 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
                 </div>
               </div>
             </div>
@@ -472,19 +471,11 @@ export function ReaderOverlay({
             </div>
             <div
               ref={progressRef}
-              className="w-2 flex-1 cursor-pointer relative group"
+              className="w-5 flex-1 cursor-pointer relative group -mx-1.5"
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
             >
-              <div
-                className={`absolute right-full mr-2.5 top-1/2 -translate-y-1/2 z-30 pointer-events-none transition-opacity ${dragging ? 'opacity-100' : 'opacity-0'}`}
-                style={{ top: `${activePct}%` }}
-              >
-                <div className="bg-gray-900/90 backdrop-blur text-white text-xs font-semibold px-2 py-1 rounded-lg whitespace-nowrap shadow-lg">
-                  {activePage + 1}/{totalPages}
-                </div>
-              </div>
-              <div className="w-full h-full bg-gray-700/50 rounded-full overflow-hidden">
+              <div className="w-2 mx-1.5 h-full bg-gray-700/50 rounded-full overflow-hidden">
                 {totalPages > 1 && dotPositions.map((p, i) => {
                   const topPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
                   const isBefore = p <= activePage;
@@ -494,7 +485,7 @@ export function ReaderOverlay({
                       className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10"
                       style={{ top: `${topPct}%` }}
                     >
-                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
+                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
                     </div>
                   );
                 })}
@@ -505,7 +496,7 @@ export function ReaderOverlay({
                     transition: dragging ? 'none' : undefined,
                   }}
                 >
-                  <div className="absolute bottom-0 w-3.5 h-3.5 bg-brand-500 rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 opacity-100 ring-2 ring-brand-700/30" />
+                  <div className="absolute bottom-0 w-4 h-4 bg-brand-500 rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 opacity-100 ring-2 ring-brand-700/30" />
                 </div>
               </div>
             </div>
