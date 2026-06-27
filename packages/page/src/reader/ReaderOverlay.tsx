@@ -462,29 +462,25 @@ export function ReaderOverlay({
                     className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
                     style={{ left: `${leftPct}%` }}
                   >
-                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
+                      <div className={`rounded-full transition-all duration-150 ${p === activePage ? 'w-3 h-3 bg-brand-500 ring-2 ring-brand-300/50' : isBefore ? 'w-2 h-2 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
+                    </div>
+                  );
+                })}
+                <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-brand-500 rounded-full relative flex items-center"
+                    style={{
+                      width: `${activePct}%`,
+                      transition: dragging ? 'none' : undefined,
+                    }}
+                  >
+                    <div className="absolute right-0 w-4 h-4 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
                   </div>
-                );
-              })}
-              <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-brand-500 rounded-full relative flex items-center"
-                  style={{
-                    width: `${activePct}%`,
-                    transition: dragging ? 'none' : undefined,
-                  }}
-                >
-                  <div className="absolute right-0 w-4 h-4 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-1 text-white/40 text-xs shrink-0">
-              <ChevronUp size={12} /><ChevronDown size={12} />
-            </div>
-          </div>
-        </div>
-      )}
-
+            <div className="flex items-center gap-1 shrink-0">
+  
       {/* Info bar — left/right */}
       {barVisible && !isHorizontalBar && (
         <div className={`absolute top-0 bottom-0 z-20 ${barSide === 'right' ? 'right-0' : 'left-0'}`} style={{ width: 40 }}>
@@ -510,11 +506,11 @@ export function ReaderOverlay({
                     className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10"
                     style={{ top: `${topPct}%` }}
                   >
-                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-2.5 h-2.5 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
-                  </div>
-                );
-              })}
-              <div className="w-2 mx-1.5 h-full bg-gray-700/50 rounded-full overflow-hidden">
+                      <div className={`rounded-full transition-all duration-150 ${p === activePage ? 'w-3 h-3 bg-brand-500 ring-2 ring-brand-300/50' : isBefore ? 'w-2 h-2 bg-brand-300' : 'w-2 h-2 bg-gray-500'}`} />
+                    </div>
+                  );
+                })}
+                <div className="w-2 mx-1.5 h-full bg-gray-700/50 rounded-full overflow-hidden">
                 <div
                   className="w-full bg-brand-500 rounded-full relative flex justify-center"
                   style={{
