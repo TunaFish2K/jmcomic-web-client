@@ -474,7 +474,7 @@ export function ReaderOverlay({
                       transition: dragging ? 'none' : undefined,
                     }}
                   >
-                    <div className="absolute right-0 w-4 h-4 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
+                    <div className="absolute right-0 w-5 h-5 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
                   </div>
                 </div>
             </div>
@@ -526,7 +526,7 @@ export function ReaderOverlay({
                     transition: dragging ? 'none' : undefined,
                   }}
                 >
-                  <div className="absolute bottom-0 w-4 h-4 bg-brand-500 rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 opacity-100 ring-2 ring-brand-700/30" />
+                  <div className="absolute bottom-0 w-5 h-5 bg-brand-500 rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 opacity-100 ring-2 ring-brand-700/30" />
                 </div>
               </div>
             </div>
