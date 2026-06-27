@@ -482,7 +482,7 @@ export function ReaderOverlay({
               <ChevronUp size={12} /><ChevronDown size={12} />
             </div>
           </div>
-          <div style={{ height: 'env(safe-area-inset-bottom, 40px)' }} />
+          <div style={{ height: 'env(safe-area-inset-bottom, 100px)' }} />
         </div>
       )}
 
