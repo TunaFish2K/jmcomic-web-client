@@ -268,7 +268,8 @@ export function ReaderOverlay({
     if (page === dragPageRef.current) return;
     dragPageRef.current = page;
     setDisplayPage(page);
-  }, [pageFromEvent]);
+    onSeekPage?.(page);
+  }, [pageFromEvent, onSeekPage]);
 
   const onDragEnd = useCallback(() => {
     setDragging(false);
@@ -382,30 +383,42 @@ export function ReaderOverlay({
             </div>
             <div
               ref={progressRef}
-              className="flex-1 h-2 bg-gray-700/50 rounded-full overflow-hidden cursor-pointer relative group"
+              className="flex-1 h-2 cursor-pointer relative group"
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
             >
-              {totalPages > 1 && dotPositions.map((p, i) => {
-                const leftPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
-                const isBefore = p <= activePage;
-                return (
-                  <div
-                    key={i}
-                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
-                    style={{ left: `${leftPct}%` }}
-                  >
-                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
-                  </div>
-                );
-              })}
               <div
-                className="h-full bg-brand-500 rounded-full relative"
-                style={{
-                  width: `${activePct}%`,
-                  transition: dragging ? 'none' : undefined,
-                }}
-              />
+                className={`absolute bottom-full mb-2.5 left-1/2 -translate-x-1/2 z-30 pointer-events-none transition-opacity ${dragging ? 'opacity-100' : 'opacity-0'}`}
+                style={{ left: `${activePct}%` }}
+              >
+                <div className="bg-gray-900/90 backdrop-blur text-white text-xs font-semibold px-2 py-1 rounded-lg whitespace-nowrap shadow-lg">
+                  {activePage + 1}/{totalPages}
+                </div>
+              </div>
+              <div className="h-full bg-gray-700/50 rounded-full overflow-hidden">
+                {totalPages > 1 && dotPositions.map((p, i) => {
+                  const leftPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
+                  const isBefore = p <= activePage;
+                  return (
+                    <div
+                      key={i}
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10"
+                      style={{ left: `${leftPct}%` }}
+                    >
+                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
+                    </div>
+                  );
+                })}
+                <div
+                  className="h-full bg-brand-500 rounded-full relative flex items-center"
+                  style={{
+                    width: `${activePct}%`,
+                    transition: dragging ? 'none' : undefined,
+                  }}
+                >
+                  <div className={`absolute right-0 w-3.5 h-3.5 bg-white rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 transition-opacity ring-1 ring-black/10 ${dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                </div>
+              </div>
             </div>
             <div className="flex items-center gap-1 text-white/40 text-xs shrink-0">
               <ChevronUp size={12} /><ChevronDown size={12} />
@@ -425,30 +438,42 @@ export function ReaderOverlay({
             </div>
             <div
               ref={progressRef}
-              className="w-2 flex-1 bg-gray-700/50 rounded-full overflow-hidden cursor-pointer relative group"
+              className="w-2 flex-1 cursor-pointer relative group"
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
             >
-              {totalPages > 1 && dotPositions.map((p, i) => {
-                const topPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
-                const isBefore = p <= activePage;
-                return (
-                  <div
-                    key={i}
-                    className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10"
-                    style={{ top: `${topPct}%` }}
-                  >
-                    <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
-                  </div>
-                );
-              })}
               <div
-                className="w-full bg-brand-500 rounded-full relative"
-                style={{
-                  height: `${activePct}%`,
-                  transition: dragging ? 'none' : undefined,
-                }}
-              />
+                className={`absolute right-full mr-2.5 top-1/2 -translate-y-1/2 z-30 pointer-events-none transition-opacity ${dragging ? 'opacity-100' : 'opacity-0'}`}
+                style={{ top: `${activePct}%` }}
+              >
+                <div className="bg-gray-900/90 backdrop-blur text-white text-xs font-semibold px-2 py-1 rounded-lg whitespace-nowrap shadow-lg">
+                  {activePage + 1}/{totalPages}
+                </div>
+              </div>
+              <div className="w-full h-full bg-gray-700/50 rounded-full overflow-hidden">
+                {totalPages > 1 && dotPositions.map((p, i) => {
+                  const topPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
+                  const isBefore = p <= activePage;
+                  return (
+                    <div
+                      key={i}
+                      className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 z-10"
+                      style={{ top: `${topPct}%` }}
+                    >
+                      <div className={`rounded-full transition-all duration-150 ${isBefore ? 'w-1.5 h-1.5 bg-brand-300' : 'w-1 h-1 bg-gray-500'}`} />
+                    </div>
+                  );
+                })}
+                <div
+                  className="w-full bg-brand-500 rounded-full relative flex justify-center"
+                  style={{
+                    height: `${activePct}%`,
+                    transition: dragging ? 'none' : undefined,
+                  }}
+                >
+                  <div className={`absolute bottom-0 w-3.5 h-3.5 bg-white rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 transition-opacity ring-1 ring-black/10 ${dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                </div>
+              </div>
             </div>
             <div className="flex flex-col items-center gap-0.5 text-white/40 text-xs">
               <ChevronLeft size={10} /><ChevronRight size={10} />
