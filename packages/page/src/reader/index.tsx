@@ -24,7 +24,7 @@ import {
   saveAlbumCache,
 } from './reader-store';
 import pLimit from 'p-limit';
-import { getSliceCount, reverseImageBySlice } from '@tiny-client/shared';
+import { getSliceCount, reverseImageBySlice, getCachedImage, setCachedImage, generateImageCacheKey } from '@tiny-client/shared';
 
 function parseSeriesOrder(value: string | number | undefined) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -37,21 +37,27 @@ type ChapterInfo = { id: string; name: string; order: number };
 const PRELOAD_AHEAD = 10;
 const PRELOAD_PARALLEL = 5;
 async function decryptImageWithRetry(url: string, photoId: string, scrambleId: number): Promise<ArrayBuffer | null> {
+  const filename = url.split('/').pop() ?? '';
+  const cacheKey = generateImageCacheKey(photoId, filename);
+
+  // Try IndexedDB cache first
+  const cached = await getCachedImage(cacheKey);
+  if (cached) return cached;
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buffer = await res.arrayBuffer();
-      const filename = url.split('/').pop() ?? '';
       const slices = getSliceCount(scrambleId, parseInt(photoId), filename);
       if (slices > 0) {
         const reversed = await reverseImageBySlice(buffer, slices);
         const jpeg = await convertToJpeg(reversed.data);
-        if (jpeg) return jpeg;
+        if (jpeg) { setCachedImage(cacheKey, jpeg); return jpeg; }
         throw new Error('JPEG conversion failed');
       }
       const jpeg = await convertToJpeg(buffer);
-      if (jpeg) return jpeg;
+      if (jpeg) { setCachedImage(cacheKey, jpeg); return jpeg; }
       throw new Error('JPEG conversion failed');
     } catch {
       await new Promise((r) => setTimeout(r, [400, 1000, 2000][attempt]));

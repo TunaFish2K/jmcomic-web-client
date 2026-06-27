@@ -12,41 +12,8 @@ interface CacheEntry {
 
 let db: IDBDatabase | null = null;
 
-// 页面加载时清除缓存 - 使用升级模式确保 store 存在
-function clearCacheOnLoad() {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    
-    request.onupgradeneeded = (event) => {
-        const database = (event.target as IDBOpenDBRequest).result;
-        // 升级时创建 store
-        if (!database.objectStoreNames.contains(STORE_NAME)) {
-            database.createObjectStore(STORE_NAME, { keyPath: 'key' });
-        }
-    };
-    
-    request.onsuccess = () => {
-        const database = request.result;
-        // 确保 store 存在后再清除
-        if (database.objectStoreNames.contains(STORE_NAME)) {
-            const transaction = database.transaction([STORE_NAME], 'readwrite');
-            const store = transaction.objectStore(STORE_NAME);
-            store.clear();
-            transaction.oncomplete = () => {
-                database.close();
-                console.log('页面加载：已清除旧缓存');
-            };
-        } else {
-            database.close();
-        }
-    };
-    
-    request.onerror = () => {
-        console.error('清除缓存失败:', request.error);
-    };
-}
-
-// 页面加载时立即清除
-clearCacheOnLoad();
+// 启动时清理过期缓存（保留最近7天）
+cleanupOldCache().catch(() => {});
 
 async function openDB(): Promise<IDBDatabase> {
     if (db) return db;

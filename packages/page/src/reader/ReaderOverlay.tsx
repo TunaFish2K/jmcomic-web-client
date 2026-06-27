@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, MoveDown, MoveLeft, MoveRight } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, MoveDown, MoveLeft, MoveRight, Trash2 } from 'lucide-react';
 import type { ReadingDirection, BarSide } from './reader-store';
+import { getCacheStats, clearAllCache } from '@tiny-client/shared';
 
 type ChapterInfo = { id: string; name: string; order: number };
 
@@ -59,6 +60,8 @@ function SettingsPanel({
   onChangeBarSide,
   onToggleBarVisible,
   onClose,
+  cacheStats,
+  onClearCache,
 }: {
   direction: ReadingDirection;
   autoSnap: boolean;
@@ -73,6 +76,8 @@ function SettingsPanel({
   onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onClose: () => void;
+  cacheStats: { count: number; totalSize: number } | null;
+  onClearCache: () => void;
 }) {
   const isVertical = direction === 'top-down';
 
@@ -159,6 +164,23 @@ function SettingsPanel({
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${barVisible ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
         </div>
+
+        <div className="border-t border-gray-700/50 pt-3">
+          <div className="flex items-center justify-between">
+            <span className="text-gray-300 text-xs">图片缓存</span>
+            <button
+              onClick={onClearCache}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-gray-800 hover:bg-red-900/50 text-gray-400 hover:text-red-400 text-xs transition-colors"
+            >
+              <Trash2 size={12} />清除
+            </button>
+          </div>
+          <div className="text-gray-500 text-[10px] mt-1">
+            {cacheStats
+              ? `${(cacheStats.totalSize / 1024 / 1024).toFixed(1)}MB (${cacheStats.count}张)`
+              : '计算中...'}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -231,6 +253,17 @@ export function ReaderOverlay({
 }) {
   const [showChapterDrawer, setShowChapterDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [cacheStats, setCacheStats] = useState<{ count: number; totalSize: number } | null>(null);
+
+  useEffect(() => {
+    getCacheStats().then(setCacheStats);
+  }, []);
+
+  const handleClearCache = useCallback(async () => {
+    await clearAllCache();
+    const stats = await getCacheStats();
+    setCacheStats(stats);
+  }, []);
 
   const progressPct = scrollProgressPct;
 
@@ -350,6 +383,7 @@ export function ReaderOverlay({
           onChangeLazyRenderRange={onChangeLazyRenderRange}
           onChangeBarSide={onChangeBarSide} onToggleBarVisible={onToggleBarVisible}
           onClose={() => setShowSettings(false)}
+          cacheStats={cacheStats} onClearCache={handleClearCache}
         />
       )}
 
@@ -416,7 +450,7 @@ export function ReaderOverlay({
                     transition: dragging ? 'none' : undefined,
                   }}
                 >
-                  <div className={`absolute right-0 w-3.5 h-3.5 bg-white rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 transition-opacity ring-1 ring-black/10 ${dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                  <div className="absolute right-0 w-3.5 h-3.5 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
                 </div>
               </div>
             </div>
@@ -471,7 +505,7 @@ export function ReaderOverlay({
                     transition: dragging ? 'none' : undefined,
                   }}
                 >
-                  <div className={`absolute bottom-0 w-3.5 h-3.5 bg-white rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 transition-opacity ring-1 ring-black/10 ${dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`} />
+                  <div className="absolute bottom-0 w-3.5 h-3.5 bg-brand-500 rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 opacity-100 ring-2 ring-brand-700/30" />
                 </div>
               </div>
             </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getSliceCount, reverseImageBySlice } from '@tiny-client/shared';
+import { getSliceCount, reverseImageBySlice, getCachedImage, setCachedImage } from '@tiny-client/shared';
 import type { PhotoWithScrambleId } from '@tiny-client/shared';
 
 const memoryCache = new Map<string, string>();
@@ -49,6 +49,17 @@ export function DecryptedImage({
     let createdUrl: string | null = null;
 
     (async () => {
+      // Try IndexedDB cache first
+      const cachedBuffer = await getCachedImage(cacheKey);
+      if (cachedBuffer && !cancelled) {
+        const blob = new Blob([cachedBuffer], { type: 'image/jpeg' });
+        createdUrl = URL.createObjectURL(blob);
+        memoryCache.set(cacheKey, createdUrl);
+        setBlobUrl(createdUrl);
+        onLoad?.(createdUrl);
+        return;
+      }
+
       for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
         if (cancelled) break;
         try {
@@ -69,6 +80,7 @@ export function DecryptedImage({
           const blob = new Blob([jpeg], { type: 'image/jpeg' });
           createdUrl = URL.createObjectURL(blob);
           memoryCache.set(cacheKey, createdUrl);
+          setCachedImage(cacheKey, jpeg);
           if (!cancelled) {
             setBlobUrl(createdUrl);
             onLoad?.(createdUrl);
