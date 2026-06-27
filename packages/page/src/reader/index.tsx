@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect } fr
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getAlbum, getPhoto } from '../api';
+import { getCachedAlbum } from '../album-cache';
 import { DecryptedImage } from './DecryptedImage';
 import { ReaderOverlay } from './ReaderOverlay';
 import type { ReadingDirection, BarSide } from './reader-store';
@@ -90,7 +91,16 @@ export default function ReaderPage() {
 
   const { data: album } = useQuery({
     queryKey: ['album', albumId],
-    queryFn: () => getAlbum(albumId!),
+    queryFn: async () => {
+      const cached = await getCachedAlbum(albumId!);
+      if (cached?.album) {
+        saveAlbumCache(albumId!, cached.album);
+        return cached.album;
+      }
+      const fetched = await getAlbum(albumId!);
+      if (fetched) saveAlbumCache(albumId!, fetched);
+      return fetched;
+    },
     enabled: !!albumId,
     initialData: initialAlbumRef.current,
   });
@@ -154,7 +164,11 @@ export default function ReaderPage() {
 
   const { data: photo } = useQuery({
     queryKey: ['photo', currentChapterId],
-    queryFn: () => getPhoto(currentChapterId),
+    queryFn: async () => {
+      const cached = await getCachedAlbum(currentChapterId);
+      if (cached?.photo) return cached.photo;
+      return getPhoto(currentChapterId);
+    },
     enabled: !!currentChapterId,
     initialData: currentChapterId === albumId ? initialPhotoRef.current : undefined,
   });

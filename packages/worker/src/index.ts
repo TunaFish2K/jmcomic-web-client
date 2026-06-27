@@ -25,6 +25,23 @@ function cacheSet(key: string, data: unknown) {
 	albumDataCache.set(key, { data, ts: Date.now() });
 }
 
+// ─── KV-backed persistent cache (L2) ─────────────────────────────
+const KV_CACHE_PREFIX = 'album:';
+const KV_CACHE_TTL_SECONDS = 3600;
+
+async function kvCacheGet<T>(kv: KVNamespace, key: string): Promise<T | undefined> {
+	try {
+		const val = await kv.get(`${KV_CACHE_PREFIX}${key}`, 'json');
+		return val as T | undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function kvCacheSet(kv: KVNamespace, key: string, data: unknown) {
+	kv.put(`${KV_CACHE_PREFIX}${key}`, JSON.stringify(data), { expirationTtl: KV_CACHE_TTL_SECONDS }).catch(() => {});
+}
+
 type WorkerBatchErrorStage = 'client_init' | 'get_album' | 'get_photo' | 'get_scramble_id' | 'unknown';
 
 type WorkerBatchError = {
@@ -204,7 +221,7 @@ async function fetchAlbumWithRetry(
 
 // Simple router
 export default {
-	async fetch(request: Request, _env: Env, ctx: ExecutionContext): Promise<Response> {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 
 		if (request.method === 'OPTIONS') {
@@ -341,15 +358,32 @@ export default {
 				return new Response(`Too many ids, max ${BATCH_ALBUM_MAX_IDS}`, { status: 400, headers: corsHeaders });
 			}
 
-			// ── Check in-memory cache ────────────────────────────
+			// ── Check L1 (memory) + L2 (KV) cache ────────────────
 			type BatchAlbumItem = { albumId: string; album: unknown; photo: unknown; error?: WorkerBatchError };
 			const cached: BatchAlbumItem[] = [];
 			const remainingIds: string[] = [];
 			for (const id of ids) {
 				const entry = cacheGet<BatchAlbumItem>(id);
-				if (entry) cached.push(entry);
-				else remainingIds.push(id);
+				if (entry) { cached.push(entry); continue; }
+				remainingIds.push(id);
 			}
+
+			if (remainingIds.length > 0 && env.ALBUM_CACHE_KV) {
+				const kvResults = await Promise.all(
+					remainingIds.map(async (id) => {
+						const val = await kvCacheGet<BatchAlbumItem>(env.ALBUM_CACHE_KV, id);
+						return { id, val };
+					}),
+				);
+				for (const { id, val } of kvResults) {
+					if (val) {
+						cacheSet(id, val);
+						cached.push(val);
+						remainingIds.splice(remainingIds.indexOf(id), 1);
+					}
+				}
+			}
+
 			if (remainingIds.length === 0) {
 				return Response.json(cached, { headers: corsHeaders });
 			}
@@ -383,9 +417,12 @@ export default {
 				},
 			);
 
-			// ── Write fresh results to cache ─────────────────────
+			// ── Write results to L1 + L2 cache ──────────────────
 			for (const item of freshResults) {
-				if (!item.error && item.album !== null) cacheSet(item.albumId, item);
+				if (!item.error && item.album !== null) {
+					cacheSet(item.albumId, item);
+					if (env.ALBUM_CACHE_KV) kvCacheSet(env.ALBUM_CACHE_KV, item.albumId, item);
+				}
 			}
 
 			return Response.json([...cached, ...freshResults], { headers: corsHeaders });

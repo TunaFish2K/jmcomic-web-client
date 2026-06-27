@@ -18,6 +18,7 @@ import {
 import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
 import { saveAlbumCache } from "../reader/reader-store";
+import { getCachedAlbums, setCachedAlbums } from "../album-cache";
 
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
 const coverLimit = pLimit(6);
@@ -1051,6 +1052,8 @@ export default function Home() {
                     for (const item of results) next.set(item.albumId, item);
                     return next;
                 });
+                const cachedItems = results.filter((r): r is { albumId: string; album: NonNullable<typeof r.album>; photo: any } => !r.error && !!r.album);
+                if (cachedItems.length > 0) setCachedAlbums(cachedItems).catch(() => {});
                 // IDs whose worker-side fetch failed get re-queued
                 return results.filter(r => r.error).map(r => r.albumId);
             } catch {
@@ -1078,6 +1081,20 @@ export default function Home() {
                     return !cached || !!cached.error;
                 })
             );
+            if (pending.size === 0) return;
+
+            // Check IndexedDB cache for pending IDs (L2 cache)
+            const cachedMap = await getCachedAlbums([...pending]);
+            if (cachedMap.size > 0) {
+                setAlbumCache(prev => {
+                    const next = new Map(prev);
+                    for (const [id, { album, photo }] of cachedMap) {
+                        next.set(id, { albumId: id, album, photo: photo ?? null });
+                    }
+                    return next;
+                });
+                for (const id of cachedMap.keys()) pending.delete(id);
+            }
             if (pending.size === 0) return;
 
             while (pending.size > 0 && !cancelled) {

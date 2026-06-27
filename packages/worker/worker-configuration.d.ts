@@ -6,6 +6,7 @@ declare namespace Cloudflare {
 		mainModule: typeof import("./src/index");
 	}
 	interface Env {
+		ALBUM_CACHE_KV: KVNamespace;
 	}
 }
 interface Env extends Cloudflare.Env {}
