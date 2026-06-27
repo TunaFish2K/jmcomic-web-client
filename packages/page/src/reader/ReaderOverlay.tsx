@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, MoveDown, MoveLeft, MoveRight, Trash2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, Trash2 } from 'lucide-react';
 import type { ReadingDirection, BarSide } from './reader-store';
 import { getCacheStats, clearAllCache } from '@tiny-client/shared';
 
@@ -140,22 +140,8 @@ function SettingsPanel({
           />
         </div>
 
-        <div>
-          <span className="text-gray-300 text-xs">信息栏位置</span>
-          <div className="grid grid-cols-2 gap-1 mt-1.5">
-            {(['left','right'] as BarSide[]).map(s => (
-              <button key={s} onClick={() => onChangeBarSide(s)} className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${barSide === s ? 'bg-brand-500/20 text-brand-400' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-                {s === 'left' ? <MoveLeft size={12} /> : <MoveRight size={12} />}
-                {s === 'left' ? '左侧' : '右侧'}
-              </button>
-            ))}
-            {(['bottom'] as BarSide[]).map(s => (
-              <button key={s} onClick={() => onChangeBarSide(s)} className={`flex items-center justify-center gap-1 px-2 py-1.5 rounded text-xs transition-colors ${barSide === s ? 'bg-brand-500/20 text-brand-400' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
-                <MoveDown size={12} />
-                下方
-              </button>
-            ))}
-          </div>
+        <div className="flex items-center justify-between">
+          <span className="text-gray-300 text-xs">信息栏在下方</span>
         </div>
 
         <div className="flex items-center justify-between">
