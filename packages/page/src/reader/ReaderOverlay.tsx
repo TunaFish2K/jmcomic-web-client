@@ -293,7 +293,26 @@ export function ReaderOverlay({
     const page = pageFromEvent(clientX, clientY);
     dragPageRef.current = page;
     setDisplayPage(page);
-  }, [pageFromEvent]);
+
+    // Attach listeners synchronously — don't wait for useEffect
+    const onMove = (e: MouseEvent | TouchEvent) => {
+      const pos = 'touches' in e
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        : { x: e.clientX, y: e.clientY };
+      onDragMove(pos.x, pos.y);
+    };
+    const onEnd = () => {
+      onDragEnd();
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onEnd);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onEnd);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onEnd);
+    window.addEventListener('touchmove', onMove, { passive: true });
+    window.addEventListener('touchend', onEnd);
+  }, [pageFromEvent, onDragMove, onDragEnd]);
 
   const onDragMove = useCallback((clientX: number, clientY: number) => {
     const page = pageFromEvent(clientX, clientY);
@@ -308,27 +327,6 @@ export function ReaderOverlay({
     if (page >= 0) onSeekPage?.(page);
     showTooltipTemporarily();
   }, [onSeekPage, showTooltipTemporarily]);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      const pos = 'touches' in e
-        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
-        : { x: e.clientX, y: e.clientY };
-      onDragMove(pos.x, pos.y);
-    };
-    const onEnd = () => onDragEnd();
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onEnd);
-    window.addEventListener('touchmove', onMove, { passive: true });
-    window.addEventListener('touchend', onEnd);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onEnd);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onEnd);
-    };
-  }, [dragging, onDragMove, onDragEnd]);
 
   // ─── Adaptive page dots ────────────────────────────────────────
   const [maxDots, setMaxDots] = useState(30);
@@ -452,8 +450,8 @@ export function ReaderOverlay({
                 </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              <button onClick={onPrevPage} className="text-white/50 hover:text-white p-0.5" title="上一页"><ChevronUp size={12} /></button>
-              <button onClick={onNextPage} className="text-white/50 hover:text-white p-0.5" title="下一页"><ChevronDown size={12} /></button>
+              <button type="button" onClick={onPrevPage} className="text-white/50 hover:text-white p-0.5" title="上一页"><ChevronUp size={12} className="pointer-events-none" /></button>
+              <button type="button" onClick={onNextPage} className="text-white/50 hover:text-white p-0.5" title="下一页"><ChevronDown size={12} className="pointer-events-none" /></button>
             </div>
           </div>
         </div>
@@ -491,8 +489,8 @@ export function ReaderOverlay({
               </div>
             </div>
             <div className="flex flex-col items-center gap-0.5">
-              <button onClick={onPrevPage} className="text-white/50 hover:text-white p-0.5" title="上一页"><ChevronLeft size={10} /></button>
-              <button onClick={onNextPage} className="text-white/50 hover:text-white p-0.5" title="下一页"><ChevronRight size={10} /></button>
+              <button type="button" onClick={onPrevPage} className="text-white/50 hover:text-white p-0.5" title="上一页"><ChevronLeft size={10} className="pointer-events-none" /></button>
+              <button type="button" onClick={onNextPage} className="text-white/50 hover:text-white p-0.5" title="下一页"><ChevronRight size={10} className="pointer-events-none" /></button>
             </div>
         </div>
       </div>
