@@ -26,6 +26,24 @@ function cacheSet(key: string, data: unknown) {
 	albumDataCache.set(key, { data, ts: Date.now() });
 }
 
+// ─── Search session domain stickiness ────────────────────────────
+const SEARCH_DOMAIN_CACHE_TTL = 60_000;
+const searchDomainCache = new Map<string, { domain: string; ts: number }>();
+
+function getCachedSearchDomain(key: string): string | undefined {
+	const entry = searchDomainCache.get(key);
+	if (!entry) return undefined;
+	if (Date.now() - entry.ts > SEARCH_DOMAIN_CACHE_TTL) {
+		searchDomainCache.delete(key);
+		return undefined;
+	}
+	return entry.domain;
+}
+
+function setCachedSearchDomain(key: string, domain: string) {
+	searchDomainCache.set(key, { domain, ts: Date.now() });
+}
+
 // ─── KV-backed persistent cache (L2) ─────────────────────────────
 const KV_CACHE_PREFIX = 'album:';
 const KV_CACHE_TTL_SECONDS = 3600;
@@ -242,24 +260,43 @@ export default {
 					mainTag: (Number(url.searchParams.get('mainTag')) as any) || 0,
 				};
 
-				// Race search across SEARCH_CLIENT_RACE_COUNT upstream domains
-				const domainServerURL = DOMAIN_SERVER_URL[Math.floor(Math.random() * DOMAIN_SERVER_URL.length)];
-				const allDomains = shuffle(await getDomainsFromDomainServer(domainServerURL));
-				const candidateDomains = allDomains.slice(0, SEARCH_CLIENT_RACE_COUNT);
+				// Try cached domain first for session stickiness (翻页一致性)
+				const sessionKey = `search:${query}:${searchOptions.mainTag}:${searchOptions.orderBy}:${searchOptions.time}`;
+				const cachedDomain = getCachedSearchDomain(sessionKey);
 
 				let result: any;
-				try {
-					result = await Promise.any(
-						candidateDomains.map(async (domain) => {
-							const client = await getClientDataAndCreateClient(`https://${domain}`);
-							return client.search(query, searchOptions);
-						}),
-					);
-				} catch (e) {
-					for (const err of (e as AggregateError).errors ?? []) {
-						console.warn('Search failed on a domain', err);
+				if (cachedDomain) {
+					try {
+						const client = await getClientDataAndCreateClient(`https://${cachedDomain}`);
+						result = await client.search(query, searchOptions);
+					} catch (e) {
+						console.warn('Cached search domain failed, falling back to race', cachedDomain, e);
+						searchDomainCache.delete(sessionKey);
 					}
-					return new Response('All upstream domains failed for search', { status: 502, headers: corsHeaders });
+				}
+
+				if (!result) {
+					// Race search across SEARCH_CLIENT_RACE_COUNT upstream domains
+					const domainServerURL = DOMAIN_SERVER_URL[Math.floor(Math.random() * DOMAIN_SERVER_URL.length)];
+					const allDomains = shuffle(await getDomainsFromDomainServer(domainServerURL));
+					const candidateDomains = allDomains.slice(0, SEARCH_CLIENT_RACE_COUNT);
+
+					try {
+						const winner = await Promise.any(
+							candidateDomains.map(async (domain) => {
+								const client = await getClientDataAndCreateClient(`https://${domain}`);
+								const res = await client.search(query, searchOptions);
+								return { result: res, domain };
+							}),
+						);
+						result = winner.result;
+						setCachedSearchDomain(sessionKey, winner.domain);
+					} catch (e) {
+						for (const err of (e as AggregateError).errors ?? []) {
+							console.warn('Search failed on a domain', err);
+						}
+						return new Response('All upstream domains failed for search', { status: 502, headers: corsHeaders });
+					}
 				}
 
 				// ── Warmup: prefetch album data in background ──────
