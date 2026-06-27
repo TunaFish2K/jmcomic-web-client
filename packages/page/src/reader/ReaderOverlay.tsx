@@ -433,12 +433,12 @@ export function ReaderOverlay({
               </div>
               <div
                 ref={progressRef}
-                className="flex-1 h-12 cursor-pointer relative group"
+                className="flex-1 h-5 cursor-pointer relative group -my-1.5"
                 onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
                 onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
                 style={{ touchAction: 'none' }}
               >
-                <div className="h-12 bg-gray-700/50 rounded-full overflow-hidden">
+                <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-brand-500 rounded-full relative flex items-center"
                       style={{
@@ -446,7 +446,7 @@ export function ReaderOverlay({
                         transition: dragging ? 'none' : undefined,
                       }}
                     >
-                      <div className="absolute right-0 w-6 h-6 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
+                      <div className="absolute right-0 w-5 h-5 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
                     </div>
                   </div>
               </div>
