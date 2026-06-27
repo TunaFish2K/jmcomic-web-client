@@ -6,6 +6,7 @@ const BATCH_ALBUM_MAX_IDS = 15;
 const BATCH_PHOTO_UPSTREAM_CONCURRENCY = 4;
 const BATCH_ALBUM_UPSTREAM_CONCURRENCY = 3;
 const CLIENT_DOMAIN_RETRY_COUNT = 3;
+const SEARCH_CLIENT_RACE_COUNT = 5;
 
 // ─── In-memory album data cache ──────────────────────────────────
 const ALBUM_CACHE_TTL_MS = 60_000;
@@ -234,14 +235,32 @@ export default {
 				const query = url.searchParams.get('query');
 				if (!query) return new Response("Missing query 'query'", { status: 400, headers: corsHeaders });
 
-				const { client } = await getClient();
-
-				const result = await client.search(query, {
+				const searchOptions = {
 					page: Number(url.searchParams.get('page')) || 1,
 					orderBy: (url.searchParams.get('orderBy') as any) || 'mr',
 					time: (url.searchParams.get('time') as any) || 'a',
 					mainTag: (Number(url.searchParams.get('mainTag')) as any) || 0,
-				});
+				};
+
+				// Race search across SEARCH_CLIENT_RACE_COUNT upstream domains
+				const domainServerURL = DOMAIN_SERVER_URL[Math.floor(Math.random() * DOMAIN_SERVER_URL.length)];
+				const allDomains = shuffle(await getDomainsFromDomainServer(domainServerURL));
+				const candidateDomains = allDomains.slice(0, SEARCH_CLIENT_RACE_COUNT);
+
+				let result: any;
+				try {
+					result = await Promise.any(
+						candidateDomains.map(async (domain) => {
+							const client = await getClientDataAndCreateClient(`https://${domain}`);
+							return client.search(query, searchOptions);
+						}),
+					);
+				} catch (e) {
+					for (const err of (e as AggregateError).errors ?? []) {
+						console.warn('Search failed on a domain', err);
+					}
+					return new Response('All upstream domains failed for search', { status: 502, headers: corsHeaders });
+				}
 
 				// ── Warmup: prefetch album data in background ──────
 				if (url.searchParams.get('warmup') === '1') {
