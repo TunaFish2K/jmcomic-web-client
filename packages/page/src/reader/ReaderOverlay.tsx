@@ -439,8 +439,8 @@ export function ReaderOverlay({
 
       {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 h-10 bg-black/90">
-          <div className="flex items-center gap-3 px-4 h-full">
+        <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/90" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+          <div className="flex items-center gap-3 px-4 h-10">
             <div className="flex items-center gap-1 shrink-0">
               <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一话"><ChevronLeft size={16} /></button>
               <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{activePage + 1}/{totalPages}</span>
@@ -451,6 +451,7 @@ export function ReaderOverlay({
               className="flex-1 h-5 cursor-pointer relative group -my-1.5"
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+              style={{ touchAction: 'none' }}
             >
               {totalPages > 1 && dotPositions.map((p, i) => {
                 const leftPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
@@ -498,6 +499,7 @@ export function ReaderOverlay({
               className="w-5 flex-1 cursor-pointer relative group -mx-1.5"
               onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
               onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+              style={{ touchAction: 'none' }}
             >
               {totalPages > 1 && dotPositions.map((p, i) => {
                 const topPct = totalPages > 1 ? (p / (totalPages - 1)) * 100 : 0;
