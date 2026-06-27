@@ -477,7 +477,6 @@ export function ReaderOverlay({
                     <div className="absolute right-0 w-4 h-4 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
                   </div>
                 </div>
-              </div>
             </div>
             <div className="flex items-center gap-1 text-white/40 text-xs shrink-0">
               <ChevronUp size={12} /><ChevronDown size={12} />
@@ -535,6 +534,7 @@ export function ReaderOverlay({
               <ChevronLeft size={10} /><ChevronRight size={10} />
             </div>
         </div>
+      </div>
       )}
 
       {!isVertical && (
