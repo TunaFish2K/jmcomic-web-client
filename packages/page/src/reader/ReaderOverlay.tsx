@@ -439,7 +439,7 @@ export function ReaderOverlay({
 
       {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col">
+        <div className="absolute max-sm:bottom-[100px] bottom-0 left-0 right-0 z-20 flex flex-col">
           <div className="flex items-center gap-3 px-4 h-10 bg-black/90">
             <div className="flex items-center gap-1 shrink-0">
               <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一话"><ChevronLeft size={16} /></button>
@@ -482,7 +482,6 @@ export function ReaderOverlay({
               <ChevronUp size={12} /><ChevronDown size={12} />
             </div>
           </div>
-          <div style={{ height: 100 }} />
         </div>
       )}
 

@@ -562,6 +562,8 @@ export default function ReaderPage() {
     WebkitOverflowScrolling: 'touch',
     overscrollBehavior: 'contain',
     touchAction: isRTL ? 'pan-x' : 'pan-y',
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
     ...barPad,
   };
 
@@ -593,6 +595,7 @@ export default function ReaderPage() {
 
   return (
     <div className="fixed inset-0 bg-black select-none overflow-hidden">
+      <style>{`::-webkit-scrollbar { display: none; }`}</style>
       <div ref={containerRef} className="h-full w-full" style={scrollDivStyle}>
         {images.map((img, i) => {
           const url = blobMap.get(i);
