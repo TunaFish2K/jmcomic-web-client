@@ -587,7 +587,7 @@ export default function ReaderPage() {
       };
 
   const imgCls = isRTL
-    ? 'max-h-full max-w-full h-auto w-auto object-contain'
+    ? 'w-full h-auto max-h-full object-contain'
     : 'h-auto w-full object-contain';
 
   const lazyRenderStart = Math.max(0, currentPage - lazyRenderRange);

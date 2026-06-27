@@ -423,35 +423,33 @@ export function ReaderOverlay({
 
       {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
-        <div className="absolute max-sm:bottom-[100px] bottom-0 left-0 right-0 z-20 flex flex-col">
-          <div className="flex items-center gap-3 px-4 h-10 bg-black/90">
-            <div className="flex items-center gap-1 shrink-0">
-              <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一话"><ChevronLeft size={16} /></button>
-              <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{activePage + 1}/{totalPages}</span>
-              <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="下一话"><ChevronRight size={16} /></button>
-            </div>
-            <div
-              ref={progressRef}
-              className="flex-1 h-5 cursor-pointer relative group -my-1.5"
-              onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
-              onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
-              style={{ touchAction: 'none' }}
-            >
-              <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-brand-500 rounded-full relative flex items-center"
-                    style={{
-                      width: `${activePct}%`,
-                      transition: dragging ? 'none' : undefined,
-                    }}
-                  >
-                    <div className="absolute right-0 w-5 h-5 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
+        <div className="absolute bottom-0 left-0 right-0 z-20">
+          <div className="bg-black/90 pb-6">
+            <div className="flex items-center gap-3 px-4 py-0.5">
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一话"><ChevronLeft size={16} /></button>
+                <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{activePage + 1}/{totalPages}</span>
+                <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="下一话"><ChevronRight size={16} /></button>
+              </div>
+              <div
+                ref={progressRef}
+                className="flex-1 h-12 cursor-pointer relative group"
+                onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
+                onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+                style={{ touchAction: 'none' }}
+              >
+                <div className="h-12 bg-gray-700/50 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-brand-500 rounded-full relative flex items-center"
+                      style={{
+                        width: `${activePct}%`,
+                        transition: dragging ? 'none' : undefined,
+                      }}
+                    >
+                      <div className="absolute right-0 w-6 h-6 bg-brand-500 rounded-full shadow-md -translate-y-1/2 top-1/2 translate-x-1/2 opacity-100 ring-2 ring-brand-700/30" />
+                    </div>
                   </div>
-                </div>
-            </div>
-            <div className="flex items-center gap-1 shrink-0">
-              <button type="button" onClick={onPrevPage} className="text-white/50 hover:text-white p-0.5" title="上一页"><ChevronUp size={12} className="pointer-events-none" /></button>
-              <button type="button" onClick={onNextPage} className="text-white/50 hover:text-white p-0.5" title="下一页"><ChevronDown size={12} className="pointer-events-none" /></button>
+              </div>
             </div>
           </div>
         </div>
@@ -487,10 +485,6 @@ export function ReaderOverlay({
                   <div className="absolute bottom-0 w-5 h-5 bg-brand-500 rounded-full shadow-md -translate-x-1/2 left-1/2 translate-y-1/2 opacity-100 ring-2 ring-brand-700/30" />
                 </div>
               </div>
-            </div>
-            <div className="flex flex-col items-center gap-0.5">
-              <button type="button" onClick={onPrevPage} className="text-white/50 hover:text-white p-0.5" title="上一页"><ChevronLeft size={10} className="pointer-events-none" /></button>
-              <button type="button" onClick={onNextPage} className="text-white/50 hover:text-white p-0.5" title="下一页"><ChevronRight size={10} className="pointer-events-none" /></button>
             </div>
         </div>
       </div>
