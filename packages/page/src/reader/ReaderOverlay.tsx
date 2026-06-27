@@ -439,8 +439,8 @@ export function ReaderOverlay({
 
       {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-black/90" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-          <div className="flex items-center gap-3 px-4 h-10">
+        <div className="absolute bottom-0 left-0 right-0 z-20 flex flex-col">
+          <div className="flex items-center gap-3 px-4 h-10 bg-black/90">
             <div className="flex items-center gap-1 shrink-0">
               <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一话"><ChevronLeft size={16} /></button>
               <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{activePage + 1}/{totalPages}</span>
@@ -479,11 +479,20 @@ export function ReaderOverlay({
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-1 shrink-0">
-  
+            <div className="flex items-center gap-1 text-white/40 text-xs shrink-0">
+              <ChevronUp size={12} /><ChevronDown size={12} />
+            </div>
+          </div>
+          <div style={{ height: 'env(safe-area-inset-bottom, 24px)' }} />
+        </div>
+      )}
+
       {/* Info bar — left/right */}
       {barVisible && !isHorizontalBar && (
-        <div className={`absolute top-0 bottom-0 z-20 ${barSide === 'right' ? 'right-0' : 'left-0'}`} style={{ width: 40 }}>
+        <div
+          className={`absolute top-0 bottom-0 z-20 ${barSide === 'right' ? 'right-0' : 'left-0'}`}
+          style={{ width: 40, paddingRight: barSide === 'right' ? 'env(safe-area-inset-right, 0px)' : undefined, paddingLeft: barSide === 'left' ? 'env(safe-area-inset-left, 0px)' : undefined }}
+        >
           <div className="flex flex-col items-center gap-2 py-4 h-full" style={{ paddingTop: '3.5rem' }}>
             <div className="flex flex-col-reverse items-center gap-0.5">
               <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="下一话"><ChevronDown size={14} /></button>
@@ -525,7 +534,6 @@ export function ReaderOverlay({
             <div className="flex flex-col items-center gap-0.5 text-white/40 text-xs">
               <ChevronLeft size={10} /><ChevronRight size={10} />
             </div>
-          </div>
         </div>
       )}
 
