@@ -162,6 +162,7 @@ export default function ReaderPage() {
 
   const initialPageRef = useRef(0);
   const pendingPageRef = useRef<number | 'last' | null>(null);
+  const switchingRef = useRef(false);
   const restoreDoneRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const loadedSetRef = useRef(new Set<number>());
@@ -259,6 +260,9 @@ export default function ReaderPage() {
   }, [scrollToPage]);
 
   const resetReader = useCallback((newChapterId: string, page?: number | 'last') => {
+    if (switchingRef.current) return;
+    switchingRef.current = true;
+    window.setTimeout(() => { switchingRef.current = false; }, 5000);
     // capture the currently displayed page so we can keep it visible while switching
     const el = containerRef.current;
     if (el) {
@@ -782,7 +786,10 @@ export default function ReaderPage() {
 
   // ── clear transition overlay once the new chapter's photo is ready ──
   useEffect(() => {
-    if (photo) setTransitioning(false);
+    if (photo) {
+      setTransitioning(false);
+      switchingRef.current = false;
+    }
   }, [photo]);
 
   // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
