@@ -36,7 +36,7 @@ function ChapterDrawer({
           </button>
         </div>
         <div className="py-1 flex-1">
-          {chapters.map((ch) => {
+          {chapters.map((ch, i) => {
             const prog = chapterProgress[ch.id];
             const isActive = ch.id === currentChapterId;
             return (
@@ -48,7 +48,10 @@ function ChapterDrawer({
                   isActive ? 'text-brand-400 bg-gray-800' : 'text-gray-300'
                 }`}
               >
-                <span className="line-clamp-1">{ch.name}</span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-gray-500 tabular-nums shrink-0">{i + 1}.</span>
+                  <span className="line-clamp-1 flex-1 min-w-0">{ch.name}</span>
+                </div>
                 {prog && (
                   <span className="text-[10px] text-gray-500 mt-0.5 tabular-nums">
                     已读 {prog.page + 1}/{prog.totalPages}

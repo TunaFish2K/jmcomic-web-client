@@ -1,4 +1,4 @@
-import { useState, useRef, createContext, useContext, useCallback, useEffect } from "react";
+import { useState, useRef, createContext, useContext, useCallback, useEffect, useMemo } from "react";
 import { Button, InputGroup, Select, ListBox, FieldError } from "@heroui/react";
 import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, Sun, Moon, Monitor, BookOpen } from "lucide-react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
@@ -17,7 +17,7 @@ import {
 } from "@tiny-client/shared";
 import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
-import { saveAlbumMeta } from "../reader/reader-store";
+import { saveAlbumMeta, getLatestChapterProgress } from "../reader/reader-store";
 import { getCachedAlbums, setCachedAlbums } from "../album-cache";
 
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
@@ -657,14 +657,26 @@ function AlbumModal({ albumId, cachedData, onClose }: {
     const album = cachedData?.album ?? null;
     const photo = cachedData?.photo ?? null;
     const isSeriesAlbum = !!album?.series?.length;
-    const sortedSeries = isSeriesAlbum
-        ? [...album!.series].sort((a, b) => parseSeriesOrder(a.sort) - parseSeriesOrder(b.sort))
-        : [];
+    const sortedSeries = useMemo(
+        () => isSeriesAlbum
+            ? [...album!.series].sort((a, b) => parseSeriesOrder(a.sort) - parseSeriesOrder(b.sort))
+            : [],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [album],
+    );
     const statsLabel = isSeriesAlbum
         ? `${sortedSeries.length} 话`
         : photo
             ? `${photo.images.length} 页`
             : '章节数据待加载';
+
+    // Last-read chapter for the "继续阅读" entry button on series albums.
+    const rootKey = album?.seriesID || albumId;
+    const latest = useMemo(
+        () => isSeriesAlbum ? getLatestChapterProgress(rootKey, sortedSeries.map((s) => s.id)) : null,
+        [rootKey, sortedSeries, isSeriesAlbum],
+    );
+    const lastChapter = latest ? sortedSeries.find((s) => s.id === latest.chapterId) : null;
 
     useEffect(() => {
         if (album) saveAlbumMeta(albumId, album);
@@ -763,6 +775,16 @@ function AlbumModal({ albumId, cachedData, onClose }: {
 
                             {isSeriesAlbum ? (
                                 <div className="space-y-3">
+                                    {latest && lastChapter && (
+                                        <Button
+                                            size="sm"
+                                            className="w-full justify-start bg-brand-500 hover:bg-brand-600 text-white"
+                                            onPress={() => navigate(`/reader/${latest.chapterId}`, { state: { isSeries: true, album, seriesItems: sortedSeries.map((s) => ({ id: s.id, name: `${album!.name} - ${s.name}`, order: parseSeriesOrder(s.sort) })) } })}
+                                        >
+                                            <BookOpen size={14} className="mr-1 shrink-0" />
+                                            <span className="truncate">继续阅读：{lastChapter.name} · 第 {latest.page + 1} 页</span>
+                                        </Button>
+                                    )}
                                     <SeriesDownloadManager
                                         albumName={album!.name}
                                         items={sortedSeries
