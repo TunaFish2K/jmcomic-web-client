@@ -160,10 +160,8 @@ export default function ReaderPage() {
   const isRTL = direction === 'left-right';
   const currentChapterIndex = sortedChapters.findIndex((c) => c.id === currentChapterId);
 
-  const initialPageRef = useRef(0);
   const pendingPageRef = useRef<number | 'last' | null>(null);
   const switchingRef = useRef(false);
-  const restoreDoneRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const loadedSetRef = useRef(new Set<number>());
   const inflightRef = useRef(new Set<number>());
@@ -259,6 +257,15 @@ export default function ReaderPage() {
     scrollToPage(clamped, 'instant');
   }, [scrollToPage]);
 
+  const handleImageLoad = useCallback((pageIndex: number) => {
+    if (pendingPageRef.current === pageIndex) {
+      scrollToPage(pageIndex, 'instant');
+      pendingPageRef.current = null;
+      setTransitioning(false);
+      switchingRef.current = false;
+    }
+  }, [scrollToPage]);
+
   const resetReader = useCallback((newChapterId: string, page?: number | 'last') => {
     if (switchingRef.current) return;
     switchingRef.current = true;
@@ -288,7 +295,6 @@ export default function ReaderPage() {
     }
     loadedSetRef.current = new Set();
     inflightRef.current = new Set();
-    restoreDoneRef.current = false;
     boundaryAccumRef.current = 0;
     if (boundaryTimerRef.current !== null) { window.clearTimeout(boundaryTimerRef.current); boundaryTimerRef.current = null; }
     // Keep the chapter list stable across the URL change by carrying it in router state.
@@ -479,16 +485,75 @@ export default function ReaderPage() {
     }
   }, []);
 
+  // ── photo-ready: resolve pendingPageRef / restore progress → scroll & unlock ──
   useEffect(() => {
     if (!photo || images.length === 0) return;
-    if (restoreDoneRef.current) return;
-    restoreDoneRef.current = true;
-    const root = seriesRootRef.current || albumIdRef.current!;
-    const stored = getLatestChapterProgress(root, sortedChapters.map((c) => c.id));
-    const startPage = stored?.chapterId === currentChapterId ? stored.page : getReadingProgress(root, currentChapterId)?.page ?? 0;
-    preloadRange(startPage);
+
+    // Determine target page
+    let targetPage: number;
+    if (pendingPageRef.current !== null) {
+      // Chapter switch: resolve 'last' to actual page number
+      targetPage = pendingPageRef.current === 'last'
+        ? images.length - 1
+        : Math.max(0, Math.min(images.length - 1, pendingPageRef.current));
+    } else {
+      // Initial load (direct URL entry): restore saved progress
+      const root = seriesRootRef.current || albumIdRef.current!;
+      const stored = getReadingProgress(root, currentChapterId);
+      const latest = getLatestChapterProgress(root, sortedChapters.map((c) => c.id));
+      targetPage = latest?.chapterId === currentChapterId
+        ? latest.page
+        : (stored?.page ?? 0);
+      targetPage = Math.max(0, Math.min(images.length - 1, targetPage));
+    }
+
+    // Set currentPage so the lazy-render range includes the target → DecryptedImage renders & starts decrypting
+    setCurrentPage(targetPage);
+    // Stash the resolved page number so onScroll guard + handleImageLoad can compare
+    pendingPageRef.current = targetPage;
+    // Kick off decryption of the target page
+    preloadRange(targetPage);
+
+    // ── Attempt scroll to target ──
+    const el = containerRef.current;
+    if (!el) { pendingPageRef.current = null; setTransitioning(false); switchingRef.current = false; return; }
+
+    const finish = () => {
+      scrollToPage(targetPage, 'instant');
+      pendingPageRef.current = null;
+      setTransitioning(false);
+      switchingRef.current = false;
+    };
+
+    const pageEl = el.children[targetPage] as HTMLElement | undefined;
+    const img = pageEl?.querySelector('img') as HTMLImageElement | null;
+
+    // Case 1: <img> already exists and has dimensions (blob was cached) → scroll immediately
+    if (img && img.complete && img.naturalHeight > 0) {
+      finish();
+      return;
+    }
+
+    // Case 2: <img> exists but not yet decoded → wait for decode, 5s fallback
+    if (img) {
+      let done = false;
+      img.decode().then(() => {
+        if (!done && pendingPageRef.current === targetPage) finish();
+      }).catch(() => {});
+      const tid = window.setTimeout(() => {
+        done = true;
+        if (pendingPageRef.current === targetPage) finish();
+      }, 5000);
+      return () => clearTimeout(tid);
+    }
+
+    // Case 3: no <img> yet (DecryptedImage still decrypting) → handleImageLoad callback + 5s fallback
+    const tid = window.setTimeout(() => {
+      if (pendingPageRef.current === targetPage) finish();
+    }, 5000);
+    return () => clearTimeout(tid);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photo, images.length]);
+  }, [photo, currentChapterId, images.length]);
 
   useEffect(() => {
     if (images.length === 0) return;
@@ -543,6 +608,7 @@ export default function ReaderPage() {
       if (isHorizontal) {
         const max = Math.max(el.scrollWidth - el.clientWidth, 0);
         setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollLeft / max) * 100));
+        if (pendingPageRef.current !== null) return;
         const center = el.scrollLeft + el.clientWidth / 2;
         let best = 0, bestDist = Infinity;
         for (let i = 0; i < children.length; i++) {
@@ -559,6 +625,7 @@ export default function ReaderPage() {
       } else {
         const max = Math.max(el.scrollHeight - el.clientHeight, 0);
         setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollTop / max) * 100));
+        if (pendingPageRef.current !== null) return;
         const center = el.scrollTop + el.clientHeight / 2;
         let best = 0, bestDist = Infinity;
         for (let i = 0; i < children.length; i++) {
@@ -573,27 +640,7 @@ export default function ReaderPage() {
 
     el.addEventListener('scroll', onScroll, { passive: true });
 
-    const root = seriesRootRef.current || albumIdRef.current!;
-    const stored = getReadingProgress(root, chapterIdRef.current);
-    let startPage = stored?.page ?? 0;
-    if (pendingPageRef.current !== null && photo?.id === currentChapterId) {
-      if (pendingPageRef.current === 'last') {
-        startPage = images.length - 1;
-      } else {
-        startPage = pendingPageRef.current;
-      }
-      pendingPageRef.current = null;
-    }
-    initialPageRef.current = startPage;
-    if (!restoreDoneRef.current) {
-      restoreDoneRef.current = true;
-      preloadRange(startPage);
-    }
-    const tid = setTimeout(() => scrollToPage(startPage), 0);
-    requestAnimationFrame(onScroll);
-
     return () => {
-      clearTimeout(tid);
       clearHorizontalSnapTimer();
       el.removeEventListener('scroll', onScroll);
     };
@@ -784,14 +831,6 @@ export default function ReaderPage() {
     };
   }, [photo, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
 
-  // ── clear transition overlay once the new chapter's photo is ready ──
-  useEffect(() => {
-    if (photo) {
-      setTransitioning(false);
-      switchingRef.current = false;
-    }
-  }, [photo]);
-
   // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
 
   const handleFlipClick = useCallback((e: React.MouseEvent) => {
@@ -889,7 +928,7 @@ export default function ReaderPage() {
           return (
             <div key={img.name} className="shrink-0" style={pageStyle}>
               {url ? (
-                <img src={url} alt="" draggable={false} className={imgCls} />
+                <img src={url} alt="" draggable={false} className={imgCls} onLoad={() => handleImageLoad(i)} />
               ) : !shouldRenderImage ? (
                 <div className={`relative overflow-hidden bg-gray-900/60 ${imgCls}`}>
                   <div className="absolute inset-0 flex items-center justify-center">
