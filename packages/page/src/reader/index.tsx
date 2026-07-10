@@ -161,6 +161,7 @@ export default function ReaderPage() {
   const currentChapterIndex = sortedChapters.findIndex((c) => c.id === currentChapterId);
 
   const initialPageRef = useRef(0);
+  const pendingLastPageRef = useRef(false);
   const restoreDoneRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const loadedSetRef = useRef(new Set<number>());
@@ -257,7 +258,7 @@ export default function ReaderPage() {
     scrollToPage(clamped, 'instant');
   }, [scrollToPage]);
 
-  const resetReader = useCallback((newChapterId: string, page?: number) => {
+  const resetReader = useCallback((newChapterId: string, page?: number | 'last') => {
     // capture the currently displayed page so we can keep it visible while switching
     const el = containerRef.current;
     if (el) {
@@ -271,7 +272,13 @@ export default function ReaderPage() {
     setHint(null);
     setBlobMap(new Map());
     setCurrentChapterId(newChapterId);
-    setCurrentPage(page ?? 0);
+    if (page === 'last') {
+      pendingLastPageRef.current = true;
+      setCurrentPage(0);
+    } else {
+      pendingLastPageRef.current = false;
+      setCurrentPage(page ?? 0);
+    }
     loadedSetRef.current = new Set();
     inflightRef.current = new Set();
     restoreDoneRef.current = false;
@@ -302,7 +309,7 @@ export default function ReaderPage() {
       }
       if (step < 0 && hasPrevChapterRef.current) {
         const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
-        if (prev) { resetReader(prev.id); return; }
+        if (prev) { resetReader(prev.id, 'last'); return; }
       }
       return;
     }
@@ -317,7 +324,7 @@ export default function ReaderPage() {
     if (step < 0) {
       if (el.scrollTop <= 1 && hasPrevChapterRef.current) {
         const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
-        if (prev) { resetReader(prev.id); return; }
+        if (prev) { resetReader(prev.id, 'last'); return; }
       }
     }
 
@@ -343,7 +350,7 @@ export default function ReaderPage() {
       scrollToPage(page - 1, 'smooth');
     } else if (hasPrevChapterRef.current) {
       const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
-      if (prev) resetReader(prev.id);
+      if (prev) resetReader(prev.id, 'last');
     }
   }, [scrollToPage, resetReader]);
 
@@ -561,7 +568,11 @@ export default function ReaderPage() {
 
     const root = seriesRootRef.current || albumIdRef.current!;
     const stored = getReadingProgress(root, chapterIdRef.current);
-    const startPage = stored?.page ?? 0;
+    let startPage = stored?.page ?? 0;
+    if (pendingLastPageRef.current) {
+      pendingLastPageRef.current = false;
+      startPage = images.length - 1;
+    }
     initialPageRef.current = startPage;
     if (!restoreDoneRef.current) {
       restoreDoneRef.current = true;
