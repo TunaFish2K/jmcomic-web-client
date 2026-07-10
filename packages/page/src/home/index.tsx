@@ -17,7 +17,7 @@ import {
 } from "@tiny-client/shared";
 import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
-import { saveAlbumCache } from "../reader/reader-store";
+import { saveAlbumMeta } from "../reader/reader-store";
 import { getCachedAlbums, setCachedAlbums } from "../album-cache";
 
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
@@ -667,7 +667,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
             : '章节数据待加载';
 
     useEffect(() => {
-        if (album) saveAlbumCache(albumId, album);
+        if (album) saveAlbumMeta(albumId, album);
     }, [album, albumId]);
 
     return (

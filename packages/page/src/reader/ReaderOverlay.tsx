@@ -8,14 +8,21 @@ type ChapterInfo = { id: string; name: string; order: number };
 function ChapterDrawer({
   chapters,
   currentChapterId,
+  chapterProgress,
   onGoTo,
   onClose,
 }: {
   chapters: ChapterInfo[];
   currentChapterId: string;
+  chapterProgress: Record<string, { page: number; totalPages: number } | undefined>;
   onGoTo: (id: string) => void;
   onClose: () => void;
 }) {
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
+  }, []);
+
   return (
     <div className="absolute inset-0 z-50 bg-black/60 flex justify-end" onClick={onClose}>
       <div
@@ -29,18 +36,79 @@ function ChapterDrawer({
           </button>
         </div>
         <div className="py-1 flex-1">
-          {chapters.map((ch) => (
-            <button
-              key={ch.id}
-              onClick={() => { onGoTo(ch.id); onClose(); }}
-              className={`w-full text-left px-4 py-3 text-sm border-b border-gray-800 hover:bg-gray-800 transition-colors ${
-                ch.id === currentChapterId ? 'text-brand-400 bg-gray-800' : 'text-gray-300'
-              }`}
-            >
-              <span className="line-clamp-1">{ch.name}</span>
-            </button>
-          ))}
+          {chapters.map((ch) => {
+            const prog = chapterProgress[ch.id];
+            const isActive = ch.id === currentChapterId;
+            return (
+              <button
+                key={ch.id}
+                ref={isActive ? activeRef : undefined}
+                onClick={() => { onGoTo(ch.id); onClose(); }}
+                className={`w-full text-left px-4 py-3 text-sm border-b border-gray-800 hover:bg-gray-800 transition-colors ${
+                  isActive ? 'text-brand-400 bg-gray-800' : 'text-gray-300'
+                }`}
+              >
+                <span className="line-clamp-1">{ch.name}</span>
+                {prog && (
+                  <span className="text-[10px] text-gray-500 mt-0.5 tabular-nums">
+                    已读 {prog.page + 1}/{prog.totalPages}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function BoundaryHint({
+  hint,
+  boundaryToast,
+  direction,
+  onDismiss,
+}: {
+  hint: { dir: 'prev' | 'next'; progress: number; chapterName: string } | null;
+  boundaryToast: 'prev' | 'next' | null;
+  direction: ReadingDirection;
+  onDismiss: () => void;
+}) {
+  const isVertical = direction === 'top-down';
+
+  if (boundaryToast) {
+    return (
+      <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+        <div className="bg-gray-900/90 backdrop-blur-md text-white/90 text-sm px-4 py-2 rounded-xl shadow-xl ring-1 ring-white/10">
+          {boundaryToast === 'prev' ? '没有上一章了' : '没有下一章了'}
+        </div>
+      </div>
+    );
+  }
+
+  if (!hint) return null;
+  const pct = Math.round(hint.progress * 100);
+  const label = hint.dir === 'prev' ? '上一章' : '下一章';
+  const Arrow = isVertical
+    ? (hint.dir === 'prev' ? ChevronUp : ChevronDown)
+    : (hint.dir === 'prev' ? ChevronLeft : ChevronRight);
+  const hint2 = isVertical
+    ? (hint.dir === 'prev' ? '继续向上滑进入' : '继续向下滑进入')
+    : (hint.dir === 'prev' ? '继续向左滑进入' : '继续向右滑进入');
+
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center" onClick={onDismiss}>
+      <div
+        className="flex flex-col items-center gap-2 bg-gray-900/85 backdrop-blur-md rounded-2xl shadow-2xl px-6 py-5 ring-1 ring-white/10 transition-all pointer-events-none"
+        style={{ opacity: Math.max(0.25, hint.progress), transform: `scale(${0.92 + hint.progress * 0.08})` }}
+      >
+        <Arrow size={26} className="text-brand-400" style={{ strokeWidth: 2.4 }} />
+        <div className="text-white text-sm font-semibold">{label}</div>
+        <div className="text-gray-300 text-xs line-clamp-1 max-w-[60vw]">{hint.chapterName}</div>
+        <div className="w-40 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+          <div className="h-full bg-brand-500 rounded-full" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="text-gray-400 text-[11px]">{hint2}</div>
       </div>
     </div>
   );
@@ -181,9 +249,12 @@ export function ReaderOverlay({
   chapterName,
   chapters,
   currentChapterId,
+  chapterProgress,
   direction,
   hasPrevChapter,
   hasNextChapter,
+  hint,
+  boundaryToast,
   autoSnap,
   seamlessMode,
   lazyRenderRange,
@@ -204,6 +275,7 @@ export function ReaderOverlay({
   onToggleBarVisible,
   onScrollByInputStep,
   onSeekPage,
+  onBoundaryDismiss,
 }: {
   visible: boolean;
   title: string;
@@ -213,9 +285,12 @@ export function ReaderOverlay({
   chapterName: string;
   chapters: ChapterInfo[];
   currentChapterId: string;
+  chapterProgress: Record<string, { page: number; totalPages: number } | undefined>;
   direction: ReadingDirection;
   hasPrevChapter: boolean;
   hasNextChapter: boolean;
+  hint: { dir: 'prev' | 'next'; progress: number; chapterName: string } | null;
+  boundaryToast: 'prev' | 'next' | null;
   autoSnap: boolean;
   seamlessMode: boolean;
   lazyRenderRange: number;
@@ -236,6 +311,7 @@ export function ReaderOverlay({
   onToggleBarVisible: () => void;
   onScrollByInputStep: (step: number) => void;
   onSeekPage?: (page: number) => void;
+  onBoundaryDismiss: () => void;
 }) {
   const [showChapterDrawer, setShowChapterDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -379,7 +455,17 @@ export function ReaderOverlay({
   return (
     <>
       {showChapterDrawer && (
-        <ChapterDrawer chapters={chapters} currentChapterId={currentChapterId} onGoTo={onGoToChapter} onClose={() => setShowChapterDrawer(false)} />
+        <ChapterDrawer
+          chapters={chapters}
+          currentChapterId={currentChapterId}
+          chapterProgress={chapterProgress}
+          onGoTo={onGoToChapter}
+          onClose={() => setShowChapterDrawer(false)}
+        />
+      )}
+
+      {(hint || boundaryToast) && (
+        <BoundaryHint hint={hint} boundaryToast={boundaryToast} direction={direction} onDismiss={onBoundaryDismiss} />
       )}
 
       {visible && showSettings && (
@@ -406,7 +492,7 @@ export function ReaderOverlay({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
-            {chapters.length > 1 && (
+            {chapters.length >= 1 && (
               <button onClick={() => setShowChapterDrawer(true)} className="text-white/80 hover:text-white p-1" title="章节列表"><Bookmark size={18} /></button>
             )}
             <button onClick={() => setShowSettings(v => !v)} className={`p-1 transition-colors ${showSettings ? 'text-brand-400' : 'text-white/80 hover:text-white'}`} title="阅读设置"><Settings size={18} /></button>
@@ -427,9 +513,9 @@ export function ReaderOverlay({
           <div className="bg-black/90 pb-6">
             <div className="flex items-center gap-3 px-4 py-0.5">
               <div className="flex items-center gap-1 shrink-0">
-                <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一话"><ChevronLeft size={16} /></button>
+                <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一章"><ChevronLeft size={16} /></button>
                 <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{activePage + 1}/{totalPages}</span>
-                <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="下一话"><ChevronRight size={16} /></button>
+                <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="下一章"><ChevronRight size={16} /></button>
               </div>
               <div
                 ref={progressRef}
@@ -464,9 +550,9 @@ export function ReaderOverlay({
         >
           <div className="flex flex-col items-center gap-2 py-4 h-full" style={{ paddingTop: '3.5rem' }}>
             <div className="flex flex-col-reverse items-center gap-0.5">
-              <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="下一话"><ChevronDown size={14} /></button>
+              <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="下一章"><ChevronDown size={14} /></button>
               <span className="text-white/60 text-[10px] tabular-nums" style={{ writingMode: 'vertical-rl' }}>{activePage + 1}/{totalPages}</span>
-              <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="上一话"><ChevronUp size={14} /></button>
+              <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="上一章"><ChevronUp size={14} /></button>
             </div>
             <div
               ref={progressRef}

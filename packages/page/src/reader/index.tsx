@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect } fr
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getAlbum, getPhoto } from '../api';
-import { getCachedAlbum } from '../album-cache';
+import { getCachedAlbum, setCachedAlbum } from '../album-cache';
 import { DecryptedImage } from './DecryptedImage';
 import { ReaderOverlay } from './ReaderOverlay';
 import type { ReadingDirection, BarSide } from './reader-store';
@@ -20,8 +20,8 @@ import {
   getBarSide,
   saveBarSide,
   saveReadingProgress,
-  getAlbumCache,
-  saveAlbumCache,
+  getAlbumMeta,
+  saveAlbumMeta,
 } from './reader-store';
 import pLimit from 'p-limit';
 import { getSliceCount, reverseImageBySlice, getCachedImage, setCachedImage, generateImageCacheKey } from '@tiny-client/shared';
@@ -89,7 +89,7 @@ export default function ReaderPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const initialAlbumRef = useRef(location.state?.album ?? (albumId ? getAlbumCache(albumId) : null));
+  const initialAlbumRef = useRef(location.state?.album ?? (albumId ? getAlbumMeta(albumId) : null));
   const initialPhotoRef = useRef(location.state?.photo ?? null);
 
   const isSeries = location.state?.isSeries === true;
@@ -100,11 +100,11 @@ export default function ReaderPage() {
     queryFn: async () => {
       const cached = await getCachedAlbum(albumId!);
       if (cached?.album) {
-        saveAlbumCache(albumId!, cached.album);
+        saveAlbumMeta(albumId!, cached.album);
         return cached.album;
       }
       const fetched = await getAlbum(albumId!);
-      if (fetched) saveAlbumCache(albumId!, fetched);
+      if (fetched) saveAlbumMeta(albumId!, fetched);
       return fetched;
     },
     enabled: !!albumId,
@@ -112,7 +112,7 @@ export default function ReaderPage() {
   });
 
   useEffect(() => {
-    initialAlbumRef.current = location.state?.album ?? (albumId ? getAlbumCache(albumId) : null);
+    initialAlbumRef.current = location.state?.album ?? (albumId ? getAlbumMeta(albumId) : null);
   }, [albumId, location.state]);
 
   useEffect(() => {
@@ -120,7 +120,7 @@ export default function ReaderPage() {
   }, [location.state]);
 
   useEffect(() => {
-    if (albumId && album) saveAlbumCache(albumId, album);
+    if (albumId && album) saveAlbumMeta(albumId, album);
   }, [albumId, album]);
 
   const sortedChapters: ChapterInfo[] = useMemo(() =>
@@ -142,6 +142,18 @@ export default function ReaderPage() {
   const [scrollProgressPct, setScrollProgressPct] = useState(0);
   const [blobMap, setBlobMap] = useState<Map<number, string>>(new Map());
 
+  // ── boundary chapter-swap hint (pull past first/last page) ──
+  const [hint, setHint] = useState<{ dir: 'prev' | 'next'; progress: number; chapterName: string } | null>(null);
+  const [boundaryToast, setBoundaryToast] = useState<'prev' | 'next' | null>(null);
+  const boundaryAccumRef = useRef(0);
+  const boundaryTimerRef = useRef<number | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const touchTrackingRef = useRef<{ boundaryDir: 'prev' | 'next'; startX: number; startY: number; startScroll: number; distance: number } | null>(null);
+
+  // ── chapter-transition snapshot (keeps last page visible while switching) ──
+  const [snapshot, setSnapshot] = useState<{ url: string; w: number; h: number } | null>(null);
+  const [transitioning, setTransitioning] = useState(false);
+
   const isRTL = direction === 'left-right';
   const currentChapterIndex = sortedChapters.findIndex((c) => c.id === currentChapterId);
 
@@ -162,21 +174,55 @@ export default function ReaderPage() {
   isRTLRef.current = isRTL;
   const albumIdRef = useRef(albumId);
   albumIdRef.current = albumId;
+  const seriesRootRef = useRef<string>(albumId ?? '');
+  const mountAlbumIdRef = useRef<string | undefined>(albumId);
+  // Stable canonical series id for progress keys: prefer album.seriesID once known.
+  useEffect(() => {
+    const root = album?.seriesID;
+    if (root && root !== seriesRootRef.current) seriesRootRef.current = root;
+  }, [album]);
   const chapterIdRef = useRef(currentChapterId);
   chapterIdRef.current = currentChapterId;
   const chapterIndexRef = useRef(currentChapterIndex);
   chapterIndexRef.current = currentChapterIndex;
   const imagesCountRef = useRef(0);
+  const hasPrevChapterRef = useRef(false);
+  hasPrevChapterRef.current = currentChapterIndex > 0;
+  const hasNextChapterRef = useRef(false);
+  hasNextChapterRef.current = currentChapterIndex < sortedChapters.length - 1;
+  const prevChapterNameRef = useRef('');
+  prevChapterNameRef.current = sortedChapters[currentChapterIndex - 1]?.name ?? '';
+  const nextChapterNameRef = useRef('');
+  nextChapterNameRef.current = sortedChapters[currentChapterIndex + 1]?.name ?? '';
+  const sortedChaptersRef = useRef(sortedChapters);
+  sortedChaptersRef.current = sortedChapters;
+
+  // Per-chapter reading progress for the chapter drawer.
+  const chapterProgress = useMemo(() => {
+    const root = seriesRootRef.current || albumIdRef.current || albumId || '';
+    const map: Record<string, { page: number; totalPages: number } | undefined> = {};
+    for (const ch of sortedChapters) {
+      const p = getReadingProgress(root, ch.id);
+      if (p) map[ch.id] = { page: p.page, totalPages: p.totalPages };
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedChapters, currentPage, currentChapterId]);
 
   const { data: photo } = useQuery({
     queryKey: ['photo', currentChapterId],
     queryFn: async () => {
       const cached = await getCachedAlbum(currentChapterId);
       if (cached?.photo) return cached.photo;
-      return getPhoto(currentChapterId);
+      const fetched = await getPhoto(currentChapterId);
+      if (fetched && album) {
+        // Persist photo in IndexedDB under the chapter id so re-entry is instant.
+        setCachedAlbum(currentChapterId, album, fetched);
+      }
+      return fetched;
     },
     enabled: !!currentChapterId,
-    initialData: currentChapterId === albumId ? initialPhotoRef.current : undefined,
+    initialData: currentChapterId === mountAlbumIdRef.current ? initialPhotoRef.current : undefined,
   });
 
   const images = photo?.images ?? [];
@@ -242,13 +288,32 @@ export default function ReaderPage() {
   }, [scrollToPage]);
 
   const resetReader = useCallback((newChapterId: string, page?: number) => {
+    // capture the currently displayed page so we can keep it visible while switching
+    const el = containerRef.current;
+    if (el) {
+      const pageEl = el.children[currentPageRef.current] as HTMLElement | undefined;
+      const img = pageEl?.querySelector('img') as HTMLImageElement | null;
+      if (img && img.src) {
+        setSnapshot({ url: img.src, w: img.naturalWidth || img.width || 1, h: img.naturalHeight || img.height || 1 });
+      }
+    }
+    setTransitioning(true);
+    setHint(null);
+    setBlobMap(new Map());
     setCurrentChapterId(newChapterId);
     setCurrentPage(page ?? 0);
-    setBlobMap(new Map());
     loadedSetRef.current = new Set();
     inflightRef.current = new Set();
     restoreDoneRef.current = false;
-  }, []);
+    boundaryAccumRef.current = 0;
+    if (boundaryTimerRef.current !== null) { window.clearTimeout(boundaryTimerRef.current); boundaryTimerRef.current = null; }
+    // Keep the chapter list stable across the URL change by carrying it in router state.
+    const chaptersToCarry = sortedChaptersRef.current;
+    navigate(`/reader/${newChapterId}`, {
+      replace: true,
+      state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
+    });
+  }, [navigate, isSeries, album]);
 
   const goNextChapter = useCallback(() => {
     if (currentChapterIndex < sortedChapters.length - 1) {
@@ -265,6 +330,36 @@ export default function ReaderPage() {
   const goToChapter = useCallback((chapterId: string) => {
     resetReader(chapterId);
   }, [resetReader]);
+
+  // ── boundary chapter-swap hint helpers ──
+  const showBoundaryToast = useCallback((dir: 'prev' | 'next') => {
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    setBoundaryToast(dir);
+    toastTimerRef.current = window.setTimeout(() => {
+      setBoundaryToast(null);
+      toastTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  const triggerChapterSwitch = useCallback((dir: 'prev' | 'next') => {
+    if (dir === 'next') {
+      if (hasNextChapterRef.current) goNextChapter();
+    } else {
+      if (hasPrevChapterRef.current) goPrevChapter();
+    }
+  }, [goNextChapter, goPrevChapter]);
+
+  const cancelBoundaryHint = useCallback(() => {
+    boundaryAccumRef.current = 0;
+    if (boundaryTimerRef.current !== null) { window.clearTimeout(boundaryTimerRef.current); boundaryTimerRef.current = null; }
+    setHint(null);
+  }, []);
+
+  const onBoundaryDismiss = useCallback(() => {
+    cancelBoundaryHint();
+    if (toastTimerRef.current !== null) { window.clearTimeout(toastTimerRef.current); toastTimerRef.current = null; }
+    setBoundaryToast(null);
+  }, [cancelBoundaryHint]);
 
   const toggleDirection = useCallback(() => {
     setDirection((prev) => {
@@ -342,8 +437,9 @@ export default function ReaderPage() {
     if (!photo || images.length === 0) return;
     if (restoreDoneRef.current) return;
     restoreDoneRef.current = true;
-    const stored = getLatestChapterProgress(albumId!, sortedChapters.map((c) => c.id));
-    const startPage = stored?.chapterId === currentChapterId ? stored.page : getReadingProgress(albumId!, currentChapterId)?.page ?? 0;
+    const root = seriesRootRef.current || albumIdRef.current!;
+    const stored = getLatestChapterProgress(root, sortedChapters.map((c) => c.id));
+    const startPage = stored?.chapterId === currentChapterId ? stored.page : getReadingProgress(root, currentChapterId)?.page ?? 0;
     preloadRange(startPage);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo, images.length]);
@@ -352,6 +448,22 @@ export default function ReaderPage() {
     if (images.length === 0) return;
     preloadRange(currentPage);
   }, [currentPage, preloadRange, images.length]);
+
+  // ─── one-shot: restore last-read chapter within the series ─────────────────
+  const initialChapterRestoreDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialChapterRestoreDoneRef.current) return;
+    // Wait for the real (multi-chapter) list; a single placeholder appears before the album loads.
+    if (sortedChapters.length <= 1) return;
+    const root = seriesRootRef.current || albumIdRef.current;
+    if (!root) return;
+    initialChapterRestoreDoneRef.current = true;
+    const latest = getLatestChapterProgress(root, sortedChapters.map((c) => c.id));
+    if (latest && latest.chapterId !== chapterIdRef.current && sortedChapters.some((c) => c.id === latest.chapterId)) {
+      resetReader(latest.chapterId, latest.page);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedChapters]);
 
   // ─── scroll observer (page detection only, no snap) ────────────────────────
 
@@ -415,12 +527,8 @@ export default function ReaderPage() {
 
     el.addEventListener('scroll', onScroll, { passive: true });
 
-    const progress = getLatestChapterProgress(albumIdRef.current!, sortedChapters.map((c) => c.id));
-    if (progress && progress.chapterId !== chapterIdRef.current) {
-      setCurrentChapterId(progress.chapterId);
-      return () => { el.removeEventListener('scroll', onScroll); };
-    }
-    const stored = getReadingProgress(albumIdRef.current!, chapterIdRef.current);
+    const root = seriesRootRef.current || albumIdRef.current!;
+    const stored = getReadingProgress(root, chapterIdRef.current);
     const startPage = stored?.page ?? 0;
     initialPageRef.current = startPage;
     if (!restoreDoneRef.current) {
@@ -439,17 +547,17 @@ export default function ReaderPage() {
   }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length, autoSnap, seamlessMode]);
 
   useEffect(() => {
-    if (!albumId || !currentChapterId || images.length === 0) return;
-
+    if (!currentChapterId || images.length === 0) return;
+    const root = seriesRootRef.current || albumIdRef.current!;
     saveReadingProgress({
-      albumId,
+      albumId: root,
       chapterId: currentChapterId,
       chapterIndex: Math.max(currentChapterIndex, 0),
       page: currentPage,
       totalPages: images.length,
       updatedAt: Date.now(),
     });
-  }, [albumId, currentChapterId, currentChapterIndex, currentPage, images.length]);
+  }, [currentChapterId, currentChapterIndex, currentPage, images.length]);
 
   // ─── wheel / touchpad scrolling ────────────────────────────────────────────
 
@@ -472,6 +580,34 @@ export default function ReaderPage() {
       if (Math.abs(dominantDelta) < 4) return;
 
       e.preventDefault();
+
+      // ── boundary chapter-swap: intercept when trying to scroll past first/last page ──
+      const step = dominantDelta > 0 ? 1 : -1;
+      const atPrev = currentPageRef.current === 0 && step < 0;
+      const atNext = currentPageRef.current >= imagesCountRef.current - 1 && step > 0;
+      if (atPrev || atNext) {
+        const dir: 'prev' | 'next' = step > 0 ? 'next' : 'prev';
+        const hasChapter = dir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
+        if (!hasChapter) {
+          showBoundaryToast(dir);
+          cancelBoundaryHint();
+          return;
+        }
+        if (boundaryTimerRef.current !== null) window.clearTimeout(boundaryTimerRef.current);
+        const isTp = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 40);
+        // A mouse-wheel notch is a large discrete delta; normalize it so the hint is visible first.
+        const contribution = isTp ? Math.abs(dominantDelta) : 40;
+        boundaryAccumRef.current += contribution;
+        const progress = Math.max(0, Math.min(1, boundaryAccumRef.current / 100));
+        setHint({ dir, progress, chapterName: dir === 'next' ? nextChapterNameRef.current : prevChapterNameRef.current });
+        if (progress >= 0.6) {
+          cancelBoundaryHint();
+          triggerChapterSwitch(dir);
+          return;
+        }
+        boundaryTimerRef.current = window.setTimeout(() => { cancelBoundaryHint(); }, 600);
+        return;
+      }
 
       const isTrackpad = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 40);
 
@@ -506,7 +642,98 @@ export default function ReaderPage() {
       el.removeEventListener('wheel', onWheel);
       resetTrackpadGesture();
     };
-  }, [isRTL, photo, scrollByInputStep]);
+  }, [isRTL, photo, scrollByInputStep, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
+
+  // ── touch boundary-pull detection (both directions use native scroll) ──
+
+  useEffect(() => {
+    if (!photo) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const curScroll = () => (isRTLRef.current ? el.scrollLeft : el.scrollTop);
+    const maxScroll = () => isRTLRef.current
+      ? Math.max(el.scrollWidth - el.clientWidth, 0)
+      : Math.max(el.scrollHeight - el.clientHeight, 0);
+
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      const s = curScroll();
+      const atPrev = currentPageRef.current === 0 && s <= 1;
+      const atNext = currentPageRef.current >= imagesCountRef.current - 1 && s >= maxScroll() - 1;
+      if (!atPrev && !atNext) return;
+      touchTrackingRef.current = {
+        boundaryDir: atPrev ? 'prev' : 'next',
+        startX: t.clientX,
+        startY: t.clientY,
+        startScroll: s,
+        distance: 0,
+      };
+      boundaryAccumRef.current = 0;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const tr = touchTrackingRef.current;
+      if (!tr) return;
+      // still pinned at the boundary? if the page can scroll further (not truly at edge), abort.
+      const s = curScroll();
+      if (tr.boundaryDir === 'prev' && s > 1) { touchTrackingRef.current = null; cancelBoundaryHint(); return; }
+      if (tr.boundaryDir === 'next' && s < maxScroll() - 1) { touchTrackingRef.current = null; cancelBoundaryHint(); return; }
+
+      const t = e.touches[0];
+      let raw: number;
+      if (isRTLRef.current) {
+        raw = tr.boundaryDir === 'prev' ? t.clientX - tr.startX : tr.startX - t.clientX;
+      } else {
+        raw = tr.boundaryDir === 'prev' ? t.clientY - tr.startY : tr.startY - t.clientY;
+      }
+      const distance = Math.max(0, raw);
+      tr.distance = distance;
+      const progress = Math.max(0, Math.min(1, distance / 100));
+      const hasChapter = tr.boundaryDir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
+      if (!hasChapter) {
+        // no chapter: don't show progress hint, just a toast (already shown on threshold pass)
+        if (progress >= 0.6) showBoundaryToast(tr.boundaryDir);
+        return;
+      }
+      setHint({ dir: tr.boundaryDir, progress, chapterName: tr.boundaryDir === 'next' ? nextChapterNameRef.current : prevChapterNameRef.current });
+    };
+
+    const onTouchEnd = () => {
+      const tr = touchTrackingRef.current;
+      touchTrackingRef.current = null;
+      if (!tr) return;
+      const progress = Math.max(0, Math.min(1, tr.distance / 100));
+      if (progress >= 0.6) {
+        const hasChapter = tr.boundaryDir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
+        if (hasChapter) {
+          cancelBoundaryHint();
+          triggerChapterSwitch(tr.boundaryDir);
+        } else {
+          showBoundaryToast(tr.boundaryDir);
+          cancelBoundaryHint();
+        }
+      } else {
+        cancelBoundaryHint();
+      }
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [photo, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
+
+  // ── clear transition overlay once the new chapter's photo is ready ──
+  useEffect(() => {
+    if (photo) setTransitioning(false);
+  }, [photo]);
 
   // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
 
@@ -532,7 +759,9 @@ export default function ReaderPage() {
 
   const title = album?.name ?? currentChapterId;
 
-  if (!photo) {
+  // First mount with no photo yet and nothing to show → full-screen loading.
+  // During a chapter switch we keep the previous page visible via the snapshot overlay instead.
+  if (!photo && !snapshot) {
     return (
       <div className="fixed inset-0 bg-black select-none">
         <div className="flex items-center justify-center h-full">
@@ -634,6 +863,26 @@ export default function ReaderPage() {
         <div className="absolute inset-0 z-10" onClick={handleFlipClick} />
       )}
 
+      {/* chapter-switch transition overlay — keeps the last page visible until the new chapter is ready */}
+      {snapshot && (
+        <div
+          className={`absolute inset-0 z-30 bg-black flex items-center justify-center transition-opacity duration-700 ${transitioning ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        >
+          <img
+            src={snapshot.url}
+            alt=""
+            className="max-w-full max-h-full object-contain"
+            style={{ width: snapshot.w ? 'auto' : undefined, maxHeight: '100%' }}
+            draggable={false}
+          />
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-9 h-9 border-2 border-brand-500/70 border-t-white rounded-full animate-spin" />
+            </div>
+          </div>
+        </div>
+      )}
+
       <ReaderOverlay
         visible={showUI}
         title={title}
@@ -643,9 +892,12 @@ export default function ReaderPage() {
         chapterName={sortedChapters[currentChapterIndex]?.name ?? ''}
         chapters={sortedChapters}
         currentChapterId={currentChapterId}
+        chapterProgress={chapterProgress}
         direction={direction}
         hasPrevChapter={currentChapterIndex > 0}
         hasNextChapter={currentChapterIndex < sortedChapters.length - 1}
+        hint={hint}
+        boundaryToast={boundaryToast}
         autoSnap={autoSnap}
         seamlessMode={seamlessMode}
         lazyRenderRange={lazyRenderRange}
@@ -666,6 +918,7 @@ export default function ReaderPage() {
         onToggleBarVisible={() => setBarVisible(v => !v)}
         onScrollByInputStep={scrollByInputStep}
         onSeekPage={seekPage}
+        onBoundaryDismiss={onBoundaryDismiss}
       />
     </div>
   );

@@ -65,7 +65,7 @@ export function cleanupAlbumCache() {
     .forEach(({ key }) => localStorage.removeItem(key));
 }
 
-export function saveAlbumCache(albumId: string, album: Album) {
+export function saveAlbumMeta(albumId: string, album: Album) {
   cleanupAlbumCache();
   localStorage.setItem(
     `${ALBUM_CACHE_PREFIX}${albumId}`,
@@ -73,7 +73,7 @@ export function saveAlbumCache(albumId: string, album: Album) {
   );
 }
 
-export function getAlbumCache(albumId: string): Album | null {
+export function getAlbumMeta(albumId: string): Album | null {
   cleanupAlbumCache();
   const raw = localStorage.getItem(`${ALBUM_CACHE_PREFIX}${albumId}`);
   if (!raw) return null;
