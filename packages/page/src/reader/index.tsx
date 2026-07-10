@@ -123,12 +123,15 @@ export default function ReaderPage() {
     if (albumId && album) saveAlbumMeta(albumId, album);
   }, [albumId, album]);
 
-  const sortedChapters: ChapterInfo[] = useMemo(() =>
-    isSeries && seriesItems.length > 0
-    ? seriesItems
-    : album?.series?.map((s) => ({ id: s.id, name: s.name, order: parseSeriesOrder(s.sort) }))
-        .sort((a, b) => a.order - b.order) ?? [{ id: albumId!, name: album?.name ?? '', order: 0 }],
-    [isSeries, seriesItems, album, albumId]);
+  const sortedChapters: ChapterInfo[] = useMemo(() => {
+    if (isSeries && seriesItems.length > 0) return seriesItems;
+    if (album?.series?.length) {
+      return [...album.series]
+        .sort((a, b) => parseSeriesOrder(a.sort) - parseSeriesOrder(b.sort))
+        .map((s, i) => ({ id: s.id, name: s.name || `第${i + 1}章`, order: parseSeriesOrder(s.sort) }));
+    }
+    return [{ id: albumId!, name: album?.name ?? '', order: 0 }];
+  }, [isSeries, seriesItems, album, albumId]);
 
   const [currentChapterId, setCurrentChapterId] = useState(albumId!);
   const [direction, setDirection] = useState<ReadingDirection>(getReadingDirection);

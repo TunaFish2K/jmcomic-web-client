@@ -677,6 +677,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
         [rootKey, sortedSeries, isSeriesAlbum],
     );
     const lastChapter = latest ? sortedSeries.find((s) => s.id === latest.chapterId) : null;
+    const lastChapterIndex = lastChapter ? sortedSeries.indexOf(lastChapter) : -1;
 
     useEffect(() => {
         if (album) saveAlbumMeta(albumId, album);
@@ -779,10 +780,10 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                         <Button
                                             size="sm"
                                             className="w-full justify-start bg-brand-500 hover:bg-brand-600 text-white"
-                                            onPress={() => navigate(`/reader/${latest.chapterId}`, { state: { isSeries: true, album, seriesItems: sortedSeries.map((s) => ({ id: s.id, name: `${album!.name} - ${s.name}`, order: parseSeriesOrder(s.sort) })) } })}
+                                            onPress={() => navigate(`/reader/${latest.chapterId}`, { state: { isSeries: true, album, seriesItems: sortedSeries.map((s, i) => ({ id: s.id, name: s.name || `第${i + 1}章`, order: parseSeriesOrder(s.sort) })) } })}
                                         >
                                             <BookOpen size={14} className="mr-1 shrink-0" />
-                                            <span className="truncate">继续阅读：{lastChapter.name} · 第 {latest.page + 1} 页</span>
+                                            <span className="truncate">继续阅读：{lastChapterIndex >= 0 && !lastChapter.name ? `第${lastChapterIndex + 1}章` : lastChapter.name} · 第 {latest.page + 1} 页</span>
                                         </Button>
                                     )}
                                     <SeriesDownloadManager
