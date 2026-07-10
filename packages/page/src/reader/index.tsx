@@ -266,29 +266,58 @@ export default function ReaderPage() {
       if (target !== currentPageRef.current) {
         setCurrentPage(target);
         scrollToPage(target, 'smooth');
+        return;
+      }
+      if (step > 0 && hasNextChapterRef.current) {
+        const next = sortedChaptersRef.current[chapterIndexRef.current + 1];
+        if (next) { resetReader(next.id); return; }
+      }
+      if (step < 0 && hasPrevChapterRef.current) {
+        const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
+        if (prev) { resetReader(prev.id); return; }
       }
       return;
     }
 
+    if (step > 0) {
+      const maxScroll = Math.max(el.scrollHeight - el.clientHeight, 0);
+      if (el.scrollTop >= maxScroll - 1 && hasNextChapterRef.current) {
+        const next = sortedChaptersRef.current[chapterIndexRef.current + 1];
+        if (next) { resetReader(next.id); return; }
+      }
+    }
+    if (step < 0) {
+      if (el.scrollTop <= 1 && hasPrevChapterRef.current) {
+        const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
+        if (prev) { resetReader(prev.id); return; }
+      }
+    }
+
     const distance = Math.max(el.clientHeight * 0.9, 1) * step;
     el.scrollBy({ top: distance, behavior: 'smooth' });
-  }, [scrollToPage]);
+  }, [scrollToPage, resetReader]);
 
   const goNextPage = useCallback(() => {
     const page = currentPageRef.current;
     if (page < imagesCountRef.current - 1) {
       setCurrentPage(page + 1);
       scrollToPage(page + 1, 'smooth');
+    } else if (hasNextChapterRef.current) {
+      const next = sortedChaptersRef.current[chapterIndexRef.current + 1];
+      if (next) resetReader(next.id);
     }
-  }, [scrollToPage]);
+  }, [scrollToPage, resetReader]);
 
   const goPrevPage = useCallback(() => {
     const page = currentPageRef.current;
     if (page > 0) {
       setCurrentPage(page - 1);
       scrollToPage(page - 1, 'smooth');
+    } else if (hasPrevChapterRef.current) {
+      const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
+      if (prev) resetReader(prev.id);
     }
-  }, [scrollToPage]);
+  }, [scrollToPage, resetReader]);
 
   const resetReader = useCallback((newChapterId: string, page?: number) => {
     // capture the currently displayed page so we can keep it visible while switching
@@ -603,12 +632,12 @@ export default function ReaderPage() {
         boundaryAccumRef.current += contribution;
         const progress = Math.max(0, Math.min(1, boundaryAccumRef.current / 100));
         setHint({ dir, progress, chapterName: dir === 'next' ? nextChapterNameRef.current : prevChapterNameRef.current });
-        if (progress >= 0.6) {
+        if (progress >= 0.5) {
           cancelBoundaryHint();
           triggerChapterSwitch(dir);
           return;
         }
-        boundaryTimerRef.current = window.setTimeout(() => { cancelBoundaryHint(); }, 600);
+        boundaryTimerRef.current = window.setTimeout(() => { cancelBoundaryHint(); }, 2000);
         return;
       }
 
