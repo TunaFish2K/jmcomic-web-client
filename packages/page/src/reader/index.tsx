@@ -257,6 +257,34 @@ export default function ReaderPage() {
     scrollToPage(clamped, 'instant');
   }, [scrollToPage]);
 
+  const resetReader = useCallback((newChapterId: string, page?: number) => {
+    // capture the currently displayed page so we can keep it visible while switching
+    const el = containerRef.current;
+    if (el) {
+      const pageEl = el.children[currentPageRef.current] as HTMLElement | undefined;
+      const img = pageEl?.querySelector('img') as HTMLImageElement | null;
+      if (img && img.src) {
+        setSnapshot({ url: img.src, w: img.naturalWidth || img.width || 1, h: img.naturalHeight || img.height || 1 });
+      }
+    }
+    setTransitioning(true);
+    setHint(null);
+    setBlobMap(new Map());
+    setCurrentChapterId(newChapterId);
+    setCurrentPage(page ?? 0);
+    loadedSetRef.current = new Set();
+    inflightRef.current = new Set();
+    restoreDoneRef.current = false;
+    boundaryAccumRef.current = 0;
+    if (boundaryTimerRef.current !== null) { window.clearTimeout(boundaryTimerRef.current); boundaryTimerRef.current = null; }
+    // Keep the chapter list stable across the URL change by carrying it in router state.
+    const chaptersToCarry = sortedChaptersRef.current;
+    navigate(`/reader/${newChapterId}`, {
+      replace: true,
+      state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
+    });
+  }, [navigate, isSeries, album]);
+
   const scrollByInputStep = useCallback((step: number) => {
     const el = containerRef.current;
     if (!el) return;
@@ -318,34 +346,6 @@ export default function ReaderPage() {
       if (prev) resetReader(prev.id);
     }
   }, [scrollToPage, resetReader]);
-
-  const resetReader = useCallback((newChapterId: string, page?: number) => {
-    // capture the currently displayed page so we can keep it visible while switching
-    const el = containerRef.current;
-    if (el) {
-      const pageEl = el.children[currentPageRef.current] as HTMLElement | undefined;
-      const img = pageEl?.querySelector('img') as HTMLImageElement | null;
-      if (img && img.src) {
-        setSnapshot({ url: img.src, w: img.naturalWidth || img.width || 1, h: img.naturalHeight || img.height || 1 });
-      }
-    }
-    setTransitioning(true);
-    setHint(null);
-    setBlobMap(new Map());
-    setCurrentChapterId(newChapterId);
-    setCurrentPage(page ?? 0);
-    loadedSetRef.current = new Set();
-    inflightRef.current = new Set();
-    restoreDoneRef.current = false;
-    boundaryAccumRef.current = 0;
-    if (boundaryTimerRef.current !== null) { window.clearTimeout(boundaryTimerRef.current); boundaryTimerRef.current = null; }
-    // Keep the chapter list stable across the URL change by carrying it in router state.
-    const chaptersToCarry = sortedChaptersRef.current;
-    navigate(`/reader/${newChapterId}`, {
-      replace: true,
-      state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
-    });
-  }, [navigate, isSeries, album]);
 
   const goNextChapter = useCallback(() => {
     if (currentChapterIndex < sortedChapters.length - 1) {
