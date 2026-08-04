@@ -5,6 +5,10 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // The previous /assets namespace contains a poisoned immutable CSS response.
+  build: {
+    assetsDir: 'assets-v2',
+  },
   plugins: [
     react({
       babel: {

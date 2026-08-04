@@ -5,7 +5,8 @@ registerSW({
   immediate: true,
   onRegisteredSW: (swUrl, registration) => {
     if (!registration) return;
-    startPwaUpdateChecks({ swUrl, registration });
+    const updateController = startPwaUpdateChecks({ swUrl, registration });
+    void updateController.checkForUpdate(true);
   },
   onRegisterError: (error) => {
     console.error('PWA service worker registration failed', error);

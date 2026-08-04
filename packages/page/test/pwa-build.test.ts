@@ -63,13 +63,27 @@ describe('PWA build output', () => {
     }
   });
 
+  it('keeps generated assets outside the poisoned legacy cache namespace', async () => {
+    const html = await readDistFile('index.html');
+    const generatedAssetUrls = [...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)].map(
+      (match) => match[1],
+    );
+
+    assert.ok(generatedAssetUrls.some((url) => url.endsWith('.js')));
+    assert.ok(generatedAssetUrls.some((url) => url.endsWith('.css')));
+    for (const url of generatedAssetUrls) {
+      assert.match(url, /^\/assets-v2\//);
+      await access(path.join(distDirectory, url.replace(/^\//, '')));
+    }
+  });
+
   it('emits restrictive headers for update-critical resources', async () => {
     const headers = await readDistFile('_headers');
 
     assert.match(headers, /\/sw\.js\s+Cache-Control: no-cache, no-store, must-revalidate/);
     assert.match(headers, /\/manifest\.webmanifest\s+Cache-Control: no-cache, no-store, must-revalidate/);
-    assert.match(headers, /\/assets\/\*\s+Cache-Control: public, max-age=31536000, immutable/);
-    assert.match(headers, /\/icons\/\*\s+Cache-Control: public, max-age=31536000, immutable/);
+    assert.doesNotMatch(headers, /\/assets\/\*/);
+    assert.doesNotMatch(headers, /immutable/);
 
     const routePatterns = headers.split('\n').filter((line) => line.startsWith('/'));
     for (const routePattern of routePatterns) {
