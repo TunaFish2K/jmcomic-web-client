@@ -24,7 +24,18 @@ import {
   saveAlbumMeta,
 } from './reader-store';
 import pLimit from 'p-limit';
-import { getSliceCount, reverseImageBySlice, getCachedImage, setCachedImage, generateImageCacheKey } from '@tiny-client/shared';
+import { getSliceCount, reverseImageBySlice, getCachedImage, setCachedImage, generateImageCacheKey, type PhotoWithScrambleId } from '@tiny-client/shared';
+import {
+  accumulateBoundaryGesture,
+  getBoundaryDirection,
+  getChapterLandingPage,
+  getDominantWheelDelta,
+  isCurrentChapterLoad,
+  isLikelyTrackpadWheel,
+  isMatchingChapterTransition,
+  MOUSE_WHEEL_BOUNDARY_CONTRIBUTION,
+  type ChapterDirection,
+} from './navigation';
 
 function parseSeriesOrder(value: string | number | undefined) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -33,9 +44,20 @@ function parseSeriesOrder(value: string | number | undefined) {
 }
 
 type ChapterInfo = { id: string; name: string; order: number };
+type PendingNavigation = {
+  chapterId: string;
+  requestedPage: number | 'last' | null;
+  resolvedPage: number | null;
+  transitionId: number | null;
+};
+type LandingAnchor = { chapterId: string; page: number };
 
 const PRELOAD_AHEAD = 10;
 const PRELOAD_PARALLEL = 5;
+const BOUNDARY_RESET_DELAY_MS = 2000;
+const CHAPTER_SWITCH_UNLOCK_DELAY_MS = 5000;
+const LANDING_ANCHOR_DELAY_MS = 5000;
+const TRACKPAD_GESTURE_END_DELAY_MS = 140;
 async function decryptImageWithRetry(url: string, photoId: string, scrambleId: number): Promise<ArrayBuffer | null> {
   const filename = url.split('/').pop() ?? '';
   const cacheKey = generateImageCacheKey(photoId, filename);
@@ -149,6 +171,7 @@ export default function ReaderPage() {
   const [hint, setHint] = useState<{ dir: 'prev' | 'next'; progress: number; chapterName: string } | null>(null);
   const [boundaryToast, setBoundaryToast] = useState<'prev' | 'next' | null>(null);
   const boundaryAccumRef = useRef(0);
+  const boundaryDirectionRef = useRef<ChapterDirection | null>(null);
   const boundaryTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const touchTrackingRef = useRef<{ boundaryDir: 'prev' | 'next'; startX: number; startY: number; startScroll: number; distance: number } | null>(null);
@@ -160,12 +183,19 @@ export default function ReaderPage() {
   const isRTL = direction === 'left-right';
   const currentChapterIndex = sortedChapters.findIndex((c) => c.id === currentChapterId);
 
-  const pendingPageRef = useRef<number | 'last' | null>(null);
+  const pendingNavigationRef = useRef<PendingNavigation | null>(null);
+  const landingAnchorRef = useRef<LandingAnchor | null>(null);
+  const landingAnchorTimerRef = useRef<number | null>(null);
+  const transitionSequenceRef = useRef(0);
+  const activeTransitionIdRef = useRef<number | null>(null);
+  const transitionUnlockTimerRef = useRef<number | null>(null);
+  const loadGenerationRef = useRef(0);
   const switchingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const loadedSetRef = useRef(new Set<number>());
   const inflightRef = useRef(new Set<number>());
   const wheelPagingLockRef = useRef(false);
+  const wheelPagingTimerRef = useRef<number | null>(null);
   const trackpadGestureLockRef = useRef(false);
   const trackpadDeltaAccumRef = useRef(0);
   const trackpadGestureTimerRef = useRef<number | null>(null);
@@ -228,7 +258,7 @@ export default function ReaderPage() {
     initialData: currentChapterId === mountAlbumIdRef.current ? initialPhotoRef.current : undefined,
   });
 
-  const images = photo?.images ?? [];
+  const images: PhotoWithScrambleId['images'] = photo?.images ?? [];
   const imagesRef = useRef(images);
   imagesRef.current = images;
   imagesCountRef.current = images.length;
@@ -236,6 +266,11 @@ export default function ReaderPage() {
   photoRef.current = photo;
 
   // ─── navigation ──────────────────────────────────────────────────────────────
+
+  const setReaderPage = useCallback((page: number) => {
+    currentPageRef.current = page;
+    setCurrentPage(page);
+  }, []);
 
   const scrollToPage = useCallback((index: number, behavior: ScrollBehavior = 'instant') => {
     const el = containerRef.current;
@@ -249,142 +284,63 @@ export default function ReaderPage() {
     }
   }, []);
 
+  const getScrollMetrics = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return null;
+    if (isRTLRef.current) {
+      const lastPage = el.children[imagesCountRef.current - 1] as HTMLElement | undefined;
+      return {
+        position: el.scrollLeft,
+        maxPosition: lastPage?.offsetLeft ?? Math.max(el.scrollWidth - el.clientWidth, 0),
+      };
+    }
+    return {
+      position: el.scrollTop,
+      maxPosition: Math.max(el.scrollHeight - el.clientHeight, 0),
+    };
+  }, []);
+
+  const releaseLandingAnchor = useCallback(() => {
+    landingAnchorRef.current = null;
+    if (landingAnchorTimerRef.current !== null) {
+      window.clearTimeout(landingAnchorTimerRef.current);
+      landingAnchorTimerRef.current = null;
+    }
+  }, []);
+
+  const setLandingAnchor = useCallback((chapterId: string, page: number) => {
+    releaseLandingAnchor();
+    landingAnchorRef.current = { chapterId, page };
+    landingAnchorTimerRef.current = window.setTimeout(releaseLandingAnchor, LANDING_ANCHOR_DELAY_MS);
+  }, [releaseLandingAnchor]);
+
+  const completeChapterTransition = useCallback((transitionId: number | null, chapterId: string) => {
+    if (!isMatchingChapterTransition({
+      activeTransitionId: activeTransitionIdRef.current,
+      currentChapterId: chapterIdRef.current,
+      transitionId,
+      chapterId,
+    })) return false;
+    if (transitionId !== null) activeTransitionIdRef.current = null;
+    if (transitionUnlockTimerRef.current !== null) {
+      window.clearTimeout(transitionUnlockTimerRef.current);
+      transitionUnlockTimerRef.current = null;
+    }
+    switchingRef.current = false;
+    setTransitioning(false);
+    return true;
+  }, []);
+
   const seekPage = useCallback((page: number) => {
+    releaseLandingAnchor();
     const total = imagesCountRef.current;
     if (total === 0) return;
     const clamped = Math.max(0, Math.min(total - 1, page));
-    setCurrentPage(clamped);
+    setReaderPage(clamped);
     scrollToPage(clamped, 'instant');
-  }, [scrollToPage]);
+  }, [releaseLandingAnchor, scrollToPage, setReaderPage]);
 
-  const handleImageLoad = useCallback((pageIndex: number) => {
-    if (pendingPageRef.current === pageIndex) {
-      scrollToPage(pageIndex, 'instant');
-      pendingPageRef.current = null;
-      setTransitioning(false);
-      switchingRef.current = false;
-    }
-  }, [scrollToPage]);
-
-  const resetReader = useCallback((newChapterId: string, page?: number | 'last') => {
-    if (switchingRef.current) return;
-    switchingRef.current = true;
-    window.setTimeout(() => { switchingRef.current = false; }, 5000);
-    // capture the currently displayed page so we can keep it visible while switching
-    const el = containerRef.current;
-    if (el) {
-      const pageEl = el.children[currentPageRef.current] as HTMLElement | undefined;
-      const img = pageEl?.querySelector('img') as HTMLImageElement | null;
-      if (img && img.src) {
-        setSnapshot({ url: img.src, w: img.naturalWidth || img.width || 1, h: img.naturalHeight || img.height || 1 });
-      }
-    }
-    setTransitioning(true);
-    setHint(null);
-    setBlobMap(new Map());
-    setCurrentChapterId(newChapterId);
-    if (page === 'last') {
-      pendingPageRef.current = 'last';
-      setCurrentPage(0);
-    } else if (typeof page === 'number') {
-      pendingPageRef.current = page;
-      setCurrentPage(page);
-    } else {
-      pendingPageRef.current = null;
-      setCurrentPage(0);
-    }
-    loadedSetRef.current = new Set();
-    inflightRef.current = new Set();
-    boundaryAccumRef.current = 0;
-    if (boundaryTimerRef.current !== null) { window.clearTimeout(boundaryTimerRef.current); boundaryTimerRef.current = null; }
-    // Keep the chapter list stable across the URL change by carrying it in router state.
-    const chaptersToCarry = sortedChaptersRef.current;
-    navigate(`/reader/${newChapterId}`, {
-      replace: true,
-      state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
-    });
-  }, [navigate, isSeries, album]);
-
-  const scrollByInputStep = useCallback((step: number) => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    if (isRTLRef.current) {
-      const target = Math.max(0, Math.min(imagesCountRef.current - 1, currentPageRef.current + step));
-      if (target !== currentPageRef.current) {
-        setCurrentPage(target);
-        scrollToPage(target, 'smooth');
-        return;
-      }
-      if (step > 0 && hasNextChapterRef.current) {
-        const next = sortedChaptersRef.current[chapterIndexRef.current + 1];
-        if (next) { resetReader(next.id, 0); return; }
-      }
-      if (step < 0 && hasPrevChapterRef.current) {
-        const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
-        if (prev) { resetReader(prev.id, 'last'); return; }
-      }
-      return;
-    }
-
-    if (step > 0) {
-      const maxScroll = Math.max(el.scrollHeight - el.clientHeight, 0);
-      if (el.scrollTop >= maxScroll - 1 && hasNextChapterRef.current) {
-        const next = sortedChaptersRef.current[chapterIndexRef.current + 1];
-        if (next) { resetReader(next.id, 0); return; }
-      }
-    }
-    if (step < 0) {
-      if (el.scrollTop <= 1 && hasPrevChapterRef.current) {
-        const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
-        if (prev) { resetReader(prev.id, 'last'); return; }
-      }
-    }
-
-    const distance = Math.max(el.clientHeight * 0.9, 1) * step;
-    el.scrollBy({ top: distance, behavior: 'smooth' });
-  }, [scrollToPage, resetReader]);
-
-  const goNextPage = useCallback(() => {
-    const page = currentPageRef.current;
-    if (page < imagesCountRef.current - 1) {
-      setCurrentPage(page + 1);
-      scrollToPage(page + 1, 'smooth');
-    } else if (hasNextChapterRef.current) {
-      const next = sortedChaptersRef.current[chapterIndexRef.current + 1];
-      if (next) resetReader(next.id, 0);
-    }
-  }, [scrollToPage, resetReader]);
-
-  const goPrevPage = useCallback(() => {
-    const page = currentPageRef.current;
-    if (page > 0) {
-      setCurrentPage(page - 1);
-      scrollToPage(page - 1, 'smooth');
-    } else if (hasPrevChapterRef.current) {
-      const prev = sortedChaptersRef.current[chapterIndexRef.current - 1];
-      if (prev) resetReader(prev.id, 'last');
-    }
-  }, [scrollToPage, resetReader]);
-
-  const goNextChapter = useCallback(() => {
-    if (currentChapterIndex < sortedChapters.length - 1) {
-      resetReader(sortedChapters[currentChapterIndex + 1].id);
-    }
-  }, [currentChapterIndex, sortedChapters, resetReader]);
-
-  const goPrevChapter = useCallback(() => {
-    if (currentChapterIndex > 0) {
-      resetReader(sortedChapters[currentChapterIndex - 1].id);
-    }
-  }, [currentChapterIndex, sortedChapters, resetReader]);
-
-  const goToChapter = useCallback((chapterId: string) => {
-    resetReader(chapterId);
-  }, [resetReader]);
-
-  // ── boundary chapter-swap hint helpers ──
-  const showBoundaryToast = useCallback((dir: 'prev' | 'next') => {
+  const showBoundaryToast = useCallback((dir: ChapterDirection) => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     setBoundaryToast(dir);
     toastTimerRef.current = window.setTimeout(() => {
@@ -393,19 +349,124 @@ export default function ReaderPage() {
     }, 1500);
   }, []);
 
-  const triggerChapterSwitch = useCallback((dir: 'prev' | 'next') => {
-    if (dir === 'next') {
-      if (hasNextChapterRef.current) goNextChapter();
-    } else {
-      if (hasPrevChapterRef.current) goPrevChapter();
-    }
-  }, [goNextChapter, goPrevChapter]);
-
   const cancelBoundaryHint = useCallback(() => {
     boundaryAccumRef.current = 0;
-    if (boundaryTimerRef.current !== null) { window.clearTimeout(boundaryTimerRef.current); boundaryTimerRef.current = null; }
+    boundaryDirectionRef.current = null;
+    if (boundaryTimerRef.current !== null) {
+      window.clearTimeout(boundaryTimerRef.current);
+      boundaryTimerRef.current = null;
+    }
     setHint(null);
   }, []);
+
+  const resetReader = useCallback((newChapterId: string, page?: number | 'last') => {
+    if (switchingRef.current || newChapterId === chapterIdRef.current) return false;
+
+    const transitionId = ++transitionSequenceRef.current;
+    activeTransitionIdRef.current = transitionId;
+    switchingRef.current = true;
+    if (transitionUnlockTimerRef.current !== null) window.clearTimeout(transitionUnlockTimerRef.current);
+    transitionUnlockTimerRef.current = window.setTimeout(() => {
+      if (activeTransitionIdRef.current === transitionId) switchingRef.current = false;
+    }, CHAPTER_SWITCH_UNLOCK_DELAY_MS);
+
+    const el = containerRef.current;
+    if (el) {
+      const pageEl = el.children[currentPageRef.current] as HTMLElement | undefined;
+      const img = pageEl?.querySelector('img') as HTMLImageElement | null;
+      if (img && img.src) {
+        setSnapshot({ url: img.src, w: img.naturalWidth || img.width || 1, h: img.naturalHeight || img.height || 1 });
+      }
+    }
+
+    setTransitioning(true);
+    cancelBoundaryHint();
+    releaseLandingAnchor();
+    setBlobMap(new Map());
+    loadGenerationRef.current += 1;
+    pendingNavigationRef.current = {
+      chapterId: newChapterId,
+      requestedPage: page ?? null,
+      resolvedPage: null,
+      transitionId,
+    };
+    chapterIdRef.current = newChapterId;
+    setCurrentChapterId(newChapterId);
+    setReaderPage(typeof page === 'number' ? page : 0);
+    loadedSetRef.current = new Set();
+    inflightRef.current = new Set();
+
+    const chaptersToCarry = sortedChaptersRef.current;
+    navigate(`/reader/${newChapterId}`, {
+      replace: true,
+      state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
+    });
+    return true;
+  }, [album, cancelBoundaryHint, isSeries, navigate, releaseLandingAnchor, setReaderPage]);
+
+  const switchAdjacentChapter = useCallback((dir: ChapterDirection) => {
+    const offset = dir === 'next' ? 1 : -1;
+    const target = sortedChaptersRef.current[chapterIndexRef.current + offset];
+    if (!target) return false;
+    return resetReader(target.id, getChapterLandingPage(dir));
+  }, [resetReader]);
+
+  const handleImageLoad = useCallback((chapterId: string, pageIndex: number) => {
+    if (chapterIdRef.current !== chapterId) return;
+
+    const anchor = landingAnchorRef.current;
+    if (anchor?.chapterId === chapterId) {
+      window.requestAnimationFrame(() => {
+        if (landingAnchorRef.current === anchor) scrollToPage(anchor.page, 'instant');
+      });
+    }
+
+    const pending = pendingNavigationRef.current;
+    if (pending?.chapterId === chapterId && pending.resolvedPage === pageIndex) {
+      scrollToPage(pageIndex, 'instant');
+      pendingNavigationRef.current = null;
+      completeChapterTransition(pending.transitionId, chapterId);
+    }
+  }, [completeChapterTransition, scrollToPage]);
+
+  const scrollByInputStep = useCallback((step: number) => {
+    const el = containerRef.current;
+    if (!el || switchingRef.current || pendingNavigationRef.current !== null) return;
+    releaseLandingAnchor();
+
+    const metrics = getScrollMetrics();
+    const boundary = metrics ? getBoundaryDirection({ ...metrics, step }) : null;
+    if (boundary) {
+      if (!switchAdjacentChapter(boundary)) showBoundaryToast(boundary);
+      return;
+    }
+    if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+
+    if (isRTLRef.current) {
+      const target = Math.max(0, Math.min(imagesCountRef.current - 1, currentPageRef.current + step));
+      if (target !== currentPageRef.current) {
+        setReaderPage(target);
+        scrollToPage(target, 'smooth');
+      }
+      return;
+    }
+
+    const distance = Math.max(el.clientHeight * 0.9, 1) * step;
+    el.scrollBy({ top: distance, behavior: 'smooth' });
+  }, [cancelBoundaryHint, getScrollMetrics, releaseLandingAnchor, scrollToPage, setReaderPage, showBoundaryToast, switchAdjacentChapter]);
+
+  const goNextPage = useCallback(() => scrollByInputStep(1), [scrollByInputStep]);
+  const goPrevPage = useCallback(() => scrollByInputStep(-1), [scrollByInputStep]);
+  const goNextChapter = useCallback(() => { switchAdjacentChapter('next'); }, [switchAdjacentChapter]);
+  const goPrevChapter = useCallback(() => { switchAdjacentChapter('prev'); }, [switchAdjacentChapter]);
+
+  const goToChapter = useCallback((chapterId: string) => {
+    resetReader(chapterId);
+  }, [resetReader]);
+
+  const triggerChapterSwitch = useCallback((dir: ChapterDirection) => {
+    switchAdjacentChapter(dir);
+  }, [switchAdjacentChapter]);
 
   const onBoundaryDismiss = useCallback(() => {
     cancelBoundaryHint();
@@ -413,13 +474,31 @@ export default function ReaderPage() {
     setBoundaryToast(null);
   }, [cancelBoundaryHint]);
 
+  useEffect(() => () => {
+    loadGenerationRef.current += 1;
+    pendingNavigationRef.current = null;
+    activeTransitionIdRef.current = null;
+    switchingRef.current = false;
+    if (transitionUnlockTimerRef.current !== null) window.clearTimeout(transitionUnlockTimerRef.current);
+    if (boundaryTimerRef.current !== null) window.clearTimeout(boundaryTimerRef.current);
+    if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
+    if (trackpadGestureTimerRef.current !== null) window.clearTimeout(trackpadGestureTimerRef.current);
+    if (wheelPagingTimerRef.current !== null) window.clearTimeout(wheelPagingTimerRef.current);
+    trackpadGestureLockRef.current = false;
+    trackpadDeltaAccumRef.current = 0;
+    wheelPagingLockRef.current = false;
+    releaseLandingAnchor();
+  }, [releaseLandingAnchor]);
+
   const toggleDirection = useCallback(() => {
+    releaseLandingAnchor();
+    cancelBoundaryHint();
     setDirection((prev) => {
       const next: ReadingDirection = prev === 'left-right' ? 'top-down' : 'left-right';
       saveReadingDirection(next);
       return next;
     });
-  }, []);
+  }, [cancelBoundaryHint, releaseLandingAnchor]);
 
   const toggleAutoSnap = useCallback(() => {
     setAutoSnap((prev) => {
@@ -454,6 +533,8 @@ export default function ReaderPage() {
     if (imgs.length === 0) return;
     const p = photoRef.current;
     if (!p) return;
+    const generation = loadGenerationRef.current;
+    const chapterId = p.id;
 
     const end = Math.min(start + PRELOAD_AHEAD, imgs.length);
     const toLoad: number[] = [];
@@ -469,35 +550,69 @@ export default function ReaderPage() {
     const limit = pLimit(PRELOAD_PARALLEL);
     for (const idx of toLoad) {
       limit(async () => {
-        const img = imgs[idx];
-        const data = await decryptImageWithRetry(img.url, p.id, p.scrambleId);
-        if (data) {
-          const blob = new Blob([data], { type: 'image/jpeg' });
-          const blobUrl = URL.createObjectURL(blob);
+        try {
+          const img = imgs[idx];
+          const data = await decryptImageWithRetry(img.url, p.id, p.scrambleId);
+          if (!data) return;
+
+          const blobUrl = URL.createObjectURL(new Blob([data], { type: 'image/jpeg' }));
+          if (!isCurrentChapterLoad({
+            generation,
+            currentGeneration: loadGenerationRef.current,
+            chapterId,
+            currentChapterId: chapterIdRef.current,
+          })) {
+            URL.revokeObjectURL(blobUrl);
+            return;
+          }
           setBlobMap((prev) => {
+            if (!isCurrentChapterLoad({
+              generation,
+              currentGeneration: loadGenerationRef.current,
+              chapterId,
+              currentChapterId: chapterIdRef.current,
+            })) {
+              URL.revokeObjectURL(blobUrl);
+              return prev;
+            }
+            if (prev.has(idx)) {
+              URL.revokeObjectURL(blobUrl);
+              return prev;
+            }
             const next = new Map(prev);
             next.set(idx, blobUrl);
             return next;
           });
           loadedSetRef.current.add(idx);
+        } finally {
+          if (generation === loadGenerationRef.current) inflightRef.current.delete(idx);
         }
       });
     }
   }, []);
 
-  // ── photo-ready: resolve pendingPageRef / restore progress → scroll & unlock ──
+  // ── photo-ready: resolve the chapter-scoped target, then scroll and unlock ──
   useEffect(() => {
-    if (!photo || images.length === 0) return;
+    if (!photo || photo.id !== currentChapterId || images.length === 0) return;
 
-    // Determine target page
+    let pending = pendingNavigationRef.current;
+    if (pending && pending.chapterId !== currentChapterId) return;
+    if (!pending) {
+      pending = {
+        chapterId: currentChapterId,
+        requestedPage: null,
+        resolvedPage: null,
+        transitionId: null,
+      };
+      pendingNavigationRef.current = pending;
+    }
+
     let targetPage: number;
-    if (pendingPageRef.current !== null) {
-      // Chapter switch: resolve 'last' to actual page number
-      targetPage = pendingPageRef.current === 'last'
+    if (pending.requestedPage !== null) {
+      targetPage = pending.requestedPage === 'last'
         ? images.length - 1
-        : Math.max(0, Math.min(images.length - 1, pendingPageRef.current));
+        : Math.max(0, Math.min(images.length - 1, pending.requestedPage));
     } else {
-      // Initial load (direct URL entry): restore saved progress
       const root = seriesRootRef.current || albumIdRef.current!;
       const stored = getReadingProgress(root, currentChapterId);
       const latest = getLatestChapterProgress(root, sortedChapters.map((c) => c.id));
@@ -507,51 +622,47 @@ export default function ReaderPage() {
       targetPage = Math.max(0, Math.min(images.length - 1, targetPage));
     }
 
-    // Set currentPage so the lazy-render range includes the target → DecryptedImage renders & starts decrypting
-    setCurrentPage(targetPage);
-    // Stash the resolved page number so onScroll guard + handleImageLoad can compare
-    pendingPageRef.current = targetPage;
-    // Kick off decryption of the target page
+    pending.resolvedPage = targetPage;
+    setReaderPage(targetPage);
+    setLandingAnchor(currentChapterId, targetPage);
     preloadRange(targetPage);
 
-    // ── Attempt scroll to target ──
     const el = containerRef.current;
-    if (!el) { pendingPageRef.current = null; setTransitioning(false); switchingRef.current = false; return; }
+    if (!el) {
+      pendingNavigationRef.current = null;
+      completeChapterTransition(pending.transitionId, currentChapterId);
+      return;
+    }
 
     const finish = () => {
+      if (pendingNavigationRef.current !== pending || chapterIdRef.current !== currentChapterId) return;
       scrollToPage(targetPage, 'instant');
-      pendingPageRef.current = null;
-      setTransitioning(false);
-      switchingRef.current = false;
+      pendingNavigationRef.current = null;
+      completeChapterTransition(pending.transitionId, currentChapterId);
     };
 
     const pageEl = el.children[targetPage] as HTMLElement | undefined;
     const img = pageEl?.querySelector('img') as HTMLImageElement | null;
 
-    // Case 1: <img> already exists and has dimensions (blob was cached) → scroll immediately
     if (img && img.complete && img.naturalHeight > 0) {
       finish();
       return;
     }
 
-    // Case 2: <img> exists but not yet decoded → wait for decode, 5s fallback
     if (img) {
       let done = false;
       img.decode().then(() => {
-        if (!done && pendingPageRef.current === targetPage) finish();
+        if (!done) finish();
       }).catch(() => {});
       const tid = window.setTimeout(() => {
         done = true;
-        if (pendingPageRef.current === targetPage) finish();
-      }, 5000);
-      return () => clearTimeout(tid);
+        finish();
+      }, CHAPTER_SWITCH_UNLOCK_DELAY_MS);
+      return () => window.clearTimeout(tid);
     }
 
-    // Case 3: no <img> yet (DecryptedImage still decrypting) → handleImageLoad callback + 5s fallback
-    const tid = window.setTimeout(() => {
-      if (pendingPageRef.current === targetPage) finish();
-    }, 5000);
-    return () => clearTimeout(tid);
+    const tid = window.setTimeout(finish, CHAPTER_SWITCH_UNLOCK_DELAY_MS);
+    return () => window.clearTimeout(tid);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo, currentChapterId, images.length]);
 
@@ -608,7 +719,7 @@ export default function ReaderPage() {
       if (isHorizontal) {
         const max = Math.max(el.scrollWidth - el.clientWidth, 0);
         setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollLeft / max) * 100));
-        if (pendingPageRef.current !== null) return;
+        if (pendingNavigationRef.current !== null) return;
         const center = el.scrollLeft + el.clientWidth / 2;
         let best = 0, bestDist = Infinity;
         for (let i = 0; i < children.length; i++) {
@@ -617,7 +728,7 @@ export default function ReaderPage() {
           const dist = Math.abs(center - mid);
           if (dist < bestDist) { bestDist = dist; best = i; }
         }
-        if (best !== currentPageRef.current) setCurrentPage(best);
+        if (best !== currentPageRef.current) setReaderPage(best);
         if (shouldSettleHorizontal) {
           clearHorizontalSnapTimer();
           horizontalSnapTimerRef.current = window.setTimeout(settleHorizontalPage, 120);
@@ -625,7 +736,7 @@ export default function ReaderPage() {
       } else {
         const max = Math.max(el.scrollHeight - el.clientHeight, 0);
         setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollTop / max) * 100));
-        if (pendingPageRef.current !== null) return;
+        if (pendingNavigationRef.current !== null) return;
         const center = el.scrollTop + el.clientHeight / 2;
         let best = 0, bestDist = Infinity;
         for (let i = 0; i < children.length; i++) {
@@ -634,7 +745,7 @@ export default function ReaderPage() {
           const dist = Math.abs(center - mid);
           if (dist < bestDist) { bestDist = dist; best = i; }
         }
-        if (best !== currentPageRef.current) setCurrentPage(best);
+        if (best !== currentPageRef.current) setReaderPage(best);
       }
     };
 
@@ -663,7 +774,7 @@ export default function ReaderPage() {
   // ─── wheel / touchpad scrolling ────────────────────────────────────────────
 
   useEffect(() => {
-    if (!isRTL || !photo) return;
+    if (!photo) return;
     const el = containerRef.current;
     if (!el) return;
 
@@ -677,51 +788,83 @@ export default function ReaderPage() {
     };
 
     const onWheel = (e: WheelEvent) => {
-      const dominantDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-      if (Math.abs(dominantDelta) < 4) return;
+      const dominantDelta = getDominantWheelDelta(e.deltaX, e.deltaY);
+      const inputDelta = isRTLRef.current ? dominantDelta : e.deltaY;
+      if (Math.abs(inputDelta) < 4) return;
+      const isTrackpad = isLikelyTrackpadWheel(e.deltaMode, e.deltaX, e.deltaY);
 
-      e.preventDefault();
+      if (isTrackpad) {
+        if (trackpadGestureTimerRef.current !== null) window.clearTimeout(trackpadGestureTimerRef.current);
+        trackpadGestureTimerRef.current = window.setTimeout(resetTrackpadGesture, TRACKPAD_GESTURE_END_DELAY_MS);
+      }
 
-      // ── boundary chapter-swap: intercept when trying to scroll past first/last page ──
-      const step = dominantDelta > 0 ? 1 : -1;
-      const atPrev = currentPageRef.current === 0 && step < 0;
-      const atNext = currentPageRef.current >= imagesCountRef.current - 1 && step > 0;
-      if (atPrev || atNext) {
-        const dir: 'prev' | 'next' = step > 0 ? 'next' : 'prev';
+      if (switchingRef.current || pendingNavigationRef.current !== null) {
+        e.preventDefault();
+        return;
+      }
+      if ((isTrackpad && trackpadGestureLockRef.current) || (!isTrackpad && wheelPagingLockRef.current)) {
+        e.preventDefault();
+        return;
+      }
+
+      const step = inputDelta > 0 ? 1 : -1;
+      const metrics = getScrollMetrics();
+      const boundary = metrics ? getBoundaryDirection({ ...metrics, step }) : null;
+      if (boundary) {
+        e.preventDefault();
+        releaseLandingAnchor();
+        const dir = boundary;
         const hasChapter = dir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
         if (!hasChapter) {
-          showBoundaryToast(dir);
           cancelBoundaryHint();
+          showBoundaryToast(dir);
           return;
         }
+
         if (boundaryTimerRef.current !== null) window.clearTimeout(boundaryTimerRef.current);
-        const isTp = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 40);
-        // A mouse-wheel notch is a large discrete delta; normalize it so the hint is visible first.
-        const contribution = isTp ? Math.abs(dominantDelta) : 40;
-        boundaryAccumRef.current += contribution;
-        const progress = Math.max(0, Math.min(1, boundaryAccumRef.current / 100));
-        setHint({ dir, progress, chapterName: dir === 'next' ? nextChapterNameRef.current : prevChapterNameRef.current });
-        if (progress >= 0.5) {
+        const accumulated = accumulateBoundaryGesture({
+          currentDirection: boundaryDirectionRef.current,
+          currentAmount: boundaryAccumRef.current,
+          direction: dir,
+          contribution: isTrackpad ? inputDelta : MOUSE_WHEEL_BOUNDARY_CONTRIBUTION,
+        });
+        boundaryDirectionRef.current = accumulated.direction;
+        boundaryAccumRef.current = accumulated.amount;
+        setHint({
+          dir,
+          progress: accumulated.progress,
+          chapterName: dir === 'next' ? nextChapterNameRef.current : prevChapterNameRef.current,
+        });
+        if (accumulated.shouldSwitch) {
+          if (isTrackpad) {
+            trackpadGestureLockRef.current = true;
+          } else {
+            wheelPagingLockRef.current = true;
+            if (wheelPagingTimerRef.current !== null) window.clearTimeout(wheelPagingTimerRef.current);
+            wheelPagingTimerRef.current = window.setTimeout(() => {
+              wheelPagingLockRef.current = false;
+              wheelPagingTimerRef.current = null;
+            }, 260);
+          }
           cancelBoundaryHint();
           triggerChapterSwitch(dir);
           return;
         }
-        boundaryTimerRef.current = window.setTimeout(() => { cancelBoundaryHint(); }, 2000);
+        boundaryTimerRef.current = window.setTimeout(cancelBoundaryHint, BOUNDARY_RESET_DELAY_MS);
         return;
       }
 
-      const isTrackpad = e.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 40);
+      if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+      releaseLandingAnchor();
+
+      // Vertical reading keeps native scrolling until it reaches a real boundary.
+      if (!isRTLRef.current) return;
+
+      e.preventDefault();
 
       if (isTrackpad) {
-        trackpadDeltaAccumRef.current += dominantDelta;
-        if (trackpadGestureTimerRef.current !== null) {
-          window.clearTimeout(trackpadGestureTimerRef.current);
-        }
-        trackpadGestureTimerRef.current = window.setTimeout(resetTrackpadGesture, 140);
-
-        if (trackpadGestureLockRef.current || Math.abs(trackpadDeltaAccumRef.current) < 60) {
-          return;
-        }
+        trackpadDeltaAccumRef.current += inputDelta;
+        if (Math.abs(trackpadDeltaAccumRef.current) < 60) return;
 
         trackpadGestureLockRef.current = true;
         scrollByInputStep(trackpadDeltaAccumRef.current > 0 ? 1 : -1);
@@ -731,19 +874,20 @@ export default function ReaderPage() {
       if (wheelPagingLockRef.current) return;
       wheelPagingLockRef.current = true;
 
-      scrollByInputStep(dominantDelta > 0 ? 1 : -1);
+      scrollByInputStep(inputDelta > 0 ? 1 : -1);
 
-      window.setTimeout(() => {
+      if (wheelPagingTimerRef.current !== null) window.clearTimeout(wheelPagingTimerRef.current);
+      wheelPagingTimerRef.current = window.setTimeout(() => {
         wheelPagingLockRef.current = false;
+        wheelPagingTimerRef.current = null;
       }, 260);
     };
 
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       el.removeEventListener('wheel', onWheel);
-      resetTrackpadGesture();
     };
-  }, [isRTL, photo, scrollByInputStep, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
+  }, [isRTL, photo, getScrollMetrics, releaseLandingAnchor, scrollByInputStep, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
 
   // ── touch boundary-pull detection (both directions use native scroll) ──
 
@@ -752,34 +896,35 @@ export default function ReaderPage() {
     const el = containerRef.current;
     if (!el) return;
 
-    const curScroll = () => (isRTLRef.current ? el.scrollLeft : el.scrollTop);
-    const maxScroll = () => isRTLRef.current
-      ? Math.max(el.scrollWidth - el.clientWidth, 0)
-      : Math.max(el.scrollHeight - el.clientHeight, 0);
-
     const onTouchStart = (e: TouchEvent) => {
+      if (switchingRef.current || pendingNavigationRef.current !== null) return;
       const t = e.touches[0];
-      const s = curScroll();
-      const atPrev = currentPageRef.current === 0 && s <= 1;
-      const atNext = currentPageRef.current >= imagesCountRef.current - 1 && s >= maxScroll() - 1;
+      const metrics = getScrollMetrics();
+      if (!metrics) return;
+      const atPrev = getBoundaryDirection({ ...metrics, step: -1 }) === 'prev';
+      const atNext = getBoundaryDirection({ ...metrics, step: 1 }) === 'next';
       if (!atPrev && !atNext) return;
+      releaseLandingAnchor();
       touchTrackingRef.current = {
         boundaryDir: atPrev ? 'prev' : 'next',
         startX: t.clientX,
         startY: t.clientY,
-        startScroll: s,
+        startScroll: metrics.position,
         distance: 0,
       };
       boundaryAccumRef.current = 0;
+      boundaryDirectionRef.current = null;
     };
 
     const onTouchMove = (e: TouchEvent) => {
       const tr = touchTrackingRef.current;
       if (!tr) return;
       // still pinned at the boundary? if the page can scroll further (not truly at edge), abort.
-      const s = curScroll();
-      if (tr.boundaryDir === 'prev' && s > 1) { touchTrackingRef.current = null; cancelBoundaryHint(); return; }
-      if (tr.boundaryDir === 'next' && s < maxScroll() - 1) { touchTrackingRef.current = null; cancelBoundaryHint(); return; }
+      const metrics = getScrollMetrics();
+      const stillAtBoundary = metrics
+        ? getBoundaryDirection({ ...metrics, step: tr.boundaryDir === 'next' ? 1 : -1 }) === tr.boundaryDir
+        : false;
+      if (!stillAtBoundary) { touchTrackingRef.current = null; cancelBoundaryHint(); return; }
 
       const t = e.touches[0];
       let raw: number;
@@ -790,7 +935,7 @@ export default function ReaderPage() {
       }
       const distance = Math.max(0, raw);
       tr.distance = distance;
-      const progress = Math.max(0, Math.min(1, distance / 100));
+      const progress = Math.min(1, distance / 60);
       const hasChapter = tr.boundaryDir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
       if (!hasChapter) {
         // no chapter: don't show progress hint, just a toast (already shown on threshold pass)
@@ -804,8 +949,8 @@ export default function ReaderPage() {
       const tr = touchTrackingRef.current;
       touchTrackingRef.current = null;
       if (!tr) return;
-      const progress = Math.max(0, Math.min(1, tr.distance / 100));
-      if (progress >= 0.6) {
+      const progress = Math.min(1, tr.distance / 60);
+      if (progress >= 1) {
         const hasChapter = tr.boundaryDir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
         if (hasChapter) {
           cancelBoundaryHint();
@@ -829,7 +974,7 @@ export default function ReaderPage() {
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
     };
-  }, [photo, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
+  }, [photo, getScrollMetrics, releaseLandingAnchor, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
 
   // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
 
@@ -928,7 +1073,7 @@ export default function ReaderPage() {
           return (
             <div key={img.name} className="shrink-0" style={pageStyle}>
               {url ? (
-                <img src={url} alt="" draggable={false} className={imgCls} onLoad={() => handleImageLoad(i)} />
+                <img src={url} alt="" draggable={false} className={imgCls} onLoad={() => handleImageLoad(photo.id, i)} />
               ) : !shouldRenderImage ? (
                 <div className={`relative overflow-hidden bg-gray-900/60 ${imgCls}`}>
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -943,8 +1088,9 @@ export default function ReaderPage() {
                   photo={photo}
                   className={imgCls}
                   onLoad={(blobUrl) => {
+                    if (chapterIdRef.current !== photo.id) return;
                     loadedSetRef.current.add(i);
-                    inflightRef.current.add(i);
+                    inflightRef.current.delete(i);
                     setBlobMap((prev) => { const next = new Map(prev); if (!next.has(i)) next.set(i, blobUrl); return next; });
                   }}
                 />
