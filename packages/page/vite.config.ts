@@ -14,9 +14,10 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      // Precache all build assets so the shell loads instantly offline
+      // Keep optional export code out of the install-critical application shell.
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        globIgnores: ['**/pdfkit.standalone-*.js'],
         // API calls to the backend worker are always network-only
         runtimeCaching: [
           {
@@ -42,12 +43,15 @@ export default defineConfig({
         ],
       },
       manifest: {
+        id: '/',
         name: 'J Client',
         short_name: 'J',
         description: 'JM第三方客户端',
+        lang: 'zh-CN',
         theme_color: '#ffffff',
         background_color: '#ffffff',
         display: 'standalone',
+        prefer_related_applications: false,
         scope: '/',
         start_url: '/',
         icons: [

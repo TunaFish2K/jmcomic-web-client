@@ -5,16 +5,13 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Home from "./home";
 import ReaderPage from "./reader";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { registerSW } from "virtual:pwa-register";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import { initializeTheme } from "./theme/theme-dom";
+import "./pwa";
 
 initializeTheme();
 
 const queryClient = new QueryClient();
-
-// Register service worker — auto-updates silently in background
-registerSW({ immediate: true });
 
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
