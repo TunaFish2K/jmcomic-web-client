@@ -42,8 +42,8 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'JM Web Client',
-        short_name: 'JM',
+        name: 'J Client',
+        short_name: 'J',
         description: 'JM第三方客户端',
         theme_color: '#ffffff',
         background_color: '#ffffff',
