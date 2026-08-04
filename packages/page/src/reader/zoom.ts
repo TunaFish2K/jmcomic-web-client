@@ -26,6 +26,40 @@ export const IDENTITY_ZOOM_TRANSFORM: ZoomTransform = {
   y: 0,
 };
 
+export function hasPositiveIntersection(first: ZoomRect, second: ZoomRect) {
+  return Math.min(first.left + first.width, second.left + second.width) > Math.max(first.left, second.left)
+    && Math.min(first.top + first.height, second.top + second.height) > Math.max(first.top, second.top);
+}
+
+export function getVisibleRectIndexes(rects: ZoomRect[], viewportRect: ZoomRect) {
+  const indexes: number[] = [];
+  for (let index = 0; index < rects.length; index++) {
+    if (hasPositiveIntersection(rects[index], viewportRect)) indexes.push(index);
+  }
+  return indexes;
+}
+
+export function getUnionRect(rects: ZoomRect[]): ZoomRect | null {
+  if (rects.length === 0) return null;
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const right = Math.max(...rects.map((rect) => rect.left + rect.width));
+  const bottom = Math.max(...rects.map((rect) => rect.top + rect.height));
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+export function getTargetZoomTransform(
+  transform: ZoomTransform,
+  contentRect: ZoomRect,
+  targetRect: ZoomRect,
+): ZoomTransform {
+  return {
+    scale: transform.scale,
+    x: transform.x + (transform.scale - 1) * (targetRect.left - contentRect.left),
+    y: transform.y + (transform.scale - 1) * (targetRect.top - contentRect.top),
+  };
+}
+
 export function getPointDistance(first: ZoomPoint, second: ZoomPoint) {
   return Math.hypot(second.x - first.x, second.y - first.y);
 }

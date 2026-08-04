@@ -11,7 +11,7 @@
         "icons:generate": "node ./scripts/generate-icons.mjs",
         "test:client": "tsx ./test/client.ts",
         "test:icons": "tsx --test ./test/icon-assets.test.ts",
-        "test:reader": "tsx --test ./test/reader-navigation.test.ts ./test/reader-zoom.test.ts",
+        "test:reader": "tsx --test ./test/reader-layout.test.ts ./test/reader-navigation.test.ts ./test/reader-store.test.ts ./test/reader-zoom.test.ts",
         "test:theme": "tsx --test ./test/theme.test.ts"
     },
     "dependencies": {

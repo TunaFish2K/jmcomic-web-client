@@ -175,8 +175,7 @@ function SettingsPanel({
           <span className="text-gray-300 text-xs">自动吸附</span>
           <button
             onClick={onToggleAutoSnap}
-            disabled={seamlessMode}
-            className={`relative w-9 h-5 rounded-full transition-colors ${autoSnap ? 'bg-brand-500' : 'bg-gray-600'} ${seamlessMode ? 'opacity-40 cursor-default' : ''}`}
+            className={`relative w-9 h-5 rounded-full transition-colors ${autoSnap ? 'bg-brand-500' : 'bg-gray-600'}`}
           >
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>

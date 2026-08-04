@@ -34,7 +34,7 @@ export function DecryptedImage({
 }: {
   image: { name: string; url: string };
   photo: PhotoWithScrambleId;
-  onLoad?: (blobUrl: string) => void;
+  onLoad?: (blobUrl: string, image: HTMLImageElement) => void;
   className?: string;
   style?: React.CSSProperties;
 }) {
@@ -56,7 +56,6 @@ export function DecryptedImage({
         createdUrl = URL.createObjectURL(blob);
         memoryCache.set(cacheKey, createdUrl);
         setBlobUrl(createdUrl);
-        onLoad?.(createdUrl);
         return;
       }
 
@@ -83,7 +82,6 @@ export function DecryptedImage({
           setCachedImage(cacheKey, jpeg);
           if (!cancelled) {
             setBlobUrl(createdUrl);
-            onLoad?.(createdUrl);
           }
           return;
         } catch {
@@ -122,7 +120,7 @@ export function DecryptedImage({
       className={className}
       style={style}
       draggable={false}
-      onLoad={() => onLoad?.(blobUrl!)}
+      onLoad={(event) => onLoad?.(blobUrl!, event.currentTarget)}
       onError={() => setFailed(true)}
     />
   );

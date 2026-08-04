@@ -5,6 +5,12 @@ import { getAlbum, getPhoto } from '../api';
 import { getCachedAlbum, setCachedAlbum } from '../album-cache';
 import { DecryptedImage } from './DecryptedImage';
 import { ReaderOverlay } from './ReaderOverlay';
+import {
+  getReaderAnchorRatio,
+  getReaderAnchorScrollPosition,
+  getReaderInteractionPolicy,
+  getReaderPageStyle,
+} from './layout';
 import type { ReadingDirection } from './reader-store';
 import {
   getReadingDirection,
@@ -41,6 +47,9 @@ import {
   getPinchZoomTransform,
   getPointDistance,
   getPointMidpoint,
+  getTargetZoomTransform,
+  getUnionRect,
+  getVisibleRectIndexes,
   IDENTITY_ZOOM_TRANSFORM,
   ZOOM_RESET_EPSILON,
   type ZoomPoint,
@@ -62,26 +71,46 @@ type PendingNavigation = {
   transitionId: number | null;
 };
 type LandingAnchor = { chapterId: string; page: number };
-type ActiveImageZoom = {
-  image: HTMLImageElement;
-  page: HTMLElement;
+type ReaderLayoutAnchor = {
   pageIndex: number;
-  imageRect: ZoomRect;
+  offsetRatio: number;
+  snapToStart: boolean;
+};
+type SavedZoomElementStyle = {
+  transform: string;
+  transformOrigin: string;
+  willChange: string;
+  position: string;
+  zIndex: string;
+  width: string;
+  height: string;
+  minWidth: string;
+  minHeight: string;
+  maxWidth: string;
+  maxHeight: string;
+  flex: string;
+  flexBasis: string;
+  aspectRatio: string;
+};
+type ZoomTarget = {
+  element: HTMLElement;
+  rect: ZoomRect;
+  style: SavedZoomElementStyle;
+};
+type ZoomLayer = {
+  element: HTMLElement;
+  position: string;
+  zIndex: string;
+};
+type ActiveImageZoom = {
+  targets: ZoomTarget[];
+  layers: ZoomLayer[];
+  contentRect: ZoomRect;
   viewportRect: ZoomRect;
   transform: ZoomTransform;
   scrollLeft: number;
   scrollTop: number;
-  imageStyle: {
-    transform: string;
-    transformOrigin: string;
-    willChange: string;
-    position: string;
-    zIndex: string;
-  };
-  pageStyle: {
-    position: string;
-    zIndex: string;
-  };
+  grouped: boolean;
 };
 type PinchGesture = {
   startDistance: number;
@@ -100,6 +129,34 @@ const CHAPTER_SWITCH_UNLOCK_DELAY_MS = 5000;
 const LANDING_ANCHOR_DELAY_MS = 5000;
 const PROGRAMMATIC_PAGE_TARGET_TIMEOUT_MS = 1500;
 const TRACKPAD_GESTURE_END_DELAY_MS = 140;
+
+function toZoomRect(rect: DOMRect): ZoomRect {
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+
+function saveZoomElementStyle(element: HTMLElement): SavedZoomElementStyle {
+  return {
+    transform: element.style.transform,
+    transformOrigin: element.style.transformOrigin,
+    willChange: element.style.willChange,
+    position: element.style.position,
+    zIndex: element.style.zIndex,
+    width: element.style.width,
+    height: element.style.height,
+    minWidth: element.style.minWidth,
+    minHeight: element.style.minHeight,
+    maxWidth: element.style.maxWidth,
+    maxHeight: element.style.maxHeight,
+    flex: element.style.flex,
+    flexBasis: element.style.flexBasis,
+    aspectRatio: element.style.aspectRatio,
+  };
+}
+
+function restoreZoomElementStyle(element: HTMLElement, style: SavedZoomElementStyle) {
+  Object.assign(element.style, style);
+}
+
 async function decryptImageWithRetry(url: string, photoId: string, scrambleId: number): Promise<ArrayBuffer | null> {
   const filename = url.split('/').pop() ?? '';
   const cacheKey = generateImageCacheKey(photoId, filename);
@@ -207,6 +264,7 @@ export default function ReaderPage() {
   const [showUI, setShowUI] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
   const [blobMap, setBlobMap] = useState<Map<number, string>>(new Map());
+  const [pageAspectRatios, setPageAspectRatios] = useState<Map<number, number>>(new Map());
   const [isZoomed, setIsZoomed] = useState(false);
 
   // ── boundary chapter-swap hint (pull past first/last page) ──
@@ -251,14 +309,22 @@ export default function ReaderPage() {
   const panGestureRef = useRef<PanGesture | null>(null);
   const zoomFrameRef = useRef<number | null>(null);
   const pendingZoomTransformRef = useRef<ZoomTransform | null>(null);
+  const pendingLayoutAnchorRef = useRef<ReaderLayoutAnchor | null>(null);
+  const pendingAspectRatiosRef = useRef(new Map<number, number>());
+  const pageAspectRatiosRef = useRef(pageAspectRatios);
   const zoomGestureMovedRef = useRef(false);
   const lastZoomTapRef = useRef<{ time: number; point: ZoomPoint } | null>(null);
   const suppressZoomClickUntilRef = useRef(0);
 
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
+  pageAspectRatiosRef.current = pageAspectRatios;
   const isRTLRef = useRef(isRTL);
   isRTLRef.current = isRTL;
+  const autoSnapRef = useRef(autoSnap);
+  autoSnapRef.current = autoSnap;
+  const seamlessModeRef = useRef(seamlessMode);
+  seamlessModeRef.current = seamlessMode;
   const albumIdRef = useRef(albumId);
   albumIdRef.current = albumId;
   const seriesRootRef = useRef<string>(albumId ?? '');
@@ -342,15 +408,54 @@ export default function ReaderPage() {
     const el = containerRef.current;
     if (!el) return null;
     if (isRTLRef.current) {
-      const lastPage = el.children[imagesCountRef.current - 1] as HTMLElement | undefined;
       return {
         position: el.scrollLeft,
-        maxPosition: lastPage?.offsetLeft ?? Math.max(el.scrollWidth - el.clientWidth, 0),
+        maxPosition: Math.max(el.scrollWidth - el.clientWidth, 0),
       };
     }
     return {
       position: el.scrollTop,
       maxPosition: Math.max(el.scrollHeight - el.clientHeight, 0),
+    };
+  }, []);
+
+  const captureLayoutAnchor = useCallback((snapToStart = autoSnapRef.current): ReaderLayoutAnchor | null => {
+    const el = containerRef.current;
+    if (!el || imagesCountRef.current === 0) return null;
+    const pages = Array.from(el.children).slice(0, imagesCountRef.current) as HTMLElement[];
+    if (pages.length === 0) return null;
+
+    if (snapToStart) {
+      return {
+        pageIndex: Math.max(0, Math.min(pages.length - 1, currentPageRef.current)),
+        offsetRatio: 0,
+        snapToStart: true,
+      };
+    }
+
+    const center = isRTLRef.current
+      ? el.scrollLeft + el.clientWidth / 2
+      : el.scrollTop + el.clientHeight / 2;
+    let pageIndex = 0;
+    let bestDistance = Infinity;
+    for (let index = 0; index < pages.length; index++) {
+      const page = pages[index];
+      const start = isRTLRef.current ? page.offsetLeft : page.offsetTop;
+      const size = isRTLRef.current ? page.offsetWidth : page.offsetHeight;
+      const distance = center < start ? start - center : center > start + size ? center - start - size : 0;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        pageIndex = index;
+      }
+    }
+
+    const page = pages[pageIndex];
+    const start = isRTLRef.current ? page.offsetLeft : page.offsetTop;
+    const size = Math.max(isRTLRef.current ? page.offsetWidth : page.offsetHeight, 1);
+    return {
+      pageIndex,
+      offsetRatio: getReaderAnchorRatio(center, start, size),
+      snapToStart: false,
     };
   }, []);
 
@@ -438,8 +543,11 @@ export default function ReaderPage() {
       const current = zoomRef.current;
       const pending = pendingZoomTransformRef.current;
       pendingZoomTransformRef.current = null;
-      if (!current || !pending || !current.image.isConnected) return;
-      current.image.style.transform = `translate3d(${pending.x}px, ${pending.y}px, 0) scale(${pending.scale})`;
+      if (!current || !pending || current.targets.some((target) => !target.element.isConnected)) return;
+      for (const target of current.targets) {
+        const local = getTargetZoomTransform(pending, current.contentRect, target.rect);
+        target.element.style.transform = `translate3d(${local.x}px, ${local.y}px, 0) scale(${local.scale})`;
+      }
     });
   }, []);
 
@@ -456,14 +564,14 @@ export default function ReaderPage() {
     const active = zoomRef.current;
     zoomRef.current = null;
     if (active) {
-      const { image, page, imageStyle, pageStyle } = active;
-      image.style.transform = imageStyle.transform;
-      image.style.transformOrigin = imageStyle.transformOrigin;
-      image.style.willChange = imageStyle.willChange;
-      image.style.position = imageStyle.position;
-      image.style.zIndex = imageStyle.zIndex;
-      page.style.position = pageStyle.position;
-      page.style.zIndex = pageStyle.zIndex;
+      if (pendingAspectRatiosRef.current.size > 0 && seamlessModeRef.current) {
+        pendingLayoutAnchorRef.current = captureLayoutAnchor(autoSnapRef.current);
+      }
+      for (const target of active.targets) restoreZoomElementStyle(target.element, target.style);
+      for (const layer of active.layers) {
+        layer.element.style.position = layer.position;
+        layer.element.style.zIndex = layer.zIndex;
+      }
 
       const container = containerRef.current;
       if (container) {
@@ -471,11 +579,19 @@ export default function ReaderPage() {
       }
     }
 
+    if (pendingAspectRatiosRef.current.size > 0) {
+      const next = new Map(pageAspectRatiosRef.current);
+      for (const [pageIndex, ratio] of pendingAspectRatiosRef.current) next.set(pageIndex, ratio);
+      pendingAspectRatiosRef.current.clear();
+      pageAspectRatiosRef.current = next;
+      setPageAspectRatios(next);
+    }
+
     if (zoomedRef.current) {
       zoomedRef.current = false;
       setIsZoomed(false);
     }
-  }, []);
+  }, [captureLayoutAnchor]);
 
   const getOrCreateActiveZoom = useCallback((midpoint: ZoomPoint) => {
     if (zoomRef.current) return zoomRef.current;
@@ -483,14 +599,60 @@ export default function ReaderPage() {
     if (!container) return null;
 
     const pages = Array.from(container.children).slice(0, imagesCountRef.current) as HTMLElement[];
-    let selected: { image: HTMLImageElement; page: HTMLElement; pageIndex: number } | null = null;
+    const viewportRect = toZoomRect(container.getBoundingClientRect());
+    if (getReaderInteractionPolicy({
+      autoSnap: autoSnapRef.current,
+      seamlessMode: seamlessModeRef.current,
+      isZoomed: false,
+    }).zoomTarget === 'visible-pages') {
+      const pageRects = pages.map((page) => toZoomRect(page.getBoundingClientRect()));
+      const pageIndexes = getVisibleRectIndexes(pageRects, viewportRect)
+        .filter((pageIndex) => pageRects[pageIndex].width > 0 && pageRects[pageIndex].height > 0);
+      const targetRects = pageIndexes.map((pageIndex) => pageRects[pageIndex]);
+      const contentRect = getUnionRect(targetRects);
+      if (contentRect && pageIndexes.length > 0) {
+        const targets = pageIndexes.map((pageIndex) => {
+          const element = pages[pageIndex];
+          const rect = pageRects[pageIndex];
+          const target = { element, rect, style: saveZoomElementStyle(element) };
+          element.style.width = `${rect.width}px`;
+          element.style.height = `${rect.height}px`;
+          element.style.minWidth = `${rect.width}px`;
+          element.style.minHeight = `${rect.height}px`;
+          element.style.maxWidth = `${rect.width}px`;
+          element.style.maxHeight = `${rect.height}px`;
+          element.style.flex = `0 0 ${isRTLRef.current ? rect.width : rect.height}px`;
+          element.style.flexBasis = `${isRTLRef.current ? rect.width : rect.height}px`;
+          element.style.aspectRatio = 'auto';
+          element.style.transformOrigin = '0 0';
+          element.style.willChange = 'transform';
+          element.style.position = 'relative';
+          element.style.zIndex = '2';
+          return target;
+        });
+        const active: ActiveImageZoom = {
+          targets,
+          layers: [],
+          contentRect,
+          viewportRect,
+          transform: IDENTITY_ZOOM_TRANSFORM,
+          scrollLeft: container.scrollLeft,
+          scrollTop: container.scrollTop,
+          grouped: true,
+        };
+        zoomRef.current = active;
+        return active;
+      }
+    }
+
+    let selected: { image: HTMLImageElement; page: HTMLElement } | null = null;
     for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
       const page = pages[pageIndex];
       const image = page.querySelector('img');
       if (!image) continue;
       const rect = image.getBoundingClientRect();
       if (midpoint.x >= rect.left && midpoint.x <= rect.right && midpoint.y >= rect.top && midpoint.y <= rect.bottom) {
-        selected = { image, page, pageIndex };
+        selected = { image, page };
         break;
       }
     }
@@ -501,44 +663,33 @@ export default function ReaderPage() {
         const rect = page.getBoundingClientRect();
         if (midpoint.x < rect.left || midpoint.x > rect.right || midpoint.y < rect.top || midpoint.y > rect.bottom) continue;
         const image = page.querySelector('img');
-        if (image) selected = { image, page, pageIndex };
+        if (image) selected = { image, page };
         break;
       }
     }
 
     if (!selected) return null;
     const imageBounds = selected.image.getBoundingClientRect();
-    const viewportBounds = container.getBoundingClientRect();
     if (imageBounds.width <= 0 || imageBounds.height <= 0) return null;
-
+    const imageRect = toZoomRect(imageBounds);
+    const target: ZoomTarget = {
+      element: selected.image,
+      rect: imageRect,
+      style: saveZoomElementStyle(selected.image),
+    };
     const active: ActiveImageZoom = {
-      ...selected,
-      imageRect: {
-        left: imageBounds.left,
-        top: imageBounds.top,
-        width: imageBounds.width,
-        height: imageBounds.height,
-      },
-      viewportRect: {
-        left: viewportBounds.left,
-        top: viewportBounds.top,
-        width: viewportBounds.width,
-        height: viewportBounds.height,
-      },
+      targets: [target],
+      layers: [{
+        element: selected.page,
+        position: selected.page.style.position,
+        zIndex: selected.page.style.zIndex,
+      }],
+      contentRect: imageRect,
+      viewportRect,
       transform: IDENTITY_ZOOM_TRANSFORM,
       scrollLeft: container.scrollLeft,
       scrollTop: container.scrollTop,
-      imageStyle: {
-        transform: selected.image.style.transform,
-        transformOrigin: selected.image.style.transformOrigin,
-        willChange: selected.image.style.willChange,
-        position: selected.image.style.position,
-        zIndex: selected.image.style.zIndex,
-      },
-      pageStyle: {
-        position: selected.page.style.position,
-        zIndex: selected.page.style.zIndex,
-      },
+      grouped: false,
     };
 
     selected.image.style.transformOrigin = '0 0';
@@ -550,6 +701,61 @@ export default function ReaderPage() {
     zoomRef.current = active;
     return active;
   }, []);
+
+  const recordPageDimensions = useCallback((chapterId: string, pageIndex: number, width: number, height: number) => {
+    if (chapterIdRef.current !== chapterId || width <= 0 || height <= 0) return;
+    const ratio = width / height;
+    const existing = pendingAspectRatiosRef.current.get(pageIndex) ?? pageAspectRatiosRef.current.get(pageIndex);
+    if (existing !== undefined && Math.abs(existing - ratio) < 0.0001) return;
+
+    if (zoomRef.current?.grouped) {
+      pendingAspectRatiosRef.current.set(pageIndex, ratio);
+      return;
+    }
+
+    if (seamlessModeRef.current) {
+      pendingLayoutAnchorRef.current = captureLayoutAnchor(autoSnapRef.current);
+    }
+    const next = new Map(pageAspectRatiosRef.current);
+    next.set(pageIndex, ratio);
+    pageAspectRatiosRef.current = next;
+    setPageAspectRatios(next);
+  }, [captureLayoutAnchor]);
+
+  useLayoutEffect(() => {
+    const anchor = pendingLayoutAnchorRef.current;
+    if (!anchor) return;
+    pendingLayoutAnchorRef.current = null;
+    const el = containerRef.current;
+    const page = el?.children[anchor.pageIndex] as HTMLElement | undefined;
+    if (!el || !page) return;
+
+    setReaderPage(anchor.pageIndex);
+    if (anchor.snapToStart) {
+      scrollToPage(anchor.pageIndex, 'instant');
+      return;
+    }
+
+    if (isRTLRef.current) {
+      const left = getReaderAnchorScrollPosition({
+        pageStart: page.offsetLeft,
+        pageSize: page.offsetWidth,
+        offsetRatio: anchor.offsetRatio,
+        viewportSize: el.clientWidth,
+        maxScroll: el.scrollWidth - el.clientWidth,
+      });
+      el.scrollTo({ left, behavior: 'instant' });
+    } else {
+      const top = getReaderAnchorScrollPosition({
+        pageStart: page.offsetTop,
+        pageSize: page.offsetHeight,
+        offsetRatio: anchor.offsetRatio,
+        viewportSize: el.clientHeight,
+        maxScroll: el.scrollHeight - el.clientHeight,
+      });
+      el.scrollTo({ top, behavior: 'instant' });
+    }
+  }, [pageAspectRatios, seamlessMode, scrollToPage, setReaderPage]);
 
   useEffect(() => {
     if (!photo) return;
@@ -614,7 +820,7 @@ export default function ReaderPage() {
         const midpoint = getPointMidpoint(first, second);
         const transform = getPinchZoomTransform({
           initialTransform: gesture.initialTransform,
-          imageRect: active.imageRect,
+          imageRect: active.contentRect,
           viewportRect: active.viewportRect,
           startMidpoint: gesture.startMidpoint,
           currentMidpoint: midpoint,
@@ -636,7 +842,7 @@ export default function ReaderPage() {
       suppressZoomClickUntilRef.current = Date.now() + 500;
       applyZoomTransform(getPannedZoomTransform({
         initialTransform: panGesture.initialTransform,
-        imageRect: active.imageRect,
+        imageRect: active.contentRect,
         viewportRect: active.viewportRect,
         startPoint: panGesture.startPoint,
         currentPoint,
@@ -738,6 +944,11 @@ export default function ReaderPage() {
     releaseLandingAnchor();
     clearProgrammaticPageTarget();
     setBlobMap(new Map());
+    const emptyAspectRatios = new Map<number, number>();
+    pageAspectRatiosRef.current = emptyAspectRatios;
+    pendingAspectRatiosRef.current.clear();
+    pendingLayoutAnchorRef.current = null;
+    setPageAspectRatios(emptyAspectRatios);
     loadGenerationRef.current += 1;
     pendingNavigationRef.current = {
       chapterId: newChapterId,
@@ -766,8 +977,9 @@ export default function ReaderPage() {
     return resetReader(target.id, getChapterLandingPage(dir));
   }, [resetReader]);
 
-  const handleImageLoad = useCallback((chapterId: string, pageIndex: number) => {
+  const handleImageLoad = useCallback((chapterId: string, pageIndex: number, image: HTMLImageElement) => {
     if (chapterIdRef.current !== chapterId) return;
+    recordPageDimensions(chapterId, pageIndex, image.naturalWidth, image.naturalHeight);
 
     const anchor = landingAnchorRef.current;
     if (anchor?.chapterId === chapterId) {
@@ -782,7 +994,7 @@ export default function ReaderPage() {
       pendingNavigationRef.current = null;
       completeChapterTransition(pending.transitionId, chapterId);
     }
-  }, [completeChapterTransition, scrollToPage]);
+  }, [completeChapterTransition, recordPageDimensions, scrollToPage]);
 
   const scrollByInputStep = useCallback((step: number) => {
     const el = containerRef.current;
@@ -886,12 +1098,13 @@ export default function ReaderPage() {
 
   const toggleSeamlessMode = useCallback(() => {
     resetZoom();
+    pendingLayoutAnchorRef.current = captureLayoutAnchor(autoSnapRef.current);
     setSeamlessMode((prev) => {
       const next = !prev;
       saveSeamlessMode(next);
       return next;
     });
-  }, [resetZoom]);
+  }, [captureLayoutAnchor, resetZoom]);
 
   const changeLazyRenderRange = useCallback((value: number) => {
     const next = Math.max(1, Math.min(12, Math.round(value)));
@@ -1067,7 +1280,7 @@ export default function ReaderPage() {
     if (!el || !photo || images.length === 0) return;
 
     const isHorizontal = isRTL;
-    const snapEnabled = autoSnap && !seamlessMode;
+    const snapEnabled = getReaderInteractionPolicy({ autoSnap, seamlessMode, isZoomed: false }).snapEnabled;
     const shouldSettleHorizontal = isHorizontal && snapEnabled && window.matchMedia('(pointer: fine)').matches;
 
     const clearHorizontalSnapTimer = () => {
@@ -1423,6 +1636,7 @@ export default function ReaderPage() {
     paddingLeft: barSide === 'left' ? 40 : 0,
     paddingRight: barSide === 'right' ? 40 : 0,
   } : {};
+  const readerPolicy = getReaderInteractionPolicy({ autoSnap, seamlessMode, isZoomed });
 
   const scrollDivStyle: React.CSSProperties = {
     position: 'relative',
@@ -1431,7 +1645,7 @@ export default function ReaderPage() {
     display: 'flex',
     flexDirection: isRTL ? 'row' : 'column',
     gap: 0,
-    scrollSnapType: !isZoomed && autoSnap && !seamlessMode ? (isRTL ? 'x mandatory' : 'y mandatory') : 'none',
+    scrollSnapType: readerPolicy.snapEnabled ? (isRTL ? 'x mandatory' : 'y mandatory') : 'none',
     WebkitOverflowScrolling: 'touch',
     overscrollBehavior: 'contain',
     touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y'),
@@ -1440,28 +1654,11 @@ export default function ReaderPage() {
     ...barPad,
   };
 
-  const pageStyle: React.CSSProperties = isRTL
-    ? {
-        flex: '0 0 100%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        scrollSnapAlign: !isZoomed && autoSnap && !seamlessMode ? 'start' : undefined,
-        scrollSnapStop: !isZoomed && autoSnap && !seamlessMode ? 'always' : undefined,
-      }
-    : {
-        height: 'auto',
-        flexShrink: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        scrollSnapAlign: !isZoomed && autoSnap && !seamlessMode ? 'start' : undefined,
-        scrollSnapStop: !isZoomed && autoSnap && !seamlessMode ? 'always' : undefined,
-      };
-
-  const imgCls = isRTL
-    ? 'w-full h-auto max-h-full object-contain'
-    : 'h-auto w-full object-contain';
+  const imgCls = seamlessMode
+    ? 'block h-full w-full object-contain'
+    : isRTL
+      ? 'block w-full h-auto max-h-full object-contain'
+      : 'block h-auto w-full object-contain';
 
   const lazyRenderStart = Math.max(0, currentPage - lazyRenderRange);
   const lazyRenderEnd = Math.min(images.length - 1, currentPage + lazyRenderRange);
@@ -1478,9 +1675,25 @@ export default function ReaderPage() {
           const url = blobMap.get(i);
           const shouldRenderImage = i >= lazyRenderStart && i <= lazyRenderEnd;
           return (
-            <div key={img.name} data-reader-page={i} className="shrink-0" style={pageStyle}>
+            <div
+              key={img.name}
+              data-reader-page={i}
+              className="shrink-0"
+              style={getReaderPageStyle({
+                direction,
+                seamlessMode,
+                aspectRatio: pageAspectRatios.get(i),
+                snapEnabled: readerPolicy.snapEnabled,
+              })}
+            >
               {url ? (
-                <img src={url} alt="" draggable={false} className={imgCls} onLoad={() => handleImageLoad(photo.id, i)} />
+                <img
+                  src={url}
+                  alt=""
+                  draggable={false}
+                  className={imgCls}
+                  onLoad={(event) => handleImageLoad(photo.id, i, event.currentTarget)}
+                />
               ) : !shouldRenderImage ? (
                 <div className={`relative overflow-hidden bg-gray-900/60 ${imgCls}`}>
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -1494,8 +1707,9 @@ export default function ReaderPage() {
                   image={img}
                   photo={photo}
                   className={imgCls}
-                  onLoad={(blobUrl) => {
+                  onLoad={(blobUrl, imageElement) => {
                     if (chapterIdRef.current !== photo.id) return;
+                    recordPageDimensions(photo.id, i, imageElement.naturalWidth, imageElement.naturalHeight);
                     loadedSetRef.current.add(i);
                     inflightRef.current.delete(i);
                     setBlobMap((prev) => { const next = new Map(prev); if (!next.has(i)) next.set(i, blobUrl); return next; });
