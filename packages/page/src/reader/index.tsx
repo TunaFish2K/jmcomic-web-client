@@ -36,6 +36,17 @@ import {
   MOUSE_WHEEL_BOUNDARY_CONTRIBUTION,
   type ChapterDirection,
 } from './navigation';
+import {
+  getPannedZoomTransform,
+  getPinchZoomTransform,
+  getPointDistance,
+  getPointMidpoint,
+  IDENTITY_ZOOM_TRANSFORM,
+  ZOOM_RESET_EPSILON,
+  type ZoomPoint,
+  type ZoomRect,
+  type ZoomTransform,
+} from './zoom';
 
 function parseSeriesOrder(value: string | number | undefined) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -51,6 +62,36 @@ type PendingNavigation = {
   transitionId: number | null;
 };
 type LandingAnchor = { chapterId: string; page: number };
+type ActiveImageZoom = {
+  image: HTMLImageElement;
+  page: HTMLElement;
+  pageIndex: number;
+  imageRect: ZoomRect;
+  viewportRect: ZoomRect;
+  transform: ZoomTransform;
+  scrollLeft: number;
+  scrollTop: number;
+  imageStyle: {
+    transform: string;
+    transformOrigin: string;
+    willChange: string;
+    position: string;
+    zIndex: string;
+  };
+  pageStyle: {
+    position: string;
+    zIndex: string;
+  };
+};
+type PinchGesture = {
+  startDistance: number;
+  startMidpoint: ZoomPoint;
+  initialTransform: ZoomTransform;
+};
+type PanGesture = {
+  startPoint: ZoomPoint;
+  initialTransform: ZoomTransform;
+};
 
 const PRELOAD_AHEAD = 10;
 const PRELOAD_PARALLEL = 5;
@@ -166,6 +207,7 @@ export default function ReaderPage() {
   const [showUI, setShowUI] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
   const [blobMap, setBlobMap] = useState<Map<number, string>>(new Map());
+  const [isZoomed, setIsZoomed] = useState(false);
 
   // ── boundary chapter-swap hint (pull past first/last page) ──
   const [hint, setHint] = useState<{ dir: 'prev' | 'next'; progress: number; chapterName: string } | null>(null);
@@ -191,6 +233,7 @@ export default function ReaderPage() {
   const transitionUnlockTimerRef = useRef<number | null>(null);
   const loadGenerationRef = useRef(0);
   const switchingRef = useRef(false);
+  const readerRootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const loadedSetRef = useRef(new Set<number>());
   const inflightRef = useRef(new Set<number>());
@@ -202,6 +245,15 @@ export default function ReaderPage() {
   const trackpadDeltaAccumRef = useRef(0);
   const trackpadGestureTimerRef = useRef<number | null>(null);
   const horizontalSnapTimerRef = useRef<number | null>(null);
+  const zoomRef = useRef<ActiveImageZoom | null>(null);
+  const zoomedRef = useRef(false);
+  const pinchGestureRef = useRef<PinchGesture | null>(null);
+  const panGestureRef = useRef<PanGesture | null>(null);
+  const zoomFrameRef = useRef<number | null>(null);
+  const pendingZoomTransformRef = useRef<ZoomTransform | null>(null);
+  const zoomGestureMovedRef = useRef(false);
+  const lastZoomTapRef = useRef<{ time: number; point: ZoomPoint } | null>(null);
+  const suppressZoomClickUntilRef = useRef(0);
 
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
@@ -350,16 +402,6 @@ export default function ReaderPage() {
     return true;
   }, []);
 
-  const seekPage = useCallback((page: number) => {
-    releaseLandingAnchor();
-    clearProgrammaticPageTarget();
-    const total = imagesCountRef.current;
-    if (total === 0) return;
-    const clamped = Math.max(0, Math.min(total - 1, page));
-    setReaderPage(clamped);
-    scrollToPage(clamped, 'instant');
-  }, [clearProgrammaticPageTarget, releaseLandingAnchor, scrollToPage, setReaderPage]);
-
   const showBoundaryToast = useCallback((dir: ChapterDirection) => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     setBoundaryToast(dir);
@@ -379,8 +421,300 @@ export default function ReaderPage() {
     setHint(null);
   }, []);
 
+  const applyZoomTransform = useCallback((transform: ZoomTransform) => {
+    const active = zoomRef.current;
+    if (!active) return;
+
+    active.transform = transform;
+    pendingZoomTransformRef.current = transform;
+    if (!zoomedRef.current && transform.scale > 1 + ZOOM_RESET_EPSILON) {
+      zoomedRef.current = true;
+      setIsZoomed(true);
+    }
+
+    if (zoomFrameRef.current !== null) return;
+    zoomFrameRef.current = window.requestAnimationFrame(() => {
+      zoomFrameRef.current = null;
+      const current = zoomRef.current;
+      const pending = pendingZoomTransformRef.current;
+      pendingZoomTransformRef.current = null;
+      if (!current || !pending || !current.image.isConnected) return;
+      current.image.style.transform = `translate3d(${pending.x}px, ${pending.y}px, 0) scale(${pending.scale})`;
+    });
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    if (zoomFrameRef.current !== null) {
+      window.cancelAnimationFrame(zoomFrameRef.current);
+      zoomFrameRef.current = null;
+    }
+    pendingZoomTransformRef.current = null;
+    pinchGestureRef.current = null;
+    panGestureRef.current = null;
+    lastZoomTapRef.current = null;
+
+    const active = zoomRef.current;
+    zoomRef.current = null;
+    if (active) {
+      const { image, page, imageStyle, pageStyle } = active;
+      image.style.transform = imageStyle.transform;
+      image.style.transformOrigin = imageStyle.transformOrigin;
+      image.style.willChange = imageStyle.willChange;
+      image.style.position = imageStyle.position;
+      image.style.zIndex = imageStyle.zIndex;
+      page.style.position = pageStyle.position;
+      page.style.zIndex = pageStyle.zIndex;
+
+      const container = containerRef.current;
+      if (container) {
+        container.scrollTo({ left: active.scrollLeft, top: active.scrollTop, behavior: 'instant' });
+      }
+    }
+
+    if (zoomedRef.current) {
+      zoomedRef.current = false;
+      setIsZoomed(false);
+    }
+  }, []);
+
+  const getOrCreateActiveZoom = useCallback((midpoint: ZoomPoint) => {
+    if (zoomRef.current) return zoomRef.current;
+    const container = containerRef.current;
+    if (!container) return null;
+
+    const pages = Array.from(container.children).slice(0, imagesCountRef.current) as HTMLElement[];
+    let selected: { image: HTMLImageElement; page: HTMLElement; pageIndex: number } | null = null;
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      const page = pages[pageIndex];
+      const image = page.querySelector('img');
+      if (!image) continue;
+      const rect = image.getBoundingClientRect();
+      if (midpoint.x >= rect.left && midpoint.x <= rect.right && midpoint.y >= rect.top && midpoint.y <= rect.bottom) {
+        selected = { image, page, pageIndex };
+        break;
+      }
+    }
+
+    if (!selected) {
+      for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+        const page = pages[pageIndex];
+        const rect = page.getBoundingClientRect();
+        if (midpoint.x < rect.left || midpoint.x > rect.right || midpoint.y < rect.top || midpoint.y > rect.bottom) continue;
+        const image = page.querySelector('img');
+        if (image) selected = { image, page, pageIndex };
+        break;
+      }
+    }
+
+    if (!selected) return null;
+    const imageBounds = selected.image.getBoundingClientRect();
+    const viewportBounds = container.getBoundingClientRect();
+    if (imageBounds.width <= 0 || imageBounds.height <= 0) return null;
+
+    const active: ActiveImageZoom = {
+      ...selected,
+      imageRect: {
+        left: imageBounds.left,
+        top: imageBounds.top,
+        width: imageBounds.width,
+        height: imageBounds.height,
+      },
+      viewportRect: {
+        left: viewportBounds.left,
+        top: viewportBounds.top,
+        width: viewportBounds.width,
+        height: viewportBounds.height,
+      },
+      transform: IDENTITY_ZOOM_TRANSFORM,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop,
+      imageStyle: {
+        transform: selected.image.style.transform,
+        transformOrigin: selected.image.style.transformOrigin,
+        willChange: selected.image.style.willChange,
+        position: selected.image.style.position,
+        zIndex: selected.image.style.zIndex,
+      },
+      pageStyle: {
+        position: selected.page.style.position,
+        zIndex: selected.page.style.zIndex,
+      },
+    };
+
+    selected.image.style.transformOrigin = '0 0';
+    selected.image.style.willChange = 'transform';
+    selected.image.style.position = 'relative';
+    selected.image.style.zIndex = '2';
+    selected.page.style.position = 'relative';
+    selected.page.style.zIndex = '2';
+    zoomRef.current = active;
+    return active;
+  }, []);
+
+  useEffect(() => {
+    if (!photo) return;
+    const touchTarget = readerRootRef.current;
+    if (!touchTarget) return;
+
+    const pointFromTouch = (touch: Touch): ZoomPoint => ({ x: touch.clientX, y: touch.clientY });
+    const isZoomControlTarget = (target: EventTarget | null) => (
+      target instanceof Element
+      && !!target.closest('button, input, select, textarea, a, [role="button"], [role="dialog"]')
+    );
+    const startPinch = (touches: TouchList) => {
+      const first = pointFromTouch(touches[0]);
+      const second = pointFromTouch(touches[1]);
+      const midpoint = getPointMidpoint(first, second);
+      const active = getOrCreateActiveZoom(midpoint);
+      if (!active) return false;
+      pinchGestureRef.current = {
+        startDistance: getPointDistance(first, second),
+        startMidpoint: midpoint,
+        initialTransform: active.transform,
+      };
+      panGestureRef.current = null;
+      return true;
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      if (switchingRef.current || pendingNavigationRef.current !== null) return;
+      if (isZoomControlTarget(event.target)) return;
+      if (event.touches.length >= 2) {
+        if (!startPinch(event.touches)) return;
+        event.preventDefault();
+        clearProgrammaticPageTarget();
+        releaseLandingAnchor();
+        touchTrackingRef.current = null;
+        cancelBoundaryHint();
+        zoomGestureMovedRef.current = false;
+        suppressZoomClickUntilRef.current = Date.now() + 500;
+        return;
+      }
+
+      const active = zoomRef.current;
+      if (event.touches.length === 1 && active && active.transform.scale > 1 + ZOOM_RESET_EPSILON) {
+        panGestureRef.current = {
+          startPoint: pointFromTouch(event.touches[0]),
+          initialTransform: active.transform,
+        };
+        zoomGestureMovedRef.current = false;
+      }
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (isZoomControlTarget(event.target)) return;
+      if (event.touches.length >= 2) {
+        if (!pinchGestureRef.current && !startPinch(event.touches)) return;
+        const active = zoomRef.current;
+        const gesture = pinchGestureRef.current;
+        if (!active || !gesture) return;
+        event.preventDefault();
+        const first = pointFromTouch(event.touches[0]);
+        const second = pointFromTouch(event.touches[1]);
+        const midpoint = getPointMidpoint(first, second);
+        const transform = getPinchZoomTransform({
+          initialTransform: gesture.initialTransform,
+          imageRect: active.imageRect,
+          viewportRect: active.viewportRect,
+          startMidpoint: gesture.startMidpoint,
+          currentMidpoint: midpoint,
+          startDistance: gesture.startDistance,
+          currentDistance: getPointDistance(first, second),
+        });
+        zoomGestureMovedRef.current = true;
+        suppressZoomClickUntilRef.current = Date.now() + 500;
+        applyZoomTransform(transform);
+        return;
+      }
+
+      const active = zoomRef.current;
+      const panGesture = panGestureRef.current;
+      if (event.touches.length !== 1 || !active || !panGesture || active.transform.scale <= 1 + ZOOM_RESET_EPSILON) return;
+      event.preventDefault();
+      const currentPoint = pointFromTouch(event.touches[0]);
+      if (getPointDistance(panGesture.startPoint, currentPoint) > 3) zoomGestureMovedRef.current = true;
+      suppressZoomClickUntilRef.current = Date.now() + 500;
+      applyZoomTransform(getPannedZoomTransform({
+        initialTransform: panGesture.initialTransform,
+        imageRect: active.imageRect,
+        viewportRect: active.viewportRect,
+        startPoint: panGesture.startPoint,
+        currentPoint,
+      }));
+    };
+
+    const onTouchEnd = (event: TouchEvent) => {
+      if (isZoomControlTarget(event.target)) return;
+      if (event.touches.length >= 2) {
+        startPinch(event.touches);
+        return;
+      }
+      const active = zoomRef.current;
+      if (event.touches.length === 1 && active && active.transform.scale > 1 + ZOOM_RESET_EPSILON) {
+        pinchGestureRef.current = null;
+        panGestureRef.current = {
+          startPoint: pointFromTouch(event.touches[0]),
+          initialTransform: active.transform,
+        };
+        return;
+      }
+
+      pinchGestureRef.current = null;
+      panGestureRef.current = null;
+      if (!active) return;
+      if (active.transform.scale <= 1 + ZOOM_RESET_EPSILON) {
+        resetZoom();
+        return;
+      }
+
+      const changedTouch = event.changedTouches[0];
+      if (!zoomGestureMovedRef.current && changedTouch) {
+        const point = pointFromTouch(changedTouch);
+        const now = Date.now();
+        const previous = lastZoomTapRef.current;
+        if (previous && now - previous.time <= 300 && getPointDistance(previous.point, point) <= 32) {
+          suppressZoomClickUntilRef.current = now + 500;
+          resetZoom();
+          return;
+        }
+        lastZoomTapRef.current = { time: now, point };
+      } else {
+        lastZoomTapRef.current = null;
+      }
+    };
+
+    const onTouchCancel = () => {
+      pinchGestureRef.current = null;
+      panGestureRef.current = null;
+      if (zoomRef.current?.transform.scale === 1) resetZoom();
+    };
+
+    touchTarget.addEventListener('touchstart', onTouchStart, { passive: false });
+    touchTarget.addEventListener('touchmove', onTouchMove, { passive: false });
+    touchTarget.addEventListener('touchend', onTouchEnd, { passive: false });
+    touchTarget.addEventListener('touchcancel', onTouchCancel, { passive: false });
+    return () => {
+      touchTarget.removeEventListener('touchstart', onTouchStart);
+      touchTarget.removeEventListener('touchmove', onTouchMove);
+      touchTarget.removeEventListener('touchend', onTouchEnd);
+      touchTarget.removeEventListener('touchcancel', onTouchCancel);
+    };
+  }, [applyZoomTransform, cancelBoundaryHint, clearProgrammaticPageTarget, getOrCreateActiveZoom, photo, releaseLandingAnchor, resetZoom]);
+
+  const seekPage = useCallback((page: number) => {
+    resetZoom();
+    releaseLandingAnchor();
+    clearProgrammaticPageTarget();
+    const total = imagesCountRef.current;
+    if (total === 0) return;
+    const clamped = Math.max(0, Math.min(total - 1, page));
+    setReaderPage(clamped);
+    scrollToPage(clamped, 'instant');
+  }, [clearProgrammaticPageTarget, releaseLandingAnchor, resetZoom, scrollToPage, setReaderPage]);
+
   const resetReader = useCallback((newChapterId: string, page?: number | 'last') => {
     if (switchingRef.current || newChapterId === chapterIdRef.current) return false;
+    resetZoom();
 
     const transitionId = ++transitionSequenceRef.current;
     activeTransitionIdRef.current = transitionId;
@@ -423,7 +757,7 @@ export default function ReaderPage() {
       state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
     });
     return true;
-  }, [album, cancelBoundaryHint, clearProgrammaticPageTarget, isSeries, navigate, releaseLandingAnchor, setReaderPage]);
+  }, [album, cancelBoundaryHint, clearProgrammaticPageTarget, isSeries, navigate, releaseLandingAnchor, resetZoom, setReaderPage]);
 
   const switchAdjacentChapter = useCallback((dir: ChapterDirection) => {
     const offset = dir === 'next' ? 1 : -1;
@@ -453,6 +787,7 @@ export default function ReaderPage() {
   const scrollByInputStep = useCallback((step: number) => {
     const el = containerRef.current;
     if (!el || switchingRef.current || pendingNavigationRef.current !== null) return;
+    resetZoom();
     releaseLandingAnchor();
 
     if (isRTLRef.current && programmaticPageTargetRef.current !== null) {
@@ -490,7 +825,7 @@ export default function ReaderPage() {
 
     const distance = Math.max(el.clientHeight * 0.9, 1) * step;
     el.scrollBy({ top: distance, behavior: 'smooth' });
-  }, [cancelBoundaryHint, clearProgrammaticPageTarget, getScrollMetrics, releaseLandingAnchor, scrollToPage, setProgrammaticPageTarget, setReaderPage, showBoundaryToast, switchAdjacentChapter]);
+  }, [cancelBoundaryHint, clearProgrammaticPageTarget, getScrollMetrics, releaseLandingAnchor, resetZoom, scrollToPage, setProgrammaticPageTarget, setReaderPage, showBoundaryToast, switchAdjacentChapter]);
 
   const goNextPage = useCallback(() => scrollByInputStep(1), [scrollByInputStep]);
   const goPrevPage = useCallback(() => scrollByInputStep(-1), [scrollByInputStep]);
@@ -524,11 +859,13 @@ export default function ReaderPage() {
     trackpadGestureLockRef.current = false;
     trackpadDeltaAccumRef.current = 0;
     wheelPagingLockRef.current = false;
+    resetZoom();
     clearProgrammaticPageTarget();
     releaseLandingAnchor();
-  }, [clearProgrammaticPageTarget, releaseLandingAnchor]);
+  }, [clearProgrammaticPageTarget, releaseLandingAnchor, resetZoom]);
 
   const toggleDirection = useCallback(() => {
+    resetZoom();
     releaseLandingAnchor();
     clearProgrammaticPageTarget();
     cancelBoundaryHint();
@@ -537,22 +874,24 @@ export default function ReaderPage() {
       saveReadingDirection(next);
       return next;
     });
-  }, [cancelBoundaryHint, clearProgrammaticPageTarget, releaseLandingAnchor]);
+  }, [cancelBoundaryHint, clearProgrammaticPageTarget, releaseLandingAnchor, resetZoom]);
 
   const toggleAutoSnap = useCallback(() => {
+    resetZoom();
     setAutoSnap((prev) => {
       saveAutoSnap(!prev);
       return !prev;
     });
-  }, []);
+  }, [resetZoom]);
 
   const toggleSeamlessMode = useCallback(() => {
+    resetZoom();
     setSeamlessMode((prev) => {
       const next = !prev;
       saveSeamlessMode(next);
       return next;
     });
-  }, []);
+  }, [resetZoom]);
 
   const changeLazyRenderRange = useCallback((value: number) => {
     const next = Math.max(1, Math.min(12, Math.round(value)));
@@ -827,6 +1166,10 @@ export default function ReaderPage() {
     };
 
     const onWheel = (e: WheelEvent) => {
+      if (zoomedRef.current) {
+        e.preventDefault();
+        return;
+      }
       const dominantDelta = getDominantWheelDelta(e.deltaX, e.deltaY);
       const inputDelta = isRTLRef.current ? dominantDelta : e.deltaY;
       if (Math.abs(inputDelta) < 4) return;
@@ -936,6 +1279,11 @@ export default function ReaderPage() {
     if (!el) return;
 
     const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || zoomRef.current) {
+        touchTrackingRef.current = null;
+        if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+        return;
+      }
       clearProgrammaticPageTarget();
       if (switchingRef.current || pendingNavigationRef.current !== null) return;
       const t = e.touches[0];
@@ -957,6 +1305,11 @@ export default function ReaderPage() {
     };
 
     const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || zoomRef.current) {
+        touchTrackingRef.current = null;
+        if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+        return;
+      }
       const tr = touchTrackingRef.current;
       if (!tr) return;
       // still pinned at the boundary? if the page can scroll further (not truly at edge), abort.
@@ -985,7 +1338,12 @@ export default function ReaderPage() {
       setHint({ dir: tr.boundaryDir, progress, chapterName: tr.boundaryDir === 'next' ? nextChapterNameRef.current : prevChapterNameRef.current });
     };
 
-    const onTouchEnd = () => {
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length > 0 || zoomRef.current) {
+        touchTrackingRef.current = null;
+        if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+        return;
+      }
       const tr = touchTrackingRef.current;
       touchTrackingRef.current = null;
       if (!tr) return;
@@ -1019,6 +1377,11 @@ export default function ReaderPage() {
   // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
 
   const handleFlipClick = useCallback((e: React.MouseEvent) => {
+    if (Date.now() < suppressZoomClickUntilRef.current) return;
+    if (zoomedRef.current) {
+      if (!showUI) setShowUI(true);
+      return;
+    }
     if (showUI) return;
     const el = containerRef.current;
     if (!el) return;
@@ -1063,15 +1426,15 @@ export default function ReaderPage() {
 
   const scrollDivStyle: React.CSSProperties = {
     position: 'relative',
-    overflowX: isRTL ? 'auto' : 'hidden',
-    overflowY: isRTL ? 'hidden' : 'auto',
+    overflowX: isZoomed ? 'hidden' : (isRTL ? 'auto' : 'hidden'),
+    overflowY: isZoomed ? 'hidden' : (isRTL ? 'hidden' : 'auto'),
     display: 'flex',
     flexDirection: isRTL ? 'row' : 'column',
     gap: 0,
-    scrollSnapType: autoSnap && !seamlessMode ? (isRTL ? 'x mandatory' : 'y mandatory') : 'none',
+    scrollSnapType: !isZoomed && autoSnap && !seamlessMode ? (isRTL ? 'x mandatory' : 'y mandatory') : 'none',
     WebkitOverflowScrolling: 'touch',
     overscrollBehavior: 'contain',
-    touchAction: isRTL ? 'pan-x' : 'pan-y',
+    touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y'),
     scrollbarWidth: 'none',
     msOverflowStyle: 'none',
     ...barPad,
@@ -1083,8 +1446,8 @@ export default function ReaderPage() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        scrollSnapAlign: autoSnap && !seamlessMode ? 'start' : undefined,
-        scrollSnapStop: autoSnap && !seamlessMode ? 'always' : undefined,
+        scrollSnapAlign: !isZoomed && autoSnap && !seamlessMode ? 'start' : undefined,
+        scrollSnapStop: !isZoomed && autoSnap && !seamlessMode ? 'always' : undefined,
       }
     : {
         height: 'auto',
@@ -1092,8 +1455,8 @@ export default function ReaderPage() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        scrollSnapAlign: autoSnap && !seamlessMode ? 'start' : undefined,
-        scrollSnapStop: autoSnap && !seamlessMode ? 'always' : undefined,
+        scrollSnapAlign: !isZoomed && autoSnap && !seamlessMode ? 'start' : undefined,
+        scrollSnapStop: !isZoomed && autoSnap && !seamlessMode ? 'always' : undefined,
       };
 
   const imgCls = isRTL
@@ -1104,14 +1467,18 @@ export default function ReaderPage() {
   const lazyRenderEnd = Math.min(images.length - 1, currentPage + lazyRenderRange);
 
   return (
-    <div className="fixed inset-0 bg-black select-none overflow-hidden">
+    <div
+      ref={readerRootRef}
+      className="fixed inset-0 bg-black select-none overflow-hidden"
+      style={{ touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y') }}
+    >
       <style>{`::-webkit-scrollbar { display: none; }`}</style>
       <div ref={containerRef} className="h-full w-full" style={scrollDivStyle}>
         {images.map((img, i) => {
           const url = blobMap.get(i);
           const shouldRenderImage = i >= lazyRenderStart && i <= lazyRenderEnd;
           return (
-            <div key={img.name} className="shrink-0" style={pageStyle}>
+            <div key={img.name} data-reader-page={i} className="shrink-0" style={pageStyle}>
               {url ? (
                 <img src={url} alt="" draggable={false} className={imgCls} onLoad={() => handleImageLoad(photo.id, i)} />
               ) : !shouldRenderImage ? (
@@ -1184,6 +1551,7 @@ export default function ReaderPage() {
         lazyRenderRange={lazyRenderRange}
         barSide={barSide}
         barVisible={barVisible}
+        isZoomed={isZoomed}
         onToggleVisibility={() => setShowUI((v) => !v)}
         onClose={() => navigate(-1)}
         onPrevPage={goPrevPage}
@@ -1196,6 +1564,7 @@ export default function ReaderPage() {
         onToggleSeamlessMode={toggleSeamlessMode}
         onChangeLazyRenderRange={changeLazyRenderRange}
         onToggleBarVisible={() => setBarVisible(v => !v)}
+        onResetZoom={resetZoom}
         onScrollByInputStep={scrollByInputStep}
         onSeekPage={seekPage}
         onBoundaryDismiss={onBoundaryDismiss}

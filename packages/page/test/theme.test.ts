@@ -113,7 +113,20 @@ describe('theme preferences', () => {
 
   it('resolves preset and custom accent colors', () => {
     assert.equal(getAccentColor({ kind: 'preset', id: 'jade' }), '#00DD99');
+    assert.equal(getAccentColor({ kind: 'preset', id: 'azure' }), '#018EEE');
     assert.equal(getAccentColor({ kind: 'custom', value: '#abc' }), '#AABBCC');
+  });
+
+  it('loads the azure preset from version 1 preferences', () => {
+    assert.deepEqual(parseThemePreferences(JSON.stringify({
+      version: 1,
+      mode: 'system',
+      accent: { kind: 'preset', id: 'azure' },
+    })), {
+      version: 1,
+      mode: 'system',
+      accent: { kind: 'preset', id: 'azure' },
+    });
   });
 
   it('chooses an accessible foreground for presets and extreme custom colors', () => {

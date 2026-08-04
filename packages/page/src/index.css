@@ -102,6 +102,15 @@ html.dark input:-webkit-autofill:active {
     -webkit-box-shadow: 0 0 0 1000px oklch(14.7% 0.004 49.25) inset !important;
 }
 
+.search-progress-bar {
+    animation: search-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes search-progress {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(250%); }
+}
+
 /* 扫描当前包的源码 */
 @source "./**/*.{js,ts,jsx,tsx}";
 /* 扫描 HeroUI 的源码 */

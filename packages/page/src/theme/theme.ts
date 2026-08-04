@@ -9,6 +9,7 @@ export const THEME_PRESETS = [
   { id: 'coral', label: '珊瑚', color: '#E85D75' },
   { id: 'amber', label: '琥珀', color: '#D68A00' },
   { id: 'cyan', label: '青蓝', color: '#0EA5B7' },
+  { id: 'azure', label: '蔚蓝', color: '#018EEE' },
   { id: 'indigo', label: '靛青', color: '#5B6EE1' },
 ] as const;
 

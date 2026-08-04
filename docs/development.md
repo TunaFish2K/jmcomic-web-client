@@ -147,19 +147,30 @@ pnpm --filter @tiny-client/page run lint
 pnpm run page:build
 ```
 
-3. 修改 Worker 后，运行 Worker 单元测试。
+3. 修改阅读器或主题后，运行对应的前端测试。
+
+```bash
+pnpm --filter @tiny-client/page run test:reader
+pnpm --filter @tiny-client/page run test:theme
+```
+
+4. 修改 Worker 后，运行 Worker 单元测试。
 
 ```bash
 pnpm --filter @tiny-client/worker exec vitest run
 ```
 
-4. 修改接口或上游客户端后，运行集成测试。
+5. 修改接口或上游客户端后，运行集成测试。
 
 ```bash
 pnpm run test:integration
 ```
 
 项目当前没有自动化浏览器界面测试。修改搜索、阅读器或下载交互后，还应在桌面和移动端浏览器中手动检查对应流程。
+
+阅读器触控改动至少应在 iOS Safari、iOS PWA、Android Chrome 和 Android PWA 中检查双指缩放、单指拖动和缩放复位。左右与上下阅读方向、自动吸附开启与关闭、无缝模式都要覆盖。关闭自动吸附时，还要确认复位后滚动位置不变。
+
+搜索交互改动应使用限速网络检查：请求期间旧结果仍可滚动和打开详情；新结果到达后列表回到顶部；已打开的详情不会关闭或丢失内容；输入焦点边框不包含搜索按钮。
 
 ## 常见问题
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, Trash2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, RotateCcw, Settings, Trash2 } from 'lucide-react';
 import type { ReadingDirection, BarSide } from './reader-store';
 import { getCacheStats, clearAllCache } from '@tiny-client/shared';
 import { ThemePanel } from '../theme/ThemeControls';
@@ -264,6 +264,7 @@ export function ReaderOverlay({
   lazyRenderRange,
   barSide,
   barVisible,
+  isZoomed,
   onToggleVisibility,
   onClose,
   onPrevPage,
@@ -276,6 +277,7 @@ export function ReaderOverlay({
   onToggleSeamlessMode,
   onChangeLazyRenderRange,
   onToggleBarVisible,
+  onResetZoom,
   onScrollByInputStep,
   onSeekPage,
   onBoundaryDismiss,
@@ -298,6 +300,7 @@ export function ReaderOverlay({
   lazyRenderRange: number;
   barSide: BarSide;
   barVisible: boolean;
+  isZoomed: boolean;
   onToggleVisibility: () => void;
   onClose: () => void;
   onPrevPage: () => void;
@@ -310,6 +313,7 @@ export function ReaderOverlay({
   onToggleSeamlessMode: () => void;
   onChangeLazyRenderRange: (value: number) => void;
   onToggleBarVisible: () => void;
+  onResetZoom: () => void;
   onScrollByInputStep: (step: number) => void;
   onSeekPage?: (page: number) => void;
   onBoundaryDismiss: () => void;
@@ -470,6 +474,16 @@ export function ReaderOverlay({
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0 ml-2">
+            {isZoomed && (
+              <button
+                onClick={onResetZoom}
+                className="p-1 text-brand-400 transition-colors hover:text-brand-300"
+                title="重置缩放"
+                aria-label="重置缩放"
+              >
+                <RotateCcw size={18} />
+              </button>
+            )}
             {chapters.length >= 1 && (
               <button onClick={() => setShowChapterDrawer(true)} className="text-white/80 hover:text-white p-1" title="章节列表"><Bookmark size={18} /></button>
             )}
@@ -557,7 +571,7 @@ export function ReaderOverlay({
       )}
 
       {!isVertical && (
-        <div className={`absolute inset-0 z-10 flex transition-opacity duration-300 ${visible ? 'pointer-events-none' : 'pointer-events-auto'}`}>
+        <div className={`absolute inset-0 z-10 flex transition-opacity duration-300 ${visible || isZoomed ? 'pointer-events-none' : 'pointer-events-auto'}`}>
           <div className="w-1/3 h-full" onClick={onPrevPage} />
           <div className="w-1/3 h-full" onClick={onToggleVisibility} />
           <div className="w-1/3 h-full" onClick={onNextPage} />

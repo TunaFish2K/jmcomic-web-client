@@ -20,7 +20,7 @@ import {
 import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
 import { saveAlbumMeta, getLatestChapterProgress } from "../reader/reader-store";
-import { getCachedAlbums, setCachedAlbums } from "../album-cache";
+import { getCachedAlbum, getCachedAlbums, setCachedAlbum, setCachedAlbums } from "../album-cache";
 import { ThemePopover } from "../theme/ThemeControls";
 
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
@@ -664,8 +664,28 @@ function AlbumModal({ albumId, cachedData, onClose }: {
     onClose: () => void;
 }) {
     const navigate = useNavigate();
-    const album = cachedData?.album ?? null;
-    const photo = cachedData?.photo ?? null;
+    const detailQuery = useQuery<BatchAlbumItem>({
+        queryKey: ['album-detail', albumId],
+        queryFn: async () => {
+            const persisted = await getCachedAlbum(albumId);
+            if (persisted) {
+                return { albumId, album: persisted.album, photo: persisted.photo };
+            }
+
+            const detail = (await getBatchAlbum([albumId])).find((item) => item.albumId === albumId);
+            if (!detail) throw new Error('详情接口未返回该本子');
+            if (!detail.error) {
+                await setCachedAlbum(detail.albumId, detail.album, detail.photo);
+            }
+            return detail;
+        },
+        initialData: cachedData && !cachedData.error ? cachedData : undefined,
+        staleTime: 5 * 60 * 1000,
+        retry: 1,
+    });
+    const detailData = detailQuery.data;
+    const album = detailData?.album ?? null;
+    const photo = detailData?.photo ?? null;
     const isSeriesAlbum = !!album?.series?.length;
     const sortedSeries = useMemo(
         () => isSeriesAlbum
@@ -728,10 +748,25 @@ function AlbumModal({ albumId, cachedData, onClose }: {
 
                 {/* body */}
                 <div className="overflow-y-auto flex-1 p-4 text-sm space-y-3">
-                    {!cachedData ? (
+                    {!detailData && detailQuery.isPending ? (
                         <div className="text-gray-400 text-center py-8">加载中...</div>
-                    ) : cachedData.error ? (
-                        <div className="text-red-500 text-center py-8">{formatBatchError(cachedData.error)}</div>
+                    ) : detailData?.error || detailQuery.isError ? (
+                        <div className="flex flex-col items-center gap-3 py-8 text-center text-red-500">
+                            <span>
+                                {detailData?.error
+                                    ? formatBatchError(detailData.error)
+                                    : detailQuery.error instanceof Error
+                                        ? detailQuery.error.message
+                                        : '详情加载失败'}
+                            </span>
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                onPress={() => { void detailQuery.refetch(); }}
+                            >
+                                <RefreshCw size={14} className="mr-1" />重试
+                            </Button>
+                        </div>
                     ) : (
                         <>
                             <div className="flex gap-4 text-xs text-gray-500 dark:text-gray-400">
@@ -930,6 +965,7 @@ export default function Home() {
     const [modalAlbumId, setModalAlbumId] = useState<string | null>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const lastSettledSearchRef = useRef<SettledSearch | null>(null);
+    const displayedResultKeyRef = useRef<string | null>(null);
 
     // ── task management ──────────────────────────────────────────────────────
     const addTask = useCallback((task: Omit<DownloadTask, 'id'>) => {
@@ -991,6 +1027,12 @@ export default function Home() {
             data: queryData,
             ids: getSearchResultIds(queryData),
         };
+
+        const resultKey = `${searchSessionKey}\u0000${urlPage}`;
+        if (displayedResultKeyRef.current !== resultKey) {
+            displayedResultKeyRef.current = resultKey;
+            listRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+        }
     }, [isPlaceholderData, isSearchError, queryData, searchSessionKey, urlPage]);
 
     // ── in-memory album cache (survives page changes within same session) ────
@@ -1209,7 +1251,6 @@ export default function Home() {
     const handlePageChange = (newPage: number) => {
         setModalAlbumId(null);
         pushSearch(urlQuery, urlCategory, urlOrderBy, urlTime, newPage);
-        listRef.current?.scrollTo({ top: 0 });
     };
 
     return (
@@ -1234,56 +1275,60 @@ export default function Home() {
 
                     {/* ── search bar ── */}
                     <form onSubmit={handleSubmit} className="shrink-0 mb-3">
-                        <InputGroup className="h-12 w-full focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500" isInvalid={!!queryError}>
-                            <InputGroup.Prefix className="p-0 flex-shrink-0">
-                                <Select
-                                    aria-label="搜索类别"
-                                    className="w-24 min-w-[96px] h-full"
-                                    variant="secondary"
-                                    value={category}
-                                     onChange={(value) => {
-                                        const v = (value as "0" | "1" | "2" | "3" | "4") ?? "0";
-                                        setCategory(v);
-                                        if (query.trim()) pushSearch(query, v, orderBy, timeFilter, 1);
-                                    }}
-                                    placeholder="选择类别"
-                                    
-                                >
-                                    <Select.Trigger className="h-full rounded-none border-none shadow-none bg-transparent px-3 flex items-center justify-center gap-1">
-                                        <Select.Value className="text-center flex-1" />
-                                        <Select.Indicator className="flex-shrink-0" />
-                                    </Select.Trigger>
-                                    <Select.Popover>
-                                        <ListBox>
-                                            <ListBox.Item id="0" textValue="全部">全部</ListBox.Item>
-                                            <ListBox.Item id="1" textValue="作品名称">作品名称</ListBox.Item>
-                                            <ListBox.Item id="2" textValue="作者">作者</ListBox.Item>
-                                            <ListBox.Item id="3" textValue="标签">标签</ListBox.Item>
-                                            <ListBox.Item id="4" textValue="角色">角色</ListBox.Item>
-                                        </ListBox>
-                                    </Select.Popover>
-                                </Select>
-                            </InputGroup.Prefix>
-                            <InputGroup.Input
-                                placeholder="搜索内容..."
-                                name="query"
-                                value={query}
-                                onChange={handleQueryChange}
-                                className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
-                                
-                            />
-                            <InputGroup.Suffix className="p-0 flex-shrink-0">
-                                <Button
-                                    type="submit"
-                                    className="rounded-none px-4 flex-shrink-0 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700"
-                                    style={{ height: '48px' }}
-                                    variant="primary"
-                                    isDisabled={searchPending}
-                                >
-                                    <SearchIcon size={18} />
-                                </Button>
-                            </InputGroup.Suffix>
-                        </InputGroup>
+                        <div className="flex h-12 w-full">
+                            <InputGroup
+                                className="relative z-0 h-12 min-w-0 flex-1 rounded-r-none focus-within:z-10 focus-within:border-brand-500 focus-within:ring-1 focus-within:ring-brand-500"
+                                isInvalid={!!queryError}
+                            >
+                                <InputGroup.Prefix className="p-0 flex-shrink-0">
+                                    <Select
+                                        aria-label="搜索类别"
+                                        className="w-24 min-w-[96px] h-full"
+                                        variant="secondary"
+                                        value={category}
+                                        onChange={(value) => {
+                                            const v = (value as "0" | "1" | "2" | "3" | "4") ?? "0";
+                                            setCategory(v);
+                                            if (query.trim()) pushSearch(query, v, orderBy, timeFilter, 1);
+                                        }}
+                                        placeholder="选择类别"
+                                    >
+                                        <Select.Trigger className="h-full rounded-none border-none shadow-none bg-transparent px-3 flex items-center justify-center gap-1">
+                                            <Select.Value className="text-center flex-1" />
+                                            <Select.Indicator className="flex-shrink-0" />
+                                        </Select.Trigger>
+                                        <Select.Popover>
+                                            <ListBox>
+                                                <ListBox.Item id="0" textValue="全部">全部</ListBox.Item>
+                                                <ListBox.Item id="1" textValue="作品名称">作品名称</ListBox.Item>
+                                                <ListBox.Item id="2" textValue="作者">作者</ListBox.Item>
+                                                <ListBox.Item id="3" textValue="标签">标签</ListBox.Item>
+                                                <ListBox.Item id="4" textValue="角色">角色</ListBox.Item>
+                                            </ListBox>
+                                        </Select.Popover>
+                                    </Select>
+                                </InputGroup.Prefix>
+                                <InputGroup.Input
+                                    placeholder="搜索内容..."
+                                    name="query"
+                                    value={query}
+                                    onChange={handleQueryChange}
+                                    className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
+                                />
+                            </InputGroup>
+                            <Button
+                                type="submit"
+                                className="relative z-0 -ml-px h-12 min-w-12 flex-shrink-0 rounded-l-none px-4 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                                variant="primary"
+                                isDisabled={searchPending}
+                                aria-label={searchPending ? '正在搜索' : '搜索'}
+                                aria-busy={searchPending}
+                            >
+                                {searchPending
+                                    ? <span className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-current border-t-transparent" />
+                                    : <SearchIcon size={18} />}
+                            </Button>
+                        </div>
                         {queryError && <FieldError className="mt-1 ml-1">{queryError}</FieldError>}
 
                         {/* sort & time */}
@@ -1352,83 +1397,94 @@ export default function Home() {
                         </div>
                     )}
 
-                    {/* ── direct match ── */}
-                    {redirectAid && (
-                        <div className="shrink-0 mb-3 border dark:border-gray-700 rounded-lg bg-brand-50 dark:bg-brand-900/30 overflow-hidden">
-                            <div className="p-2 bg-brand-100 dark:bg-brand-900/40 text-sm font-medium text-brand-800 dark:text-brand-200">搜索到直接匹配的本子</div>
+                    <div className="relative flex min-h-0 flex-1 flex-col" aria-busy={searchPending}>
+                        {searchPending && data && (
                             <div
-                                className="p-3 cursor-pointer hover:bg-brand-50 dark:hover:bg-brand-900/20"
-                                onClick={() => setModalAlbumId(redirectAid)}
+                                className="pointer-events-none absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden bg-brand-100 dark:bg-brand-950"
+                                role="progressbar"
+                                aria-label="正在更新搜索结果"
                             >
-                                <div className="flex gap-3 items-center">
-                                    {albumCache.get(redirectAid)?.photo?.images[0] && (
-                                        <CoverImage
-                                            coverUrl={albumCache.get(redirectAid)!.photo!.images[0].url}
-                                            scrambleId={albumCache.get(redirectAid)!.photo!.scrambleId}
-                                            albumId={redirectAid}
-                                            className="w-12 h-16 rounded shrink-0"
+                                <div className="search-progress-bar h-full w-2/5 bg-brand-500" />
+                            </div>
+                        )}
+
+                        {/* ── direct match ── */}
+                        {redirectAid && (
+                            <div className="shrink-0 mb-3 border dark:border-gray-700 rounded-lg bg-brand-50 dark:bg-brand-900/30 overflow-hidden">
+                                <div className="p-2 bg-brand-100 dark:bg-brand-900/40 text-sm font-medium text-brand-800 dark:text-brand-200">搜索到直接匹配的本子</div>
+                                <div
+                                    className="p-3 cursor-pointer hover:bg-brand-50 dark:hover:bg-brand-900/20"
+                                    onClick={() => setModalAlbumId(redirectAid)}
+                                >
+                                    <div className="flex gap-3 items-center">
+                                        {albumCache.get(redirectAid)?.photo?.images[0] && (
+                                            <CoverImage
+                                                coverUrl={albumCache.get(redirectAid)!.photo!.images[0].url}
+                                                scrambleId={albumCache.get(redirectAid)!.photo!.scrambleId}
+                                                albumId={redirectAid}
+                                                className="w-12 h-16 rounded shrink-0"
+                                            />
+                                        )}
+                                        <div>
+                                            <div className="text-sm font-medium">{albumCache.get(redirectAid)?.album?.name ?? `#${redirectAid}`}</div>
+                                            <div className="text-xs text-gray-400">点击查看详情</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ── results grid ── */}
+                        {hasResults && (
+                            <div ref={listRef} className="flex-1 overflow-y-auto min-h-0 mb-3">
+                                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                                    {data.content.map(item => (
+                                        <AlbumCard
+                                            key={item.id}
+                                            item={item}
+                                            cachedData={albumCache.get(item.id)}
+                                            onClick={() => setModalAlbumId(item.id)}
+                                            cardRef={getCardRef(item.id)}
                                         />
-                                    )}
-                                    <div>
-                                        <div className="text-sm font-medium">{albumCache.get(redirectAid)?.album?.name ?? `#${redirectAid}`}</div>
-                                        <div className="text-xs text-gray-400">点击查看详情</div>
-                                    </div>
+                                    ))}
                                 </div>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {/* ── results grid ── */}
-                    {hasResults && (
-                        <div
-                            ref={listRef}
-                            className={`flex-1 overflow-y-auto min-h-0 mb-3 relative ${searchPending ? 'pointer-events-none' : ''}`}
-                        >
-                            {searchPending && (
-                                <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-start justify-center pt-20 z-10">
-                                    <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                                        <div className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-brand-500 rounded-full animate-spin" />
-                                        <span className="text-sm">正在加载第 {urlPage} 页...</span>
-                                    </div>
+                        {/* ── first load ── */}
+                        {searchPending && !data && (
+                            <div className="flex flex-1 items-center justify-center text-gray-500 dark:text-gray-400" role="status">
+                                <div className="flex items-center gap-2">
+                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500 dark:border-gray-600 dark:border-t-brand-500" />
+                                    <span className="text-sm">正在搜索...</span>
                                 </div>
-                            )}
-                            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                                {data.content.map(item => (
-                                    <AlbumCard
-                                        key={item.id}
-                                        item={item}
-                                        cachedData={albumCache.get(item.id)}
-                                        onClick={() => setModalAlbumId(item.id)}
-                                        cardRef={getCardRef(item.id)}
-                                    />
-                                ))}
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {/* ── empty ── */}
-                    {data && "content" in data && data.content.length === 0 && !redirectAid && (
-                        <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
-                            没有找到相关结果
-                        </div>
-                    )}
-
-                    {/* ── pagination ── */}
-                    {totalCount > 0 && (
-                        <div className="shrink-0 py-3 border-t dark:border-gray-700">
-                            <div className="flex items-center justify-center gap-1 mb-2">
-                                <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={urlPage === 1 || searchPending} onPress={() => handlePageChange(1)}>首页</Button>
-                                <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={!hasPrevPage || searchPending} onPress={() => handlePageChange(urlPage - 1)}>上页</Button>
-                                <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={!hasNextPage || searchPending || isSearchError} onPress={() => handlePageChange(urlPage + 1)}>下页</Button>
-                                <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={urlPage === totalPages || searchPending || isSearchError} onPress={() => handlePageChange(totalPages)}>尾页</Button>
+                        {/* ── empty ── */}
+                        {data && "content" in data && data.content.length === 0 && !redirectAid && (
+                            <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
+                                没有找到相关结果
                             </div>
-                            <div className="text-center text-gray-500 dark:text-gray-400 text-xs">{totalCount}条·{urlPage}/{totalPages}页</div>
-                        </div>
-                    )}
+                        )}
+
+                        {/* ── pagination ── */}
+                        {totalCount > 0 && (
+                            <div className="shrink-0 py-3 border-t dark:border-gray-700">
+                                <div className="flex items-center justify-center gap-1 mb-2">
+                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                        isDisabled={urlPage === 1 || searchPending} onPress={() => handlePageChange(1)}>首页</Button>
+                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                        isDisabled={!hasPrevPage || searchPending} onPress={() => handlePageChange(urlPage - 1)}>上页</Button>
+                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                        isDisabled={!hasNextPage || searchPending || isSearchError} onPress={() => handlePageChange(urlPage + 1)}>下页</Button>
+                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                        isDisabled={urlPage === totalPages || searchPending || isSearchError} onPress={() => handlePageChange(totalPages)}>尾页</Button>
+                                </div>
+                                <div className="text-center text-gray-500 dark:text-gray-400 text-xs">{totalCount}条·{urlPage}/{totalPages}页</div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </TaskContext.Provider>
