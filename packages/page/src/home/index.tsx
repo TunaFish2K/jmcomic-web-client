@@ -1264,7 +1264,7 @@ export default function Home() {
                     <form onSubmit={handleSubmit} className="shrink-0 mb-3">
                         <div className="flex h-12 w-full">
                             <InputGroup
-                                className="relative z-0 h-12 min-w-0 flex-1 rounded-r-none focus-within:z-10 focus-within:ring-1 focus-within:ring-inset focus-within:ring-brand-500"
+                                className="search-input-group relative z-0 h-12 min-w-0 flex-1 rounded-r-none focus-within:z-10"
                                 isInvalid={!!queryError}
                             >
                                 <InputGroup.Prefix className="p-0 flex-shrink-0">
