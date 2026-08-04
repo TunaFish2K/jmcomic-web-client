@@ -1,8 +1,9 @@
 import type { Album, PhotoWithScrambleId } from "@tiny-client/shared";
 
 const DB_NAME = "jm-album-cache";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = "albums";
+const UPDATED_AT_INDEX_NAME = "updatedAt";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 200;
 
@@ -18,15 +19,40 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
+    let abandoned = false;
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: "albumId" });
-        store.createIndex("updatedAt", "updatedAt", { unique: false });
+      const database = request.result;
+      const store = database.objectStoreNames.contains(STORE_NAME)
+        ? request.transaction!.objectStore(STORE_NAME)
+        : database.createObjectStore(STORE_NAME, { keyPath: "albumId" });
+      if (!store.indexNames.contains(UPDATED_AT_INDEX_NAME)) {
+        store.createIndex(UPDATED_AT_INDEX_NAME, "updatedAt", { unique: false });
       }
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const database = request.result;
+      if (abandoned) {
+        database.close();
+        return;
+      }
+      if (!database.objectStoreNames.contains(STORE_NAME)) {
+        database.close();
+        dbPromise = null;
+        reject(new Error(`Album cache is missing the ${STORE_NAME} object store`));
+        return;
+      }
+      database.onversionchange = () => {
+        database.close();
+        dbPromise = null;
+      };
+      resolve(database);
+    };
+    request.onblocked = () => {
+      abandoned = true;
+      dbPromise = null;
+      reject(new Error("Album cache database upgrade is blocked"));
+    };
     request.onerror = () => {
       dbPromise = null;
       reject(request.error);
@@ -67,7 +93,7 @@ export async function getCachedAlbum(
 ): Promise<{ album: Album; photo: PhotoWithScrambleId | null } | null> {
   try {
     const db = await openDB();
-    return new Promise((resolve) => {
+    return await new Promise((resolve) => {
       const transaction = db.transaction(STORE_NAME, "readonly");
       const store = transaction.objectStore(STORE_NAME);
       const request = store.get(albumId);
