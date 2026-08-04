@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
@@ -48,19 +48,24 @@ describe('PWA build output', () => {
     }
   });
 
-  it('keeps optional export code outside the install-critical precache', async () => {
+  it('uses a self-contained worker only to remove poisoned app-shell caches', async () => {
     const serviceWorker = await readDistFile('sw.js');
 
     assert.match(serviceWorker, /skipWaiting\(\)/);
-    assert.match(serviceWorker, /clientsClaim\(\)/);
-    assert.match(serviceWorker, /createHandlerBoundToURL\("index\.html"\)/);
+    assert.match(serviceWorker, /clients\.claim\(\)/);
+    assert.doesNotMatch(serviceWorker, /importScripts\(/);
+    assert.doesNotMatch(serviceWorker, /assets-v[23]\//);
     assert.doesNotMatch(serviceWorker, /pdfkit\.standalone-/);
 
     const precachedUrls = [...serviceWorker.matchAll(/url:"([^"]+)"/g)].map((match) => match[1]);
-    assert.ok(precachedUrls.includes('index.html'));
+    assert.deepEqual(precachedUrls, ['pwa-cache-cleanup-v3.txt']);
     for (const url of precachedUrls) {
       await access(path.join(distDirectory, url));
     }
+
+    const emittedFiles = await readdir(distDirectory, { recursive: true });
+    assert.ok(!emittedFiles.some((file) => file.includes('workbox-window')));
+    assert.ok(!emittedFiles.some((file) => /^workbox-.*\.js$/.test(file)));
   });
 
   it('keeps generated assets outside the poisoned legacy cache namespace', async () => {
@@ -72,7 +77,7 @@ describe('PWA build output', () => {
     assert.ok(generatedAssetUrls.some((url) => url.endsWith('.js')));
     assert.ok(generatedAssetUrls.some((url) => url.endsWith('.css')));
     for (const url of generatedAssetUrls) {
-      assert.match(url, /^\/assets-v2\//);
+      assert.match(url, /^\/assets-v3\//);
       await access(path.join(distDirectory, url.replace(/^\//, '')));
     }
   });
@@ -82,6 +87,7 @@ describe('PWA build output', () => {
 
     assert.match(headers, /\/sw\.js\s+Cache-Control: no-cache, no-store, must-revalidate/);
     assert.match(headers, /\/manifest\.webmanifest\s+Cache-Control: no-cache, no-store, must-revalidate/);
+    assert.match(headers, /\/assets-v3\/\*\s+Cache-Control: public, max-age=0, must-revalidate/);
     assert.doesNotMatch(headers, /\/assets\/\*/);
     assert.doesNotMatch(headers, /immutable/);
 

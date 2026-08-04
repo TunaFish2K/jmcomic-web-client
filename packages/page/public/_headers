@@ -12,3 +12,6 @@
 
 /manifest.webmanifest
   Cache-Control: no-cache, no-store, must-revalidate
+
+/assets-v3/*
+  Cache-Control: public, max-age=0, must-revalidate
