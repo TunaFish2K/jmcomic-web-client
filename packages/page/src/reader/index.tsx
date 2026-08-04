@@ -168,7 +168,10 @@ export default function ReaderPage() {
   const initialPhotoRef = useRef(location.state?.photo ?? null);
 
   const isSeries = location.state?.isSeries === true;
-  const seriesItems = (location.state?.seriesItems as ChapterInfo[] | undefined) ?? [];
+  const seriesItems = useMemo(
+    () => (location.state?.seriesItems as ChapterInfo[] | undefined) ?? [],
+    [location.state?.seriesItems],
+  );
 
   const { data: album } = useQuery({
     queryKey: ['album', albumId],

@@ -36,6 +36,11 @@ type SettledSearch = {
     ids: string[];
 };
 
+type SuccessfulBatchAlbumItem = Extract<
+    BatchAlbumItem,
+    { album: NonNullable<BatchAlbumItem['album']> }
+>;
+
 // ─── Cover image (decrypt in browser) ───────────────────────────────────────
 
 function CoverImage({ coverUrl, scrambleId, albumId, className }: {
@@ -85,7 +90,6 @@ function CoverImage({ coverUrl, scrambleId, albumId, className }: {
             cancelled = true;
             if (created) URL.revokeObjectURL(created);
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [coverUrl, scrambleId, albumId]);
 
     if (!objectUrl || failed) return (
@@ -434,12 +438,6 @@ function SeriesDownloadManager({ albumName, items }: {
         setRangeEnd(String(end));
         setRangeError(null);
     }, []);
-
-    useEffect(() => {
-        setRangeStart('1');
-        setRangeEnd(String(items.length));
-        setRangeError(null);
-    }, [items.length]);
 
     const selectedItems = (() => {
         const start = parseInt(rangeStart, 10);
@@ -803,6 +801,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                         </Button>
                                     )}
                                     <SeriesDownloadManager
+                                        key={`${albumId}:${sortedSeries.length}`}
                                         albumName={album!.name}
                                         items={sortedSeries
                                             .map((seriesItem) => ({
@@ -1041,14 +1040,15 @@ export default function Home() {
     // Observe card visibility whenever `data` changes (new search results)
     useEffect(() => {
         if (!data || !('content' in data) || data.content.length === 0) return;
+        const visibleIds = visibleIdsRef.current;
 
         const observer = new IntersectionObserver(
             (entries) => {
                 for (const entry of entries) {
                     const id = (entry.target as HTMLElement).dataset.albumId;
                     if (!id) continue;
-                    if (entry.isIntersecting) visibleIdsRef.current.add(id);
-                    else visibleIdsRef.current.delete(id);
+                    if (entry.isIntersecting) visibleIds.add(id);
+                    else visibleIds.delete(id);
                 }
             },
             { threshold: 0.1 },
@@ -1062,7 +1062,7 @@ export default function Home() {
         return () => {
             clearTimeout(tid);
             observer.disconnect();
-            visibleIdsRef.current.clear();
+            visibleIds.clear();
         };
     }, [data]);
 
@@ -1089,7 +1089,6 @@ export default function Home() {
             }
             return changed ? next : prev;
         });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [resultIdsKey]);
 
     // Fetch batch album data — visible cards first, then the rest.
@@ -1113,7 +1112,9 @@ export default function Home() {
                     for (const item of results) next.set(item.albumId, item);
                     return next;
                 });
-                const cachedItems = results.filter((r): r is { albumId: string; album: NonNullable<typeof r.album>; photo: any } => !r.error && !!r.album);
+                const cachedItems = results.filter(
+                    (result): result is SuccessfulBatchAlbumItem => result.album !== null,
+                );
                 if (cachedItems.length > 0) setCachedAlbums(cachedItems).catch(() => {});
                 // IDs whose worker-side fetch failed get re-queued
                 return results.filter(r => r.error).map(r => r.albumId);

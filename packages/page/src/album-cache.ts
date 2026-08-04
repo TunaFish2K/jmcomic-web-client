@@ -47,7 +47,6 @@ async function enforceMaxEntries(db: IDBDatabase): Promise<void> {
   });
   if (count <= MAX_ENTRIES) return;
 
-  const oldestCutoff = Date.now() + 1;
   const req = index.openCursor();
   let toDelete = count - MAX_ENTRIES;
   await new Promise<void>((resolve, reject) => {
