@@ -1305,7 +1305,7 @@ export default function Home() {
                             </InputGroup>
                             <Button
                                 type="submit"
-                                className="relative z-0 -ml-px h-12 min-w-12 flex-shrink-0 rounded-l-none px-4 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                                className="relative z-0 -ml-px h-12 min-w-12 flex-shrink-0 rounded-field rounded-l-none px-4 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                                 variant="primary"
                                 isDisabled={searchPending}
                                 aria-label={searchPending ? '正在搜索' : '搜索'}
