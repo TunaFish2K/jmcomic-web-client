@@ -15,31 +15,33 @@
     --color-gray-900: oklch(21.6% 0.006 56.043);
     --color-gray-950: oklch(14.7% 0.004 49.25);
 
-    --color-primary: #00dd99;
-    --color-primary-50: #e6fff9;
-    --color-primary-100: #b3ffe8;
-    --color-primary-200: #80ffd7;
-    --color-primary-300: #4dffc6;
-    --color-primary-400: #1affb5;
-    --color-primary-500: #00dd99;
-    --color-primary-600: #00b880;
-    --color-primary-700: #008a5e;
-    --color-primary-800: #005c3c;
-    --color-primary-900: #002e1e;
-    --color-primary-950: #00170f;
+    --color-brand: var(--theme-accent);
+    --color-brand-50: color-mix(in oklch, var(--theme-accent) 8%, white);
+    --color-brand-100: color-mix(in oklch, var(--theme-accent) 20%, white);
+    --color-brand-200: color-mix(in oklch, var(--theme-accent) 35%, white);
+    --color-brand-300: color-mix(in oklch, var(--theme-accent) 55%, white);
+    --color-brand-400: color-mix(in oklch, var(--theme-accent) 80%, white);
+    --color-brand-500: var(--theme-accent);
+    --color-brand-600: color-mix(in oklch, var(--theme-accent) 84%, black);
+    --color-brand-700: color-mix(in oklch, var(--theme-accent) 68%, black);
+    --color-brand-800: color-mix(in oklch, var(--theme-accent) 48%, black);
+    --color-brand-900: color-mix(in oklch, var(--theme-accent) 30%, black);
+    --color-brand-950: color-mix(in oklch, var(--theme-accent) 16%, black);
+    --color-brand-foreground: var(--theme-accent-foreground);
 
-    --color-brand: #00dd99;
-    --color-brand-50: #e6fff9;
-    --color-brand-100: #b3ffe8;
-    --color-brand-200: #80ffd7;
-    --color-brand-300: #4dffc6;
-    --color-brand-400: #1affb5;
-    --color-brand-500: #00dd99;
-    --color-brand-600: #00b880;
-    --color-brand-700: #008a5e;
-    --color-brand-800: #005c3c;
-    --color-brand-900: #002e1e;
-    --color-brand-950: #00170f;
+    --color-primary: var(--color-brand);
+    --color-primary-50: var(--color-brand-50);
+    --color-primary-100: var(--color-brand-100);
+    --color-primary-200: var(--color-brand-200);
+    --color-primary-300: var(--color-brand-300);
+    --color-primary-400: var(--color-brand-400);
+    --color-primary-500: var(--color-brand-500);
+    --color-primary-600: var(--color-brand-600);
+    --color-primary-700: var(--color-brand-700);
+    --color-primary-800: var(--color-brand-800);
+    --color-primary-900: var(--color-brand-900);
+    --color-primary-950: var(--color-brand-950);
+    --color-primary-foreground: var(--color-brand-foreground);
 
     --animate-shimmer: shimmer 1.8s ease-in-out infinite;
 
@@ -66,6 +68,10 @@ body,
 }
 
 html {
+    --theme-accent: #00dd99;
+    --theme-accent-foreground: #000000;
+    --accent: var(--theme-accent);
+    --accent-foreground: var(--theme-accent-foreground);
     background-color: oklch(97% 0.001 106.424);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -73,32 +79,6 @@ html {
 
 html.dark,
 html.dark body {
-    --color-primary: #00b884;
-    --color-primary-50: #d9fff3;
-    --color-primary-100: #a6f5d8;
-    --color-primary-200: #73e8bf;
-    --color-primary-300: #40d9a5;
-    --color-primary-400: #12c98f;
-    --color-primary-500: #00b884;
-    --color-primary-600: #00966c;
-    --color-primary-700: #007050;
-    --color-primary-800: #004d37;
-    --color-primary-900: #002e21;
-    --color-primary-950: #00170f;
-
-    --color-brand: #00b884;
-    --color-brand-50: #d9fff3;
-    --color-brand-100: #a6f5d8;
-    --color-brand-200: #73e8bf;
-    --color-brand-300: #40d9a5;
-    --color-brand-400: #12c98f;
-    --color-brand-500: #00b884;
-    --color-brand-600: #00966c;
-    --color-brand-700: #007050;
-    --color-brand-800: #004d37;
-    --color-brand-900: #002e21;
-    --color-brand-950: #00170f;
-
     background-color: oklch(14.7% 0.004 49.25);
     color: oklch(98.5% 0.001 106.423);
     color-scheme: dark;

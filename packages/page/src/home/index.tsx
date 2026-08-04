@@ -1,6 +1,6 @@
 import { useState, useRef, createContext, useContext, useCallback, useEffect, useMemo } from "react";
 import { Button, InputGroup, Select, ListBox, FieldError } from "@heroui/react";
-import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, Sun, Moon, Monitor, BookOpen, RefreshCw } from "lucide-react";
+import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, BookOpen, RefreshCw } from "lucide-react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { search, getPhoto, getBatchAlbum, getBatchPhoto } from "../api";
 import type { BatchAlbumItem, BatchError } from "../api";
@@ -21,6 +21,7 @@ import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
 import { saveAlbumMeta, getLatestChapterProgress } from "../reader/reader-store";
 import { getCachedAlbums, setCachedAlbums } from "../album-cache";
+import { ThemePopover } from "../theme/ThemeControls";
 
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
 const coverLimit = pLimit(6);
@@ -788,7 +789,7 @@ function AlbumModal({ albumId, cachedData, onClose }: {
                                     {latest && lastChapter && (
                                         <Button
                                             size="sm"
-                                            className="w-full justify-start bg-brand-500 hover:bg-brand-600 text-white"
+                                            className="w-full justify-start bg-brand-500 text-brand-foreground hover:bg-brand-600"
                                             onPress={() => navigate(`/reader/${latest.chapterId}`, { state: { isSeries: true, album, seriesItems: sortedSeries.map((s, i) => ({ id: s.id, name: s.name || `第${i + 1}章`, order: parseSeriesOrder(s.sort) })) } })}
                                         >
                                             <BookOpen size={14} className="mr-1 shrink-0" />
@@ -927,40 +928,8 @@ export default function Home() {
     const [tasks, setTasks] = useState<DownloadTask[]>([]);
     const [showTaskPanel, setShowTaskPanel] = useState(false);
     const [modalAlbumId, setModalAlbumId] = useState<string | null>(null);
-    const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(() => {
-        const stored = localStorage.getItem("theme");
-        if (stored === "light" || stored === "dark") return stored;
-        return "system";
-    });
     const listRef = useRef<HTMLDivElement>(null);
     const lastSettledSearchRef = useRef<SettledSearch | null>(null);
-
-    // ── dark mode ────────────────────────────────────────────────────────────
-    const applyTheme = useCallback((t: 'light' | 'dark' | 'system') => {
-        const isDark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.classList.toggle('dark', isDark);
-    }, []);
-
-    const cycleTheme = useCallback(() => {
-        setTheme(prev => {
-            const next = prev === 'light' ? 'dark' : prev === 'dark' ? 'system' : 'light';
-            if (next === 'system') {
-                localStorage.removeItem("theme");
-            } else {
-                localStorage.setItem("theme", next);
-            }
-            applyTheme(next);
-            return next;
-        });
-    }, [applyTheme]);
-
-    useEffect(() => {
-        if (theme !== 'system') return;
-        const mq = window.matchMedia('(prefers-color-scheme: dark)');
-        const handler = () => applyTheme('system');
-        mq.addEventListener('change', handler);
-        return () => mq.removeEventListener('change', handler);
-    }, [theme, applyTheme]);
 
     // ── task management ──────────────────────────────────────────────────────
     const addTask = useCallback((task: Omit<DownloadTask, 'id'>) => {
@@ -1306,7 +1275,7 @@ export default function Home() {
                             <InputGroup.Suffix className="p-0 flex-shrink-0">
                                 <Button
                                     type="submit"
-                                    className="rounded-none px-4 flex-shrink-0 bg-brand-500 text-white hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700"
+                                    className="rounded-none px-4 flex-shrink-0 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700"
                                     style={{ height: '48px' }}
                                     variant="primary"
                                     isDisabled={searchPending}
@@ -1360,17 +1329,7 @@ export default function Home() {
                                 </Select.Popover>
                             </Select>
 
-                            {/* dark mode toggle */}
-                            <button
-                                type="button"
-                                onClick={cycleTheme}
-                                className="h-10 w-10 shrink-0 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                                title={theme === 'light' ? '浅色模式' : theme === 'dark' ? '深色模式' : '跟随系统'}
-                            >
-                                {theme === 'light' && <Sun size={18} />}
-                                {theme === 'dark' && <Moon size={18} />}
-                                {theme === 'system' && <Monitor size={18} />}
-                            </button>
+                            <ThemePopover />
                         </div>
                     </form>
 

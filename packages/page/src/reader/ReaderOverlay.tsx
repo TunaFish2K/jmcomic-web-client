@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, Trash2 } from 'lucide-react';
 import type { ReadingDirection, BarSide } from './reader-store';
 import { getCacheStats, clearAllCache } from '@tiny-client/shared';
+import { ThemePanel } from '../theme/ThemeControls';
 
 type ChapterInfo = { id: string; name: string; order: number };
 
@@ -149,7 +150,7 @@ function SettingsPanel({
   const isVertical = direction === 'top-down';
 
   return (
-    <div className="absolute top-0 right-0 z-50 w-64 bg-gray-900/95 backdrop-blur rounded-bl-xl shadow-xl border-l border-b border-gray-700/50 overflow-hidden">
+    <div className="absolute top-0 right-0 z-50 max-h-[100dvh] w-64 overflow-y-auto rounded-bl-xl border-b border-l border-gray-700/50 bg-gray-900/95 shadow-xl backdrop-blur">
       <div className="p-3 border-b border-gray-700 flex items-center justify-between">
         <span className="text-white text-sm font-medium flex items-center gap-2">
           <Settings size={15} />阅读设置
@@ -216,6 +217,11 @@ function SettingsPanel({
           <button onClick={onToggleBarVisible} className={`relative w-9 h-5 rounded-full transition-colors ${barVisible ? 'bg-brand-500' : 'bg-gray-600'}`}>
             <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${barVisible ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
+        </div>
+
+        <div className="border-t border-gray-700/50 pt-3">
+          <div className="mb-3 text-xs font-medium text-gray-300">外观</div>
+          <ThemePanel tone="dark" />
         </div>
 
         <div className="border-t border-gray-700/50 pt-3">
