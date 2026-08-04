@@ -17,6 +17,14 @@ describe('worker routes', () => {
 		expect(await response.text()).toBe("Missing query 'query'");
 	});
 
+	it('returns 400 when /search receives too many previous IDs', async () => {
+		const previousIds = Array.from({ length: 81 }, (_, index) => String(index + 1)).join(',');
+		const response = await SELF.fetch(`https://example.com/search?query=test&page=2&previousIds=${previousIds}`);
+
+		expect(response.status).toBe(400);
+		expect(await response.text()).toBe('Too many previousIds, max 80');
+	});
+
 	it('returns 400 when /batch-album misses ids', async () => {
 		const response = await SELF.fetch('https://example.com/batch-album');
 

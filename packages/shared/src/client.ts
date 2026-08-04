@@ -374,3 +374,21 @@ export type Photo = NonNullable<Awaited<ReturnType<Client["getPhoto"]>>>;
 export type PhotoWithScrambleId = NonNullable<
   Awaited<ReturnType<Client["getPhotoWithScrambleId"]>>
 >;
+
+export function getSearchResultIds(result: SearchResult): string[] {
+  return result.content.map((item) => item.id);
+}
+
+export function hasSameSearchResultIds(
+  result: SearchResult,
+  previousIds: string[],
+): boolean {
+  const resultIds = getSearchResultIds(result);
+  if (resultIds.length === 0 || resultIds.length !== previousIds.length) {
+    return false;
+  }
+
+  const sortedResultIds = [...resultIds].sort();
+  const sortedPreviousIds = [...previousIds].sort();
+  return sortedResultIds.every((id, index) => id === sortedPreviousIds[index]);
+}

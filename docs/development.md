@@ -90,8 +90,9 @@ Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker �
 | `orderBy` | `mr` 最新发布、`mv` 最多浏览、`mp` 最多图片、`tf` 最多喜欢 | `mr` |
 | `time` | `a` 全部、`t` 今天、`w` 本周、`m` 本月 | `a` |
 | `warmup` | 设置为 `1` 时预取当前搜索结果的作品信息 | 不启用 |
+| `previousIds` | 上一页作品 ID，使用逗号分隔，最多 80 个 | 不启用 |
 
-成功时返回 `SearchResult`。当所有候选上游域名都失败时，接口返回 `502`。
+成功时返回 `SearchResult`。`page` 大于 1 且提供 `previousIds` 时，Worker 会拒绝与上一页完全相同的候选结果，并改用其他上游域名。所有候选域名都失败或返回重复页时，接口返回 `502`。
 
 ### `GET /album/:id`
 
@@ -125,7 +126,7 @@ Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker �
 | 阅读进度和阅读设置 | `localStorage` | 不自动过期 |
 | 已还原图片 | IndexedDB `jm-image-cache` | 启动时清理超过 7 天的数据 |
 | Worker 作品数据 | Worker 实例内存 | 60 秒 |
-| Worker 搜索域名 | Worker 实例内存 | 60 秒 |
+| Worker 搜索客户端 | Worker 实例内存 | 60 秒 |
 | Worker 作品数据 | Cloudflare KV | 配置 `ALBUM_CACHE_KV` 后保存 1 小时 |
 
 PWA 会预缓存前端静态资源。搜索、作品和章节接口使用网络请求，因此不能依赖 PWA 缓存离线访问这些接口。

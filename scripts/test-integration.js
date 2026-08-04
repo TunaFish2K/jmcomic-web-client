@@ -16,6 +16,31 @@ async function runTests() {
     const searchData = await searchRes.json();
     console.log("✅ Search OK. Found:", searchData.total, "results.");
 
+    // 1.25 Test pagination does not return the complete previous page
+    const firstPageIds = searchData.content?.map((item) => item.id) ?? [];
+    if (firstPageIds.length > 0 && Number(searchData.total) > firstPageIds.length) {
+      console.log("👉 Testing /search pagination...");
+      const secondPageUrl = new URL(`${BASE_URL}/search`);
+      secondPageUrl.searchParams.set("query", "blue");
+      secondPageUrl.searchParams.set("page", "2");
+      secondPageUrl.searchParams.set("previousIds", firstPageIds.join(","));
+      const secondPageRes = await fetch(secondPageUrl);
+      if (!secondPageRes.ok)
+        throw new Error(
+          `Second search page failed: ${secondPageRes.status} ${secondPageRes.statusText}`,
+        );
+
+      const secondPageData = await secondPageRes.json();
+      const secondPageIds = secondPageData.content?.map((item) => item.id) ?? [];
+      const sortedFirstIds = [...firstPageIds].sort();
+      const sortedSecondIds = [...secondPageIds].sort();
+      const repeated =
+        sortedFirstIds.length === sortedSecondIds.length &&
+        sortedFirstIds.every((id, index) => id === sortedSecondIds[index]);
+      if (repeated) throw new Error("Search page 2 repeated every result from page 1");
+      console.log("✅ Search pagination OK.");
+    }
+
     // 1.5 Test batch-album parameter validation
     console.log("👉 Testing /batch-album validation...");
     const batchBadRes = await fetch(`${BASE_URL}/batch-album`);

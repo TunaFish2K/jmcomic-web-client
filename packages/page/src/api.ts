@@ -65,6 +65,7 @@ export async function search(
         orderBy?: "mr" | "mv" | "mp" | "tf";
         time?: "a" | "t" | "w" | "m";
         mainTag?: 0 | 2 | 1 | 3 | 4;
+        previousIds?: string[];
     },
 ) {
     options = options ?? {};
@@ -80,6 +81,9 @@ export async function search(
     url.searchParams.set("time", options.time);
     url.searchParams.set("mainTag", options.mainTag.toString());
     url.searchParams.set("warmup", "1");
+    if (options.page > 1 && options.previousIds?.length) {
+        url.searchParams.set("previousIds", options.previousIds.join(","));
+    }
     const res = await fetch(url);
     if (!res.ok) {
         const errorMessage = await res.text();

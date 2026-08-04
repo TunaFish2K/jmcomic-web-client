@@ -15,3 +15,4 @@ export const HEADERS_API = {
 };
 
 export const INITIAL_VERSION = "2.0.16";
+export const SEARCH_PAGE_SIZE = 80;

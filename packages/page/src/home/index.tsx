@@ -1,6 +1,6 @@
 import { useState, useRef, createContext, useContext, useCallback, useEffect, useMemo } from "react";
 import { Button, InputGroup, Select, ListBox, FieldError } from "@heroui/react";
-import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, Sun, Moon, Monitor, BookOpen } from "lucide-react";
+import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, Sun, Moon, Monitor, BookOpen, RefreshCw } from "lucide-react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { search, getPhoto, getBatchAlbum, getBatchPhoto } from "../api";
 import type { BatchAlbumItem, BatchError } from "../api";
@@ -13,6 +13,8 @@ import {
     downloadAndDecryptImagesOfPhotosThenWriteIntoZipFile,
     downloadAndDecryptImagesOfPhotosThenWriteIntoPDFFile,
     getSliceCount,
+    getSearchResultIds,
+    SEARCH_PAGE_SIZE,
     reverseImageBySlice,
 } from "@tiny-client/shared";
 import { PDFDocument } from "pdf-lib";
@@ -28,6 +30,13 @@ const downloadLimit = pLimit(2);
 
 const BATCH_PHOTO_CHUNK_SIZE = 20;
 const BATCH_PHOTO_RETRY_DELAYS_MS = [1000, 2500];
+
+type SettledSearch = {
+    sessionKey: string;
+    page: number;
+    data: SearchResult;
+    ids: string[];
+};
 
 // ─── Cover image (decrypt in browser) ───────────────────────────────────────
 
@@ -924,6 +933,7 @@ export default function Home() {
         return "system";
     });
     const listRef = useRef<HTMLDivElement>(null);
+    const lastSettledSearchRef = useRef<SettledSearch | null>(null);
 
     // ── dark mode ────────────────────────────────────────────────────────────
     const applyTheme = useCallback((t: 'light' | 'dark' | 'system') => {
@@ -969,19 +979,50 @@ export default function Home() {
     const taskContextValue = { tasks, addTask, updateTask, removeTask, clearCompleted };
 
     // ── search query — driven by URL params ──────────────────────────────────
-    const { data, isFetching } = useQuery<SearchResult>({
+    const searchSessionKey = `${urlQuery}\u0000${urlCategory}\u0000${urlOrderBy}\u0000${urlTime}`;
+    const searchQuery = useQuery<SearchResult>({
         queryKey: ["search", urlQuery, urlPage, urlCategory, urlOrderBy, urlTime],
-        queryFn: () => search(urlQuery, {
-            mainTag: parseInt(urlCategory) as 1 | 2 | 3 | 4,
-            page: urlPage,
-            orderBy: urlOrderBy,
-            time: urlTime,
-        }),
+        queryFn: () => {
+            const previousSearch = lastSettledSearchRef.current;
+            const previousIds = previousSearch?.sessionKey === searchSessionKey && previousSearch.page !== urlPage
+                ? previousSearch.ids
+                : undefined;
+            return search(urlQuery, {
+                mainTag: parseInt(urlCategory) as 1 | 2 | 3 | 4,
+                page: urlPage,
+                orderBy: urlOrderBy,
+                time: urlTime,
+                previousIds,
+            });
+        },
         enabled: !!urlQuery,
         staleTime: 5 * 60 * 1000,   // don't refetch the same query within 5 min
         gcTime: 10 * 60 * 1000,     // keep cached results for 10 min
         placeholderData: keepPreviousData,
+        retry: 1,
     });
+    const {
+        data: queryData,
+        isError: isSearchError,
+        isFetching,
+        isPlaceholderData,
+        refetch: refetchSearch,
+    } = searchQuery;
+    const fallbackSearch = lastSettledSearchRef.current?.sessionKey === searchSessionKey
+        ? lastSettledSearchRef.current
+        : null;
+    const data = queryData ?? fallbackSearch?.data;
+    const searchPending = isFetching || isPlaceholderData;
+
+    useEffect(() => {
+        if (!queryData || isPlaceholderData || isSearchError) return;
+        lastSettledSearchRef.current = {
+            sessionKey: searchSessionKey,
+            page: urlPage,
+            data: queryData,
+            ids: getSearchResultIds(queryData),
+        };
+    }, [isPlaceholderData, isSearchError, queryData, searchSessionKey, urlPage]);
 
     // ── in-memory album cache (survives page changes within same session) ────
     const [albumCache, setAlbumCache] = useState<Map<string, BatchAlbumItem>>(new Map());
@@ -1165,8 +1206,7 @@ export default function Home() {
 
     // ── pagination ───────────────────────────────────────────────────────────
     const totalCount = data?.total ? parseInt(data.total) : 0;
-    const itemsPerPage = 20;
-    const totalPages = Math.ceil(totalCount / itemsPerPage);
+    const totalPages = Math.ceil(totalCount / SEARCH_PAGE_SIZE);
     const hasNextPage = urlPage < totalPages;
     const hasPrevPage = urlPage > 1;
 
@@ -1269,7 +1309,7 @@ export default function Home() {
                                     className="rounded-none px-4 flex-shrink-0 bg-brand-500 text-white hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700"
                                     style={{ height: '48px' }}
                                     variant="primary"
-                                    isDisabled={isFetching}
+                                    isDisabled={searchPending}
                                 >
                                     <SearchIcon size={18} />
                                 </Button>
@@ -1334,6 +1374,25 @@ export default function Home() {
                         </div>
                     </form>
 
+                    {isSearchError && (
+                        <div className="shrink-0 mb-3 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+                            <div className="min-w-0">
+                                <div className="text-sm font-medium">第 {urlPage} 页加载失败</div>
+                                <div className="text-xs opacity-80">
+                                    {fallbackSearch ? '仍显示上一次成功加载的结果。' : '请检查网络或稍后重试。'}
+                                </div>
+                            </div>
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                className="shrink-0 text-xs"
+                                onPress={() => { void refetchSearch(); }}
+                            >
+                                <RefreshCw size={14} className="mr-1" />重试
+                            </Button>
+                        </div>
+                    )}
+
                     {/* ── direct match ── */}
                     {redirectAid && (
                         <div className="shrink-0 mb-3 border dark:border-gray-700 rounded-lg bg-brand-50 dark:bg-brand-900/30 overflow-hidden">
@@ -1364,13 +1423,13 @@ export default function Home() {
                     {hasResults && (
                         <div
                             ref={listRef}
-                            className={`flex-1 overflow-y-auto min-h-0 mb-3 relative ${isFetching ? 'pointer-events-none' : ''}`}
+                            className={`flex-1 overflow-y-auto min-h-0 mb-3 relative ${searchPending ? 'pointer-events-none' : ''}`}
                         >
-                            {isFetching && (
+                            {searchPending && (
                                 <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 flex items-start justify-center pt-20 z-10">
                                     <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
                                         <div className="w-5 h-5 border-2 border-gray-300 dark:border-gray-600 border-t-brand-500 rounded-full animate-spin" />
-                                        <span className="text-sm">加载中...</span>
+                                        <span className="text-sm">正在加载第 {urlPage} 页...</span>
                                     </div>
                                 </div>
                             )}
@@ -1400,13 +1459,13 @@ export default function Home() {
                         <div className="shrink-0 py-3 border-t dark:border-gray-700">
                             <div className="flex items-center justify-center gap-1 mb-2">
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={urlPage === 1 || isFetching} onPress={() => handlePageChange(1)}>首页</Button>
+                                    isDisabled={urlPage === 1 || searchPending} onPress={() => handlePageChange(1)}>首页</Button>
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={!hasPrevPage || isFetching} onPress={() => handlePageChange(urlPage - 1)}>上页</Button>
+                                    isDisabled={!hasPrevPage || searchPending} onPress={() => handlePageChange(urlPage - 1)}>上页</Button>
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={!hasNextPage || isFetching} onPress={() => handlePageChange(urlPage + 1)}>下页</Button>
+                                    isDisabled={!hasNextPage || searchPending || isSearchError} onPress={() => handlePageChange(urlPage + 1)}>下页</Button>
                                 <Button variant="secondary" size="sm" className="px-2 text-xs"
-                                    isDisabled={urlPage === totalPages || isFetching} onPress={() => handlePageChange(totalPages)}>尾页</Button>
+                                    isDisabled={urlPage === totalPages || searchPending || isSearchError} onPress={() => handlePageChange(totalPages)}>尾页</Button>
                             </div>
                             <div className="text-center text-gray-500 dark:text-gray-400 text-xs">{totalCount}条·{urlPage}/{totalPages}页</div>
                         </div>

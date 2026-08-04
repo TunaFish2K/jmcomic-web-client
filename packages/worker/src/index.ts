@@ -1,5 +1,6 @@
 import { getClientDataAndCreateClient, getDomainsFromDomainServer } from '@tiny-client/shared/client';
-import { DOMAIN_SERVER_URL } from '@tiny-client/shared/constants';
+import { DOMAIN_SERVER_URL, SEARCH_PAGE_SIZE } from '@tiny-client/shared/constants';
+import { assertDistinctSearchResult, selectFirstDistinctSearchResult } from './search';
 
 const BATCH_PHOTO_MAX_IDS = 20;
 const BATCH_ALBUM_MAX_IDS = 15;
@@ -26,22 +27,22 @@ function cacheSet(key: string, data: unknown) {
 	albumDataCache.set(key, { data, ts: Date.now() });
 }
 
-// ─── Search session domain stickiness ────────────────────────────
-const SEARCH_DOMAIN_CACHE_TTL = 60_000;
-const searchDomainCache = new Map<string, { domain: string; ts: number }>();
+// ─── Search session client stickiness ────────────────────────────
+const SEARCH_CLIENT_CACHE_TTL = 60_000;
+const searchClientCache = new Map<string, { context: ClientContext; ts: number }>();
 
-function getCachedSearchDomain(key: string): string | undefined {
-	const entry = searchDomainCache.get(key);
+function getCachedSearchClient(key: string): ClientContext | undefined {
+	const entry = searchClientCache.get(key);
 	if (!entry) return undefined;
-	if (Date.now() - entry.ts > SEARCH_DOMAIN_CACHE_TTL) {
-		searchDomainCache.delete(key);
+	if (Date.now() - entry.ts > SEARCH_CLIENT_CACHE_TTL) {
+		searchClientCache.delete(key);
 		return undefined;
 	}
-	return entry.domain;
+	return entry.context;
 }
 
-function setCachedSearchDomain(key: string, domain: string) {
-	searchDomainCache.set(key, { domain, ts: Date.now() });
+function setCachedSearchClient(key: string, context: ClientContext) {
+	searchClientCache.set(key, { context, ts: Date.now() });
 }
 
 // ─── KV-backed persistent cache (L2) ─────────────────────────────
@@ -252,6 +253,13 @@ export default {
 			if (url.pathname === '/search') {
 				const query = url.searchParams.get('query');
 				if (!query) return new Response("Missing query 'query'", { status: 400, headers: corsHeaders });
+				const previousIds = (url.searchParams.get('previousIds') ?? '')
+					.split(',')
+					.map((id) => id.trim())
+					.filter(Boolean);
+				if (previousIds.length > SEARCH_PAGE_SIZE) {
+					return new Response(`Too many previousIds, max ${SEARCH_PAGE_SIZE}`, { status: 400, headers: corsHeaders });
+				}
 
 				const searchOptions = {
 					page: Number(url.searchParams.get('page')) || 1,
@@ -259,19 +267,22 @@ export default {
 					time: (url.searchParams.get('time') as any) || 'a',
 					mainTag: (Number(url.searchParams.get('mainTag')) as any) || 0,
 				};
+				const duplicateGuardIds = searchOptions.page > 1 ? previousIds : [];
 
-				// Try cached domain first for session stickiness (翻页一致性)
+				// Reuse the same upstream client so pagination keeps its domain and cookie.
 				const sessionKey = `search:${query}:${searchOptions.mainTag}:${searchOptions.orderBy}:${searchOptions.time}`;
-				const cachedDomain = getCachedSearchDomain(sessionKey);
+				const cachedContext = getCachedSearchClient(sessionKey);
 
 				let result: any;
-				if (cachedDomain) {
+				if (cachedContext) {
 					try {
-						const client = await getClientDataAndCreateClient(`https://${cachedDomain}`);
-						result = await client.search(query, searchOptions);
+						result = assertDistinctSearchResult(
+							await cachedContext.client.search(query, searchOptions),
+							duplicateGuardIds,
+						);
 					} catch (e) {
-						console.warn('Cached search domain failed, falling back to race', cachedDomain, e);
-						searchDomainCache.delete(sessionKey);
+						console.warn('Cached search client failed, falling back to race', cachedContext.domain, e);
+						searchClientCache.delete(sessionKey);
 					}
 				}
 
@@ -279,23 +290,26 @@ export default {
 					// Race search across SEARCH_CLIENT_RACE_COUNT upstream domains
 					const domainServerURL = DOMAIN_SERVER_URL[Math.floor(Math.random() * DOMAIN_SERVER_URL.length)];
 					const allDomains = shuffle(await getDomainsFromDomainServer(domainServerURL));
-					const candidateDomains = allDomains.slice(0, SEARCH_CLIENT_RACE_COUNT);
+					const candidateDomains = allDomains
+						.filter((domain) => domain !== cachedContext?.domain)
+						.slice(0, SEARCH_CLIENT_RACE_COUNT);
 
 					try {
-						const winner = await Promise.any(
-							candidateDomains.map(async (domain) => {
+						const winner = await selectFirstDistinctSearchResult(
+							candidateDomains.map((domain) => async () => {
 								const client = await getClientDataAndCreateClient(`https://${domain}`);
 								const res = await client.search(query, searchOptions);
-								return { result: res, domain };
+								return { result: res, value: { client, domain } };
 							}),
+							duplicateGuardIds,
 						);
 						result = winner.result;
-						setCachedSearchDomain(sessionKey, winner.domain);
+						setCachedSearchClient(sessionKey, winner.value);
 					} catch (e) {
 						for (const err of (e as AggregateError).errors ?? []) {
 							console.warn('Search failed on a domain', err);
 						}
-						return new Response('All upstream domains failed for search', { status: 502, headers: corsHeaders });
+						return new Response('All upstream domains failed or returned duplicate search results', { status: 502, headers: corsHeaders });
 					}
 				}
 
