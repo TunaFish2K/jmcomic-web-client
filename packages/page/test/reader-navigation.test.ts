@@ -8,6 +8,7 @@ import {
   isCurrentChapterLoad,
   isLikelyTrackpadWheel,
   isMatchingChapterTransition,
+  isScrollTargetReached,
   MOUSE_WHEEL_BOUNDARY_CONTRIBUTION,
 } from '../src/reader/navigation';
 
@@ -24,6 +25,11 @@ describe('reader navigation', () => {
     assert.equal(getBoundaryDirection({ position: 1.5, maxPosition: 800, step: -1 }), 'prev');
     assert.equal(getBoundaryDirection({ position: 798.5, maxPosition: 800, step: 1 }), 'next');
     assert.equal(getBoundaryDirection({ position: 3, maxPosition: 800, step: -1 }), null);
+  });
+
+  it('keeps a programmatic page target until the smooth scroll reaches it', () => {
+    assert.equal(isScrollTargetReached({ position: 400, targetPosition: 800 }), false);
+    assert.equal(isScrollTargetReached({ position: 798.5, targetPosition: 800 }), true);
   });
 
   it('accumulates one direction and resets when the direction changes', () => {

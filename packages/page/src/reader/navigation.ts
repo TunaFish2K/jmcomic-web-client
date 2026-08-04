@@ -20,6 +20,18 @@ export function getBoundaryDirection({
   return null;
 }
 
+export function isScrollTargetReached({
+  position,
+  targetPosition,
+  tolerance = SCROLL_EDGE_TOLERANCE_PX,
+}: {
+  position: number;
+  targetPosition: number;
+  tolerance?: number;
+}) {
+  return Math.abs(position - targetPosition) <= tolerance;
+}
+
 export function accumulateBoundaryGesture({
   currentDirection,
   currentAmount,

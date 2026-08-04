@@ -5,7 +5,7 @@ import { getAlbum, getPhoto } from '../api';
 import { getCachedAlbum, setCachedAlbum } from '../album-cache';
 import { DecryptedImage } from './DecryptedImage';
 import { ReaderOverlay } from './ReaderOverlay';
-import type { ReadingDirection, BarSide } from './reader-store';
+import type { ReadingDirection } from './reader-store';
 import {
   getReadingDirection,
   saveReadingDirection,
@@ -18,7 +18,6 @@ import {
   getLazyRenderRange,
   saveLazyRenderRange,
   getBarSide,
-  saveBarSide,
   saveReadingProgress,
   getAlbumMeta,
   saveAlbumMeta,
@@ -33,6 +32,7 @@ import {
   isCurrentChapterLoad,
   isLikelyTrackpadWheel,
   isMatchingChapterTransition,
+  isScrollTargetReached,
   MOUSE_WHEEL_BOUNDARY_CONTRIBUTION,
   type ChapterDirection,
 } from './navigation';
@@ -57,6 +57,7 @@ const PRELOAD_PARALLEL = 5;
 const BOUNDARY_RESET_DELAY_MS = 2000;
 const CHAPTER_SWITCH_UNLOCK_DELAY_MS = 5000;
 const LANDING_ANCHOR_DELAY_MS = 5000;
+const PROGRAMMATIC_PAGE_TARGET_TIMEOUT_MS = 1500;
 const TRACKPAD_GESTURE_END_DELAY_MS = 140;
 async function decryptImageWithRetry(url: string, photoId: string, scrambleId: number): Promise<ArrayBuffer | null> {
   const filename = url.split('/').pop() ?? '';
@@ -160,11 +161,10 @@ export default function ReaderPage() {
   const [autoSnap, setAutoSnap] = useState(getAutoSnap);
   const [seamlessMode, setSeamlessMode] = useState(getSeamlessMode);
   const [lazyRenderRange, setLazyRenderRange] = useState(getLazyRenderRange);
-  const [barSide, setBarSide] = useState(getBarSide);
+  const [barSide] = useState(getBarSide);
   const [barVisible, setBarVisible] = useState(true);
   const [showUI, setShowUI] = useState(true);
   const [currentPage, setCurrentPage] = useState(0);
-  const [scrollProgressPct, setScrollProgressPct] = useState(0);
   const [blobMap, setBlobMap] = useState<Map<number, string>>(new Map());
 
   // ── boundary chapter-swap hint (pull past first/last page) ──
@@ -196,6 +196,8 @@ export default function ReaderPage() {
   const inflightRef = useRef(new Set<number>());
   const wheelPagingLockRef = useRef(false);
   const wheelPagingTimerRef = useRef<number | null>(null);
+  const programmaticPageTargetRef = useRef<number | null>(null);
+  const programmaticPageTargetTimerRef = useRef<number | null>(null);
   const trackpadGestureLockRef = useRef(false);
   const trackpadDeltaAccumRef = useRef(0);
   const trackpadGestureTimerRef = useRef<number | null>(null);
@@ -314,6 +316,23 @@ export default function ReaderPage() {
     landingAnchorTimerRef.current = window.setTimeout(releaseLandingAnchor, LANDING_ANCHOR_DELAY_MS);
   }, [releaseLandingAnchor]);
 
+  const clearProgrammaticPageTarget = useCallback(() => {
+    programmaticPageTargetRef.current = null;
+    if (programmaticPageTargetTimerRef.current !== null) {
+      window.clearTimeout(programmaticPageTargetTimerRef.current);
+      programmaticPageTargetTimerRef.current = null;
+    }
+  }, []);
+
+  const setProgrammaticPageTarget = useCallback((page: number) => {
+    clearProgrammaticPageTarget();
+    programmaticPageTargetRef.current = page;
+    programmaticPageTargetTimerRef.current = window.setTimeout(
+      clearProgrammaticPageTarget,
+      PROGRAMMATIC_PAGE_TARGET_TIMEOUT_MS,
+    );
+  }, [clearProgrammaticPageTarget]);
+
   const completeChapterTransition = useCallback((transitionId: number | null, chapterId: string) => {
     if (!isMatchingChapterTransition({
       activeTransitionId: activeTransitionIdRef.current,
@@ -333,12 +352,13 @@ export default function ReaderPage() {
 
   const seekPage = useCallback((page: number) => {
     releaseLandingAnchor();
+    clearProgrammaticPageTarget();
     const total = imagesCountRef.current;
     if (total === 0) return;
     const clamped = Math.max(0, Math.min(total - 1, page));
     setReaderPage(clamped);
     scrollToPage(clamped, 'instant');
-  }, [releaseLandingAnchor, scrollToPage, setReaderPage]);
+  }, [clearProgrammaticPageTarget, releaseLandingAnchor, scrollToPage, setReaderPage]);
 
   const showBoundaryToast = useCallback((dir: ChapterDirection) => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
@@ -382,6 +402,7 @@ export default function ReaderPage() {
     setTransitioning(true);
     cancelBoundaryHint();
     releaseLandingAnchor();
+    clearProgrammaticPageTarget();
     setBlobMap(new Map());
     loadGenerationRef.current += 1;
     pendingNavigationRef.current = {
@@ -402,7 +423,7 @@ export default function ReaderPage() {
       state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
     });
     return true;
-  }, [album, cancelBoundaryHint, isSeries, navigate, releaseLandingAnchor, setReaderPage]);
+  }, [album, cancelBoundaryHint, clearProgrammaticPageTarget, isSeries, navigate, releaseLandingAnchor, setReaderPage]);
 
   const switchAdjacentChapter = useCallback((dir: ChapterDirection) => {
     const offset = dir === 'next' ? 1 : -1;
@@ -434,9 +455,24 @@ export default function ReaderPage() {
     if (!el || switchingRef.current || pendingNavigationRef.current !== null) return;
     releaseLandingAnchor();
 
+    if (isRTLRef.current && programmaticPageTargetRef.current !== null) {
+      const nextPage = currentPageRef.current + step;
+      if (nextPage < 0 || nextPage >= imagesCountRef.current) {
+        clearProgrammaticPageTarget();
+        const direction = step > 0 ? 'next' : 'prev';
+        if (!switchAdjacentChapter(direction)) showBoundaryToast(direction);
+        return;
+      }
+      setProgrammaticPageTarget(nextPage);
+      setReaderPage(nextPage);
+      scrollToPage(nextPage, 'smooth');
+      return;
+    }
+
     const metrics = getScrollMetrics();
     const boundary = metrics ? getBoundaryDirection({ ...metrics, step }) : null;
     if (boundary) {
+      clearProgrammaticPageTarget();
       if (!switchAdjacentChapter(boundary)) showBoundaryToast(boundary);
       return;
     }
@@ -445,6 +481,7 @@ export default function ReaderPage() {
     if (isRTLRef.current) {
       const target = Math.max(0, Math.min(imagesCountRef.current - 1, currentPageRef.current + step));
       if (target !== currentPageRef.current) {
+        setProgrammaticPageTarget(target);
         setReaderPage(target);
         scrollToPage(target, 'smooth');
       }
@@ -453,7 +490,7 @@ export default function ReaderPage() {
 
     const distance = Math.max(el.clientHeight * 0.9, 1) * step;
     el.scrollBy({ top: distance, behavior: 'smooth' });
-  }, [cancelBoundaryHint, getScrollMetrics, releaseLandingAnchor, scrollToPage, setReaderPage, showBoundaryToast, switchAdjacentChapter]);
+  }, [cancelBoundaryHint, clearProgrammaticPageTarget, getScrollMetrics, releaseLandingAnchor, scrollToPage, setProgrammaticPageTarget, setReaderPage, showBoundaryToast, switchAdjacentChapter]);
 
   const goNextPage = useCallback(() => scrollByInputStep(1), [scrollByInputStep]);
   const goPrevPage = useCallback(() => scrollByInputStep(-1), [scrollByInputStep]);
@@ -487,29 +524,26 @@ export default function ReaderPage() {
     trackpadGestureLockRef.current = false;
     trackpadDeltaAccumRef.current = 0;
     wheelPagingLockRef.current = false;
+    clearProgrammaticPageTarget();
     releaseLandingAnchor();
-  }, [releaseLandingAnchor]);
+  }, [clearProgrammaticPageTarget, releaseLandingAnchor]);
 
   const toggleDirection = useCallback(() => {
     releaseLandingAnchor();
+    clearProgrammaticPageTarget();
     cancelBoundaryHint();
     setDirection((prev) => {
       const next: ReadingDirection = prev === 'left-right' ? 'top-down' : 'left-right';
       saveReadingDirection(next);
       return next;
     });
-  }, [cancelBoundaryHint, releaseLandingAnchor]);
+  }, [cancelBoundaryHint, clearProgrammaticPageTarget, releaseLandingAnchor]);
 
   const toggleAutoSnap = useCallback(() => {
     setAutoSnap((prev) => {
       saveAutoSnap(!prev);
       return !prev;
     });
-  }, []);
-
-  const changeBarSide = useCallback((side: BarSide) => {
-    setBarSide(side);
-    saveBarSide(side);
   }, []);
 
   const toggleSeamlessMode = useCallback(() => {
@@ -717,9 +751,16 @@ export default function ReaderPage() {
       const children = el.children;
       if (children.length === 0) return;
       if (isHorizontal) {
-        const max = Math.max(el.scrollWidth - el.clientWidth, 0);
-        setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollLeft / max) * 100));
         if (pendingNavigationRef.current !== null) return;
+        const programmaticTarget = programmaticPageTargetRef.current;
+        if (programmaticTarget !== null) {
+          const target = children[programmaticTarget] as HTMLElement | undefined;
+          if (target && !isScrollTargetReached({
+            position: el.scrollLeft,
+            targetPosition: target.offsetLeft,
+          })) return;
+          clearProgrammaticPageTarget();
+        }
         const center = el.scrollLeft + el.clientWidth / 2;
         let best = 0, bestDist = Infinity;
         for (let i = 0; i < children.length; i++) {
@@ -734,8 +775,6 @@ export default function ReaderPage() {
           horizontalSnapTimerRef.current = window.setTimeout(settleHorizontalPage, 120);
         }
       } else {
-        const max = Math.max(el.scrollHeight - el.clientHeight, 0);
-        setScrollProgressPct(max === 0 ? 0 : Math.round((el.scrollTop / max) * 100));
         if (pendingNavigationRef.current !== null) return;
         const center = el.scrollTop + el.clientHeight / 2;
         let best = 0, bestDist = Infinity;
@@ -897,6 +936,7 @@ export default function ReaderPage() {
     if (!el) return;
 
     const onTouchStart = (e: TouchEvent) => {
+      clearProgrammaticPageTarget();
       if (switchingRef.current || pendingNavigationRef.current !== null) return;
       const t = e.touches[0];
       const metrics = getScrollMetrics();
@@ -974,7 +1014,7 @@ export default function ReaderPage() {
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
     };
-  }, [photo, getScrollMetrics, releaseLandingAnchor, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
+  }, [photo, clearProgrammaticPageTarget, getScrollMetrics, releaseLandingAnchor, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
 
   // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
 
@@ -1130,7 +1170,6 @@ export default function ReaderPage() {
         title={title}
         currentPage={currentPage}
         totalPages={images.length}
-        scrollProgressPct={scrollProgressPct}
         chapterName={sortedChapters[currentChapterIndex]?.name ?? ''}
         chapters={sortedChapters}
         currentChapterId={currentChapterId}
@@ -1156,7 +1195,6 @@ export default function ReaderPage() {
         onToggleAutoSnap={toggleAutoSnap}
         onToggleSeamlessMode={toggleSeamlessMode}
         onChangeLazyRenderRange={changeLazyRenderRange}
-        onChangeBarSide={changeBarSide}
         onToggleBarVisible={() => setBarVisible(v => !v)}
         onScrollByInputStep={scrollByInputStep}
         onSeekPage={seekPage}

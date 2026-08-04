@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, Settings, Trash2 } from 'lucide-react';
 import type { ReadingDirection, BarSide } from './reader-store';
 import { getCacheStats, clearAllCache } from '@tiny-client/shared';
@@ -122,13 +122,11 @@ function SettingsPanel({
   autoSnap,
   seamlessMode,
   lazyRenderRange,
-  barSide,
   barVisible,
   onToggleDirection,
   onToggleAutoSnap,
   onToggleSeamlessMode,
   onChangeLazyRenderRange,
-  onChangeBarSide,
   onToggleBarVisible,
   onClose,
   cacheStats,
@@ -138,13 +136,11 @@ function SettingsPanel({
   autoSnap: boolean;
   seamlessMode: boolean;
   lazyRenderRange: number;
-  barSide: BarSide;
   barVisible: boolean;
   onToggleDirection: () => void;
   onToggleAutoSnap: () => void;
   onToggleSeamlessMode: () => void;
   onChangeLazyRenderRange: (value: number) => void;
-  onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onClose: () => void;
   cacheStats: { count: number; totalSize: number } | null;
@@ -248,7 +244,6 @@ export function ReaderOverlay({
   title,
   currentPage,
   totalPages,
-  scrollProgressPct,
   chapterName,
   chapters,
   currentChapterId,
@@ -274,7 +269,6 @@ export function ReaderOverlay({
   onToggleAutoSnap,
   onToggleSeamlessMode,
   onChangeLazyRenderRange,
-  onChangeBarSide,
   onToggleBarVisible,
   onScrollByInputStep,
   onSeekPage,
@@ -284,7 +278,6 @@ export function ReaderOverlay({
   title: string;
   currentPage: number;
   totalPages: number;
-  scrollProgressPct: number;
   chapterName: string;
   chapters: ChapterInfo[];
   currentChapterId: string;
@@ -310,7 +303,6 @@ export function ReaderOverlay({
   onToggleAutoSnap: () => void;
   onToggleSeamlessMode: () => void;
   onChangeLazyRenderRange: (value: number) => void;
-  onChangeBarSide: (side: BarSide) => void;
   onToggleBarVisible: () => void;
   onScrollByInputStep: (step: number) => void;
   onSeekPage?: (page: number) => void;
@@ -329,8 +321,6 @@ export function ReaderOverlay({
     const stats = await getCacheStats();
     setCacheStats(stats);
   }, []);
-
-  const progressPct = scrollProgressPct;
 
   // ─── Seek drag ─────────────────────────────────────────────────
   const progressRef = useRef<HTMLDivElement>(null);
@@ -407,32 +397,11 @@ export function ReaderOverlay({
     window.addEventListener('touchend', onEnd);
   }, [pageFromEvent, onDragMove, onDragEnd]);
 
-  // ─── Adaptive page dots ────────────────────────────────────────
-  const [maxDots, setMaxDots] = useState(30);
-  useEffect(() => {
-    const update = () => setMaxDots(window.innerWidth < 640 ? 10 : 30);
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
-
   useEffect(() => {
     return () => {
       if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
     };
   }, []);
-
-  const dotPositions = useMemo(() => {
-    if (totalPages < 2) return [];
-    const step = Math.max(1, Math.floor(totalPages / maxDots));
-    const last = totalPages - 1;
-    const dots: number[] = [0];
-    for (let i = step; i < last; i += step) dots.push(i);
-    if (dots[dots.length - 1] !== last) dots.push(last);
-    return dots;
-  }, [totalPages, maxDots]);
-
-  // ────────────────────────────────────────────────────────────────
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -474,11 +443,11 @@ export function ReaderOverlay({
       {visible && showSettings && (
         <SettingsPanel
           direction={direction} autoSnap={autoSnap} seamlessMode={seamlessMode} lazyRenderRange={lazyRenderRange}
-          barSide={barSide} barVisible={barVisible}
+          barVisible={barVisible}
           onToggleDirection={onToggleDirection} onToggleAutoSnap={onToggleAutoSnap}
           onToggleSeamlessMode={onToggleSeamlessMode}
           onChangeLazyRenderRange={onChangeLazyRenderRange}
-          onChangeBarSide={onChangeBarSide} onToggleBarVisible={onToggleBarVisible}
+          onToggleBarVisible={onToggleBarVisible}
           onClose={() => setShowSettings(false)}
           cacheStats={cacheStats} onClearCache={handleClearCache}
         />
