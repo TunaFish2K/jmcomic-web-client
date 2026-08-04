@@ -102,6 +102,37 @@ html.dark input:-webkit-autofill:active {
     -webkit-box-shadow: 0 0 0 1000px oklch(14.7% 0.004 49.25) inset !important;
 }
 
+/* 搜索栏由输入组统一提供背景和 inset 聚焦边框。 */
+.search-input-group::after {
+    position: absolute;
+    z-index: 20;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    content: "";
+}
+
+.search-input-group:focus-within::after {
+    box-shadow: inset 0 0 0 1px var(--theme-accent);
+}
+
+.search-input-group input:-webkit-autofill,
+.search-input-group input:-webkit-autofill:hover,
+.search-input-group input:-webkit-autofill:focus,
+.search-input-group input:-webkit-autofill:active {
+    height: 100%;
+    -webkit-box-shadow: inset 0 0 0 1000px var(--field-background, var(--default)) !important;
+    -webkit-text-fill-color: var(--field-foreground, var(--foreground)) !important;
+    caret-color: var(--field-foreground, var(--foreground)) !important;
+}
+
+.search-input-group input:autofill {
+    height: 100%;
+    box-shadow: inset 0 0 0 1000px var(--field-background, var(--default)) !important;
+    color: var(--field-foreground, var(--foreground)) !important;
+    caret-color: var(--field-foreground, var(--foreground)) !important;
+}
+
 .search-progress-bar {
     animation: search-progress 1.2s ease-in-out infinite;
 }
