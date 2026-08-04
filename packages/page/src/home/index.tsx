@@ -1264,7 +1264,7 @@ export default function Home() {
                     <form onSubmit={handleSubmit} className="shrink-0 mb-3">
                         <div className="flex h-12 w-full">
                             <InputGroup
-                                className="search-input-group relative z-0 h-12 min-w-0 flex-1 rounded-field rounded-r-none focus-within:z-10 focus-within:ring-1 focus-within:ring-inset focus-within:ring-brand-500"
+                                className="relative z-0 h-12 min-w-0 flex-1 rounded-r-none focus-within:z-10 focus-within:ring-1 focus-within:ring-inset focus-within:ring-brand-500"
                                 isInvalid={!!queryError}
                             >
                                 <InputGroup.Prefix className="p-0 flex-shrink-0">
@@ -1300,12 +1300,12 @@ export default function Home() {
                                     name="query"
                                     value={query}
                                     onChange={handleQueryChange}
-                                    className="flex-1 min-w-0"
+                                    className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
                                 />
                             </InputGroup>
                             <Button
                                 type="submit"
-                                className="relative z-0 -ml-px h-12 min-w-12 flex-shrink-0 rounded-field rounded-l-none px-4 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                                className="relative z-0 -ml-px h-12 min-w-12 flex-shrink-0 rounded-l-none px-4 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                                 variant="primary"
                                 isDisabled={searchPending}
                                 aria-label={searchPending ? '正在搜索' : '搜索'}
