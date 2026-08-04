@@ -7,17 +7,14 @@ import type { BatchAlbumItem, BatchError } from "../api";
 import type { SearchResult, PhotoWithScrambleId } from "@tiny-client/shared";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
-    startDownload,
-    downloadAllImages,
-    downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile,
-    downloadAndDecryptImagesOfPhotosThenWriteIntoZipFile,
-    downloadAndDecryptImagesOfPhotosThenWriteIntoPDFFile,
+    exportPhotosToTemporaryFile,
     getSliceCount,
     getSearchResultIds,
     SEARCH_PAGE_SIZE,
     reverseImageBySlice,
+    startTemporaryDownload,
+    type ExportProgress,
 } from "@tiny-client/shared";
-import { PDFDocument } from "pdf-lib";
 import pLimit from "p-limit";
 import { saveAlbumMeta, getLatestChapterProgress } from "../reader/reader-store";
 import { getCachedAlbum, getCachedAlbums, setCachedAlbum, setCachedAlbums } from "../album-cache";
@@ -27,7 +24,7 @@ import { ThemePopover } from "../theme/ThemeControls";
 const coverLimit = pLimit(6);
 
 // Global concurrency limiter for download tasks (shared across all active downloads)
-const downloadLimit = pLimit(2);
+const downloadLimit = pLimit(1);
 
 const BATCH_PHOTO_CHUNK_SIZE = 20;
 const BATCH_PHOTO_RETRY_DELAYS_MS = [1000, 2500];
@@ -111,7 +108,7 @@ type DownloadTask = {
     albumId: string;
     name: string;
     format: 'pdf' | 'zip' | 'cbz';
-    stage: 'downloading' | 'packaging' | 'completed' | 'error';
+    stage: 'processing' | 'finalizing' | 'completed' | 'error';
     progress: number;
     total: number;
     error?: string;
@@ -126,6 +123,8 @@ type DownloadTarget = {
 };
 
 type BatchMode = 'individual' | 'combined';
+
+type DownloadTaskHandle = { id: string; signal: AbortSignal };
 
 function sanitizeFilename(name: string) {
     return name.replace(/[<>:"/\\|?*]/g, '_');
@@ -147,11 +146,31 @@ function formatBatchError(error: BatchError) {
     return details ? `${error.message} (${details})` : error.message;
 }
 
-async function getPhotosInChunks(targets: DownloadTarget[], chunkSize: number = BATCH_PHOTO_CHUNK_SIZE) {
+function throwIfDownloadAborted(signal?: AbortSignal) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+}
+
+function waitForRetry(delay: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        throwIfDownloadAborted(signal);
+        const timer = window.setTimeout(resolve, delay);
+        signal?.addEventListener('abort', () => {
+            window.clearTimeout(timer);
+            reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+    });
+}
+
+async function getPhotosInChunks(
+    targets: DownloadTarget[],
+    chunkSize: number = BATCH_PHOTO_CHUNK_SIZE,
+    signal?: AbortSignal,
+) {
     const photoMap = new Map<string, PhotoWithScrambleId>();
     let pendingTargets = [...targets];
 
     for (let attempt = 0; attempt <= BATCH_PHOTO_RETRY_DELAYS_MS.length && pendingTargets.length > 0; attempt++) {
+        throwIfDownloadAborted(signal);
         const chunks: DownloadTarget[][] = [];
         for (let i = 0; i < pendingTargets.length; i += chunkSize) {
             chunks.push(pendingTargets.slice(i, i + chunkSize));
@@ -159,7 +178,9 @@ async function getPhotosInChunks(targets: DownloadTarget[], chunkSize: number = 
 
         const failedIds = new Set<string>();
         for (const chunk of chunks) {
-            const batch = await getBatchPhoto(chunk.map((target) => target.id));
+            throwIfDownloadAborted(signal);
+            const batch = await getBatchPhoto(chunk.map((target) => target.id), signal);
+            throwIfDownloadAborted(signal);
             for (const item of batch) {
                 if (item.photo) photoMap.set(item.photoId, item.photo);
                 else failedIds.add(item.photoId);
@@ -172,7 +193,7 @@ async function getPhotosInChunks(targets: DownloadTarget[], chunkSize: number = 
 
         // Only retry chapters that still failed in this round.
         pendingTargets = pendingTargets.filter((target) => failedIds.has(target.id));
-        await new Promise((resolve) => setTimeout(resolve, BATCH_PHOTO_RETRY_DELAYS_MS[attempt]));
+        await waitForRetry(BATCH_PHOTO_RETRY_DELAYS_MS[attempt], signal);
     }
 
     return targets.map((target) => {
@@ -191,67 +212,27 @@ async function buildSingleDownload(
     target: DownloadTarget,
     format: DownloadFormat,
     updateTask: (updates: Partial<DownloadTask>) => void,
-    prefetchedPhoto?: PhotoWithScrambleId,
+    signal: AbortSignal,
 ) {
-    const photo = prefetchedPhoto ?? await getPhoto(target.id);
+    const photo = await getPhoto(target.id, signal);
+    throwIfDownloadAborted(signal);
     if (!photo) throw new Error('无法获取图片数据');
 
     const safeName = sanitizeFilename(target.name);
     const totalImages = photo.images.length;
-    const totalProgress = format === 'pdf' ? 1 + totalImages * 2 : 1 + totalImages;
-
-    updateTask({ total: totalProgress, progress: 1 });
-
-    if (format === 'pdf') {
-        const buffer = await (async () => {
-            const pdfDocument = await PDFDocument.create();
-            let processedCount = 0;
-
-            const downloadedImages = await downloadAllImages(
-                photo.images,
-                5,
-                (done) => updateTask({ progress: 1 + done, stage: 'downloading' }),
-                photo.id,
-                (photo as PhotoWithScrambleId).scrambleId,
-            );
-
-            updateTask({ stage: 'packaging' });
-
-            for (let i = 0; i < downloadedImages.length; i++) {
-                const image = downloadedImages[i];
-                processedCount++;
-                if (image.data === null) {
-                    updateTask({ progress: 1 + totalImages + processedCount, stage: 'packaging' });
-                    continue;
-                }
-                const bitmap = await createImageBitmap(new Blob([image.data]));
-                const width = bitmap.width;
-                const height = bitmap.height;
-                bitmap.close();
-                const page = pdfDocument.addPage([width, height]);
-                const pdfImage = await pdfDocument.embedJpg(image.data);
-                page.drawImage(pdfImage, { x: 0, y: 0, width, height });
-                updateTask({ progress: 1 + totalImages + processedCount, stage: 'packaging' });
-            }
-
-            const pdfBytes = await pdfDocument.save();
-            updateTask({ progress: totalProgress, stage: 'completed' });
-            return pdfBytes.buffer;
-        })();
-        startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
-    } else {
-        const buffer = await downloadAndDecryptImagesOfPhotoThenWriteIntoZipFile(
-            photo as PhotoWithScrambleId,
-            (done, total) => updateTask({
-                progress: 1 + done,
-                stage: done < total ? 'packaging' : 'completed',
-            }),
-            5,
-        );
-        const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
-        startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
-        updateTask({ progress: totalProgress, stage: 'completed' });
-    }
+    const filename = `${safeName}.${format}`;
+    updateTask({ total: totalImages, progress: 0, stage: 'processing' });
+    const temporary = await exportPhotosToTemporaryFile({
+        filename,
+        format,
+        photos: [{ name: target.name, photo }],
+    }, (progress: ExportProgress) => updateTask({
+        progress: progress.completed,
+        total: progress.total,
+        stage: progress.stage,
+    }), signal);
+    throwIfDownloadAborted(signal);
+    startTemporaryDownload(filename, temporary);
 }
 
 async function buildCombinedDownload(
@@ -259,45 +240,32 @@ async function buildCombinedDownload(
     format: DownloadFormat,
     archiveName: string,
     updateTask: (updates: Partial<DownloadTask>) => void,
+    signal: AbortSignal,
 ) {
-    const photos = await getPhotosInChunks(targets);
+    const photos = await getPhotosInChunks(targets, BATCH_PHOTO_CHUNK_SIZE, signal);
+    throwIfDownloadAborted(signal);
 
     const totalImages = photos.reduce((sum, item) => sum + item.photo.images.length, 0);
-    const totalProgress = 1 + (format === 'pdf' ? totalImages * 2 : totalImages);
     const safeName = sanitizeFilename(archiveName);
-
-    updateTask({ total: totalProgress, progress: 1, stage: 'downloading' });
-
-    if (format === 'pdf') {
-        const buffer = await downloadAndDecryptImagesOfPhotosThenWriteIntoPDFFile(
-            photos,
-            (done) => updateTask({
-                progress: 1 + done,
-                stage: done < totalImages ? 'downloading' : 'packaging',
-            }),
-            5,
-        );
-        startDownload(`${safeName}.pdf`, new Uint8Array(buffer), 'application/pdf');
-    } else {
-        const buffer = await downloadAndDecryptImagesOfPhotosThenWriteIntoZipFile(
-            photos,
-            (done) => updateTask({
-                progress: 1 + done,
-                stage: done < totalImages ? 'downloading' : 'packaging',
-            }),
-            5,
-            format === 'cbz' ? 'flat' : 'folders',
-        );
-        const mimeType = format === 'cbz' ? 'application/octet-stream' : 'application/zip';
-        startDownload(`${safeName}.${format}`, new Uint8Array(buffer), mimeType);
-    }
-
-    updateTask({ progress: totalProgress, stage: 'completed' });
+    const filename = `${safeName}.${format}`;
+    updateTask({ total: totalImages, progress: 0, stage: 'processing' });
+    const temporary = await exportPhotosToTemporaryFile({
+        filename,
+        format,
+        photos,
+        archiveLayout: format === 'cbz' ? 'flat' : 'folders',
+    }, (progress: ExportProgress) => updateTask({
+        progress: progress.completed,
+        total: progress.total,
+        stage: progress.stage,
+    }), signal);
+    throwIfDownloadAborted(signal);
+    startTemporaryDownload(filename, temporary);
 }
 
 type TaskContextType = {
     tasks: DownloadTask[];
-    addTask: (task: Omit<DownloadTask, 'id'>) => string;
+    addTask: (task: Omit<DownloadTask, 'id'>) => DownloadTaskHandle;
     updateTask: (id: string, updates: Partial<DownloadTask>) => void;
     removeTask: (id: string) => void;
     clearCompleted: () => void;
@@ -321,9 +289,9 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
     const completedTasks = tasks.filter(t => t.stage === 'completed');
 
     const stageText = (s: DownloadTask['stage']) =>
-        ({ downloading: '下载图片', packaging: '打包中', completed: '完成', error: '错误' })[s];
+        ({ processing: '处理图片', finalizing: '写入文件', completed: '完成', error: '错误' })[s];
     const stageColor = (s: DownloadTask['stage']) =>
-        ({ downloading: 'bg-brand-500', packaging: 'bg-yellow-500', completed: 'bg-green-500', error: 'bg-red-500' })[s];
+        ({ processing: 'bg-brand-500', finalizing: 'bg-yellow-500', completed: 'bg-green-500', error: 'bg-red-500' })[s];
 
     if (tasks.length === 0) return null;
 
@@ -360,6 +328,11 @@ function TaskPanel({ onClose }: { onClose: () => void }) {
                                         <span className={`inline-block w-1.5 h-1.5 rounded-full ${stageColor(task.stage)}`} />
                                         <span>{stageText(task.stage)}</span>
                                     </div>
+                                    {task.error && (
+                                        <div className="mt-1 line-clamp-2 text-xs text-red-600 dark:text-red-400" title={task.error}>
+                                            {task.error}
+                                        </div>
+                                    )}
                                 </div>
                                 <button onClick={() => removeTask(task.id)} className="text-gray-300 dark:text-gray-600 hover:text-red-500 shrink-0">
                                     <X size={14} />
@@ -399,21 +372,24 @@ function DownloadButtons({ items, label }: {
         );
         if (existingTask) return;
 
-        const taskId = addTask({
+        const { id: taskId, signal } = addTask({
             albumId: target.id,
             name: target.name,
             format,
-            stage: 'downloading',
+            stage: 'processing',
             progress: 0,
             total: 1,
         });
 
         downloadLimit(async () => {
             try {
-                await buildSingleDownload(target, format, (updates) => updateTask(taskId, updates));
+                throwIfDownloadAborted(signal);
+                await buildSingleDownload(target, format, (updates) => updateTask(taskId, updates), signal);
             } catch (error) {
-                console.error('下载失败:', error);
-                updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+                if (!signal.aborted) {
+                    console.error('下载失败:', error);
+                    updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+                }
             }
         });
     };
@@ -473,7 +449,7 @@ function SeriesDownloadManager({ albumName, items }: {
         return orderedItems.slice(start - 1, end);
     })();
 
-    const handleBatchDownload = async (format: DownloadFormat) => {
+    const handleBatchDownload = (format: DownloadFormat) => {
         const start = parseInt(rangeStart, 10);
         const end = parseInt(rangeEnd, 10);
 
@@ -494,39 +470,30 @@ function SeriesDownloadManager({ albumName, items }: {
             ));
             if (queuedItems.length === 0) return;
 
-            let batchPhotos: Awaited<ReturnType<typeof getPhotosInChunks>>;
-            try {
-                batchPhotos = await getPhotosInChunks(queuedItems);
-            } catch (error) {
-                setRangeError((error as Error).message);
-                return;
-            }
-
-            const photoMap = new Map(batchPhotos.map((item) => [item.photo.id, item.photo]));
-
             for (const item of queuedItems) {
                 const existingTask = tasks.find((t) =>
                     t.albumId === item.id && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
                 );
                 if (existingTask) continue;
 
-                const taskId = addTask({
+                const { id: taskId, signal } = addTask({
                     albumId: item.id,
                     name: item.name,
                     format,
-                    stage: 'downloading',
+                    stage: 'processing',
                     progress: 0,
                     total: 1,
                 });
 
                 downloadLimit(async () => {
                     try {
-                        const photo = photoMap.get(item.id);
-                        if (!photo) throw new Error(`无法获取章节 ${item.name} 的图片数据`);
-                        await buildSingleDownload(item, format, (updates) => updateTask(taskId, updates), photo);
+                        throwIfDownloadAborted(signal);
+                        await buildSingleDownload(item, format, (updates) => updateTask(taskId, updates), signal);
                     } catch (error) {
-                        console.error('下载失败:', error);
-                        updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+                        if (!signal.aborted) {
+                            console.error('下载失败:', error);
+                            updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+                        }
                     }
                 });
             }
@@ -540,26 +507,30 @@ function SeriesDownloadManager({ albumName, items }: {
         );
         if (existingCombinedTask) return;
 
-        const taskId = addTask({
+        const { id: taskId, signal } = addTask({
             albumId: combinedTaskId,
             name: combinedTaskName,
             format,
-            stage: 'downloading',
+            stage: 'processing',
             progress: 0,
             total: 1,
         });
 
         downloadLimit(async () => {
             try {
+                throwIfDownloadAborted(signal);
                 await buildCombinedDownload(
                     selectedItems,
                     format,
                     combinedTaskName,
                     (updates) => updateTask(taskId, updates),
+                    signal,
                 );
             } catch (error) {
-                console.error('合集下载失败:', error);
-                updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+                if (!signal.aborted) {
+                    console.error('合集下载失败:', error);
+                    updateTask(taskId, { stage: 'error', error: (error as Error).message, progress: 0, total: 1 });
+                }
             }
         });
     };
@@ -963,6 +934,7 @@ export default function Home() {
     const [tasks, setTasks] = useState<DownloadTask[]>([]);
     const [showTaskPanel, setShowTaskPanel] = useState(false);
     const [modalAlbumId, setModalAlbumId] = useState<string | null>(null);
+    const taskControllersRef = useRef(new Map<string, AbortController>());
     const listRef = useRef<HTMLDivElement>(null);
     const lastSettledSearchRef = useRef<SettledSearch | null>(null);
     const displayedResultKeyRef = useRef<string | null>(null);
@@ -970,16 +942,30 @@ export default function Home() {
     // ── task management ──────────────────────────────────────────────────────
     const addTask = useCallback((task: Omit<DownloadTask, 'id'>) => {
         const newTask: DownloadTask = { ...task, id: `${Date.now()}_${Math.random()}` };
+        const controller = new AbortController();
+        taskControllersRef.current.set(newTask.id, controller);
         setTasks(prev => [...prev, newTask]);
         setShowTaskPanel(true);
-        return newTask.id;
+        return { id: newTask.id, signal: controller.signal };
     }, []);
-    const updateTask = useCallback((id: string, updates: Partial<DownloadTask>) =>
-        setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t)), []);
-    const removeTask = useCallback((id: string) =>
-        setTasks(prev => prev.filter(t => t.id !== id)), []);
+    const updateTask = useCallback((id: string, updates: Partial<DownloadTask>) => {
+        if (updates.stage === 'completed' || updates.stage === 'error') {
+            taskControllersRef.current.delete(id);
+        }
+        setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    }, []);
+    const removeTask = useCallback((id: string) => {
+        taskControllersRef.current.get(id)?.abort();
+        taskControllersRef.current.delete(id);
+        setTasks(prev => prev.filter(t => t.id !== id));
+    }, []);
     const clearCompleted = useCallback(() =>
         setTasks(prev => prev.filter(t => t.stage !== 'completed' && t.stage !== 'error')), []);
+
+    useEffect(() => () => {
+        for (const controller of taskControllersRef.current.values()) controller.abort();
+        taskControllersRef.current.clear();
+    }, []);
 
     const taskContextValue = { tasks, addTask, updateTask, removeTask, clearCompleted };
 

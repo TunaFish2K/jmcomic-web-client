@@ -25,18 +25,33 @@ function shouldRetryPhotoRequest(status: number) {
     return status === 429 || status >= 500;
 }
 
-function sleep(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+            return;
+        }
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+    });
 }
 
-async function fetchPhotoJsonWithRetry<T>(url: URL, allowNotFound = false): Promise<T | null> {
+async function fetchPhotoJsonWithRetry<T>(
+    url: URL,
+    allowNotFound = false,
+    signal?: AbortSignal,
+): Promise<T | null> {
     for (let attempt = 0; ; attempt++) {
         let res: Response;
         try {
-            res = await fetch(url);
+            res = await fetch(url, { signal });
         } catch (error) {
+            if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError');
             if (attempt >= PHOTO_RETRY_DELAYS_MS.length) throw error;
-            await sleep(PHOTO_RETRY_DELAYS_MS[attempt]);
+            await sleep(PHOTO_RETRY_DELAYS_MS[attempt], signal);
             continue;
         }
 
@@ -45,7 +60,7 @@ async function fetchPhotoJsonWithRetry<T>(url: URL, allowNotFound = false): Prom
 
             const errorMessage = await res.text();
             if (attempt < PHOTO_RETRY_DELAYS_MS.length && shouldRetryPhotoRequest(res.status)) {
-                await sleep(PHOTO_RETRY_DELAYS_MS[attempt]);
+                await sleep(PHOTO_RETRY_DELAYS_MS[attempt], signal);
                 continue;
             }
 
@@ -107,20 +122,20 @@ export async function getAlbum(id: string) {
     return (await res.json()) as Album;
 }
 
-export async function getPhoto(id: string) {
+export async function getPhoto(id: string, signal?: AbortSignal) {
     const url = new URL(`/photo/${id}`, BACKEND_URL);
-    return await fetchPhotoJsonWithRetry<PhotoWithScrambleId>(url, true);
+    return await fetchPhotoJsonWithRetry<PhotoWithScrambleId>(url, true, signal);
 }
 
 export type BatchPhotoItem =
     | { photoId: string; photo: PhotoWithScrambleId; error?: never }
     | { photoId: string; photo: null; error: BatchError };
 
-export async function getBatchPhoto(ids: string[]): Promise<BatchPhotoItem[]> {
+export async function getBatchPhoto(ids: string[], signal?: AbortSignal): Promise<BatchPhotoItem[]> {
     if (ids.length === 0) return [];
     const url = new URL('/batch-photo', BACKEND_URL);
     url.searchParams.set('ids', ids.join(','));
-    return (await fetchPhotoJsonWithRetry<BatchPhotoItem[]>(url)) ?? [];
+    return (await fetchPhotoJsonWithRetry<BatchPhotoItem[]>(url, false, signal)) ?? [];
 }
 
 export type BatchAlbumItem =

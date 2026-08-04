@@ -193,7 +193,7 @@ function SettingsPanel({
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <span className="text-gray-300 text-xs">懒加载范围</span>
+            <span className="text-gray-300 text-xs">预取上限</span>
             <span className="text-gray-400 text-xs">前后各 {lazyRenderRange} 页</span>
           </div>
           <input

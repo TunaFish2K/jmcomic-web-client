@@ -86,8 +86,10 @@ export function getReaderPageStyle({
     };
   }
   return {
-    height: 'auto',
-    flexShrink: 0,
+    flex: aspectRatio ? '0 0 auto' : '0 0 100%',
+    width: '100%',
+    height: aspectRatio ? 'auto' : '100%',
+    aspectRatio,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

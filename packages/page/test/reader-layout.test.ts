@@ -73,6 +73,24 @@ describe('reader layout modes', () => {
       seamlessMode: true,
       snapEnabled: false,
     }).flex, '0 0 100%');
+    assert.equal(getReaderPageStyle({
+      direction: 'top-down',
+      seamlessMode: false,
+      snapEnabled: false,
+    }).flex, '0 0 100%');
+  });
+
+  it('keeps exact vertical placeholders after an image is evicted', () => {
+    const style = getReaderPageStyle({
+      direction: 'top-down',
+      seamlessMode: false,
+      aspectRatio: 0.625,
+      snapEnabled: false,
+    });
+
+    assert.equal(style.width, '100%');
+    assert.equal(style.height, 'auto');
+    assert.equal(style.aspectRatio, 0.625);
   });
 
   it('preserves the same page content point when a page is resized', () => {

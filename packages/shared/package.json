@@ -8,20 +8,25 @@
     "./constants": "./src/constants.ts"
   },
   "type": "module",
+  "scripts": {
+    "test": "tsx --test ./test/*.test.ts"
+  },
   "packageManager": "pnpm@10.28.0",
   "dependencies": {
     "crypto-js": "^4.2.0",
     "fflate": "^0.8.2",
     "p-limit": "^7.3.0",
-    "pdf-lib": "^1.17.1",
+    "pdfkit": "^0.19.1",
     "set-cookie-parser": "^3.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/crypto-js": "^4.2.2",
     "@types/node": "^24.10.1",
+    "@types/pdfkit": "^0.17.6",
     "@types/set-cookie-parser": "^2.4.10",
     "eslint": "^9.39.1",
+    "fake-indexeddb": "^6.2.5",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3",

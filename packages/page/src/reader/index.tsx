@@ -3,7 +3,6 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getAlbum, getPhoto } from '../api';
 import { getCachedAlbum, setCachedAlbum } from '../album-cache';
-import { DecryptedImage } from './DecryptedImage';
 import { ReaderOverlay } from './ReaderOverlay';
 import {
   getReaderAnchorRatio,
@@ -29,19 +28,23 @@ import {
   saveAlbumMeta,
 } from './reader-store';
 import pLimit from 'p-limit';
-import { getSliceCount, reverseImageBySlice, getCachedImage, setCachedImage, generateImageCacheKey, type PhotoWithScrambleId } from '@tiny-client/shared';
+import { getProcessedPhotoImage, type PhotoWithScrambleId } from '@tiny-client/shared';
 import {
   accumulateBoundaryGesture,
   getBoundaryDirection,
   getChapterLandingPage,
   getDominantWheelDelta,
-  isCurrentChapterLoad,
   isLikelyTrackpadWheel,
   isMatchingChapterTransition,
   isScrollTargetReached,
   MOUSE_WHEEL_BOUNDARY_CONTRIBUTION,
   type ChapterDirection,
 } from './navigation';
+import {
+  evictResidentPageUrls,
+  estimateResidentImageBytes,
+  selectResidentPages,
+} from './residency';
 import {
   getPannedZoomTransform,
   getPinchZoomTransform,
@@ -111,6 +114,7 @@ type ActiveImageZoom = {
   scrollLeft: number;
   scrollTop: number;
   grouped: boolean;
+  pageIndexes: number[];
 };
 type PinchGesture = {
   startDistance: number;
@@ -122,8 +126,7 @@ type PanGesture = {
   initialTransform: ZoomTransform;
 };
 
-const PRELOAD_AHEAD = 10;
-const PRELOAD_PARALLEL = 5;
+const IMAGE_LOAD_PARALLEL = 2;
 const BOUNDARY_RESET_DELAY_MS = 2000;
 const CHAPTER_SWITCH_UNLOCK_DELAY_MS = 5000;
 const LANDING_ANCHOR_DELAY_MS = 5000;
@@ -155,55 +158,6 @@ function saveZoomElementStyle(element: HTMLElement): SavedZoomElementStyle {
 
 function restoreZoomElementStyle(element: HTMLElement, style: SavedZoomElementStyle) {
   Object.assign(element.style, style);
-}
-
-async function decryptImageWithRetry(url: string, photoId: string, scrambleId: number): Promise<ArrayBuffer | null> {
-  const filename = url.split('/').pop() ?? '';
-  const cacheKey = generateImageCacheKey(photoId, filename);
-
-  // Try IndexedDB cache first
-  const cached = await getCachedImage(cacheKey);
-  if (cached) return cached;
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const buffer = await res.arrayBuffer();
-      const slices = getSliceCount(scrambleId, parseInt(photoId), filename);
-      if (slices > 0) {
-        const reversed = await reverseImageBySlice(buffer, slices);
-        const jpeg = await convertToJpeg(reversed.data);
-        if (jpeg) { setCachedImage(cacheKey, jpeg); return jpeg; }
-        throw new Error('JPEG conversion failed');
-      }
-      const jpeg = await convertToJpeg(buffer);
-      if (jpeg) { setCachedImage(cacheKey, jpeg); return jpeg; }
-      throw new Error('JPEG conversion failed');
-    } catch {
-      await new Promise((r) => setTimeout(r, [400, 1000, 2000][attempt]));
-    }
-  }
-  return null;
-}
-
-function convertToJpeg(imageData: ArrayBuffer): Promise<ArrayBuffer | null> {
-  return new Promise((resolve) => {
-    try {
-      const blob = new Blob([imageData]);
-      createImageBitmap(blob).then((bitmap) => {
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(bitmap, 0, 0);
-        bitmap.close();
-        canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 }).then((jpegBlob) => {
-          jpegBlob.arrayBuffer().then(resolve);
-        });
-      }).catch(() => resolve(null));
-    } catch {
-      resolve(null);
-    }
-  });
 }
 
 export default function ReaderPage() {
@@ -266,6 +220,8 @@ export default function ReaderPage() {
   const [blobMap, setBlobMap] = useState<Map<number, string>>(new Map());
   const [pageAspectRatios, setPageAspectRatios] = useState<Map<number, number>>(new Map());
   const [isZoomed, setIsZoomed] = useState(false);
+  const [residencyRevision, setResidencyRevision] = useState(0);
+  const [failedPages, setFailedPages] = useState<Set<number>>(new Set());
 
   // ── boundary chapter-swap hint (pull past first/last page) ──
   const [hint, setHint] = useState<{ dir: 'prev' | 'next'; progress: number; chapterName: string } | null>(null);
@@ -293,8 +249,13 @@ export default function ReaderPage() {
   const switchingRef = useRef(false);
   const readerRootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const loadedSetRef = useRef(new Set<number>());
-  const inflightRef = useRef(new Set<number>());
+  const blobMapRef = useRef(blobMap);
+  const pageCostsRef = useRef(new Map<number, number>());
+  const desiredPagesRef = useRef(new Set<number>());
+  const visiblePagesRef = useRef(new Set<number>([0]));
+  const inflightRef = useRef(new Map<number, AbortController>());
+  const imageLoadLimitRef = useRef<ReturnType<typeof pLimit> | null>(null);
+  if (!imageLoadLimitRef.current) imageLoadLimitRef.current = pLimit(IMAGE_LOAD_PARALLEL);
   const wheelPagingLockRef = useRef(false);
   const wheelPagingTimerRef = useRef<number | null>(null);
   const programmaticPageTargetRef = useRef<number | null>(null);
@@ -315,9 +276,12 @@ export default function ReaderPage() {
   const zoomGestureMovedRef = useRef(false);
   const lastZoomTapRef = useRef<{ time: number; point: ZoomPoint } | null>(null);
   const suppressZoomClickUntilRef = useRef(0);
+  const snapshotUrlRef = useRef<string | null>(null);
+  const deferredSnapshotUrlsRef = useRef(new Set<string>());
 
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
+  blobMapRef.current = blobMap;
   pageAspectRatiosRef.current = pageAspectRatios;
   const isRTLRef = useRef(isRTL);
   isRTLRef.current = isRTL;
@@ -364,10 +328,10 @@ export default function ReaderPage() {
 
   const { data: photo } = useQuery({
     queryKey: ['photo', currentChapterId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const cached = await getCachedAlbum(currentChapterId);
       if (cached?.photo) return cached.photo;
-      const fetched = await getPhoto(currentChapterId);
+      const fetched = await getPhoto(currentChapterId, signal);
       if (fetched && album) {
         // Persist photo in IndexedDB under the chapter id so re-entry is instant.
         setCachedAlbum(currentChapterId, album, fetched);
@@ -378,12 +342,30 @@ export default function ReaderPage() {
     initialData: currentChapterId === mountAlbumIdRef.current ? initialPhotoRef.current : undefined,
   });
 
-  const images: PhotoWithScrambleId['images'] = photo?.images ?? [];
-  const imagesRef = useRef(images);
-  imagesRef.current = images;
+  const images: PhotoWithScrambleId['images'] = useMemo(() => photo?.images ?? [], [photo]);
   imagesCountRef.current = images.length;
-  const photoRef = useRef(photo);
-  photoRef.current = photo;
+
+  const commitBlobMap = useCallback((next: Map<number, string>) => {
+    blobMapRef.current = next;
+    setBlobMap(next);
+  }, []);
+
+  const revokeBlobUrl = useCallback((url: string) => {
+    if (snapshotUrlRef.current === url) {
+      deferredSnapshotUrlsRef.current.add(url);
+      return;
+    }
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const clearResidentImages = useCallback(() => {
+    for (const url of blobMapRef.current.values()) revokeBlobUrl(url);
+    commitBlobMap(new Map());
+    pageCostsRef.current.clear();
+    desiredPagesRef.current.clear();
+    for (const controller of inflightRef.current.values()) controller.abort();
+    inflightRef.current.clear();
+  }, [commitBlobMap, revokeBlobUrl]);
 
   // ─── navigation ──────────────────────────────────────────────────────────────
 
@@ -507,6 +489,17 @@ export default function ReaderPage() {
     return true;
   }, []);
 
+  useEffect(() => {
+    if (!snapshot || transitioning) return;
+    const snapshotUrl = snapshot.url;
+    const timer = window.setTimeout(() => {
+      setSnapshot((current) => current?.url === snapshotUrl ? null : current);
+      if (snapshotUrlRef.current === snapshotUrl) snapshotUrlRef.current = null;
+      if (deferredSnapshotUrlsRef.current.delete(snapshotUrl)) URL.revokeObjectURL(snapshotUrl);
+    }, 750);
+    return () => window.clearTimeout(timer);
+  }, [snapshot, transitioning]);
+
   const showBoundaryToast = useCallback((dir: ChapterDirection) => {
     if (toastTimerRef.current !== null) window.clearTimeout(toastTimerRef.current);
     setBoundaryToast(dir);
@@ -591,6 +584,7 @@ export default function ReaderPage() {
       zoomedRef.current = false;
       setIsZoomed(false);
     }
+    if (active) setResidencyRevision((value) => value + 1);
   }, [captureLayoutAnchor]);
 
   const getOrCreateActiveZoom = useCallback((midpoint: ZoomPoint) => {
@@ -639,20 +633,22 @@ export default function ReaderPage() {
           scrollLeft: container.scrollLeft,
           scrollTop: container.scrollTop,
           grouped: true,
+          pageIndexes,
         };
         zoomRef.current = active;
+        setResidencyRevision((value) => value + 1);
         return active;
       }
     }
 
-    let selected: { image: HTMLImageElement; page: HTMLElement } | null = null;
+    let selected: { image: HTMLImageElement; page: HTMLElement; pageIndex: number } | null = null;
     for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
       const page = pages[pageIndex];
       const image = page.querySelector('img');
       if (!image) continue;
       const rect = image.getBoundingClientRect();
       if (midpoint.x >= rect.left && midpoint.x <= rect.right && midpoint.y >= rect.top && midpoint.y <= rect.bottom) {
-        selected = { image, page };
+        selected = { image, page, pageIndex };
         break;
       }
     }
@@ -663,7 +659,7 @@ export default function ReaderPage() {
         const rect = page.getBoundingClientRect();
         if (midpoint.x < rect.left || midpoint.x > rect.right || midpoint.y < rect.top || midpoint.y > rect.bottom) continue;
         const image = page.querySelector('img');
-        if (image) selected = { image, page };
+        if (image) selected = { image, page, pageIndex };
         break;
       }
     }
@@ -690,6 +686,7 @@ export default function ReaderPage() {
       scrollLeft: container.scrollLeft,
       scrollTop: container.scrollTop,
       grouped: false,
+      pageIndexes: [selected.pageIndex],
     };
 
     selected.image.style.transformOrigin = '0 0';
@@ -699,6 +696,7 @@ export default function ReaderPage() {
     selected.page.style.position = 'relative';
     selected.page.style.zIndex = '2';
     zoomRef.current = active;
+    setResidencyRevision((value) => value + 1);
     return active;
   }, []);
 
@@ -934,8 +932,19 @@ export default function ReaderPage() {
     if (el) {
       const pageEl = el.children[currentPageRef.current] as HTMLElement | undefined;
       const img = pageEl?.querySelector('img') as HTMLImageElement | null;
+      const nextSnapshotUrl = img?.src || null;
+      const previousSnapshotUrl = snapshotUrlRef.current;
+      if (previousSnapshotUrl && previousSnapshotUrl !== nextSnapshotUrl) {
+        if (deferredSnapshotUrlsRef.current.delete(previousSnapshotUrl)) {
+          URL.revokeObjectURL(previousSnapshotUrl);
+        }
+      }
       if (img && img.src) {
+        snapshotUrlRef.current = img.src;
         setSnapshot({ url: img.src, w: img.naturalWidth || img.width || 1, h: img.naturalHeight || img.height || 1 });
+      } else {
+        snapshotUrlRef.current = null;
+        setSnapshot(null);
       }
     }
 
@@ -943,12 +952,13 @@ export default function ReaderPage() {
     cancelBoundaryHint();
     releaseLandingAnchor();
     clearProgrammaticPageTarget();
-    setBlobMap(new Map());
+    clearResidentImages();
     const emptyAspectRatios = new Map<number, number>();
     pageAspectRatiosRef.current = emptyAspectRatios;
     pendingAspectRatiosRef.current.clear();
     pendingLayoutAnchorRef.current = null;
     setPageAspectRatios(emptyAspectRatios);
+    setFailedPages(new Set());
     loadGenerationRef.current += 1;
     pendingNavigationRef.current = {
       chapterId: newChapterId,
@@ -959,8 +969,7 @@ export default function ReaderPage() {
     chapterIdRef.current = newChapterId;
     setCurrentChapterId(newChapterId);
     setReaderPage(typeof page === 'number' ? page : 0);
-    loadedSetRef.current = new Set();
-    inflightRef.current = new Set();
+    visiblePagesRef.current = new Set(typeof page === 'number' ? [page] : [0]);
 
     const chaptersToCarry = sortedChaptersRef.current;
     navigate(`/reader/${newChapterId}`, {
@@ -968,7 +977,7 @@ export default function ReaderPage() {
       state: { isSeries: chaptersToCarry.length > 1 || isSeries, seriesItems: chaptersToCarry, album },
     });
     return true;
-  }, [album, cancelBoundaryHint, clearProgrammaticPageTarget, isSeries, navigate, releaseLandingAnchor, resetZoom, setReaderPage]);
+  }, [album, cancelBoundaryHint, clearProgrammaticPageTarget, clearResidentImages, isSeries, navigate, releaseLandingAnchor, resetZoom, setReaderPage]);
 
   const switchAdjacentChapter = useCallback((dir: ChapterDirection) => {
     const offset = dir === 'next' ? 1 : -1;
@@ -1072,9 +1081,13 @@ export default function ReaderPage() {
     trackpadDeltaAccumRef.current = 0;
     wheelPagingLockRef.current = false;
     resetZoom();
+    clearResidentImages();
+    snapshotUrlRef.current = null;
+    for (const url of deferredSnapshotUrlsRef.current) URL.revokeObjectURL(url);
+    deferredSnapshotUrlsRef.current.clear();
     clearProgrammaticPageTarget();
     releaseLandingAnchor();
-  }, [clearProgrammaticPageTarget, releaseLandingAnchor, resetZoom]);
+  }, [clearProgrammaticPageTarget, clearResidentImages, releaseLandingAnchor, resetZoom]);
 
   const toggleDirection = useCallback(() => {
     resetZoom();
@@ -1112,70 +1125,93 @@ export default function ReaderPage() {
     saveLazyRenderRange(next);
   }, []);
 
-  // ─── preloader ───────────────────────────────────────────────────────────────
+  // ─── bounded resident image window ───────────────────────────────────────────
 
-  const preloadRange = useCallback((start: number) => {
-    const imgs = imagesRef.current;
-    if (imgs.length === 0) return;
-    const p = photoRef.current;
-    if (!p) return;
+  useEffect(() => {
+    if (!photo || photo.id !== currentChapterId || images.length === 0) return;
+
     const generation = loadGenerationRef.current;
-    const chapterId = p.id;
+    const chapterId = photo.id;
+    const selection = selectResidentPages({
+      pageCount: images.length,
+      currentPage,
+      visiblePages: visiblePagesRef.current,
+      pinnedPages: zoomRef.current?.pageIndexes ?? [],
+      prefetchRange: lazyRenderRange,
+      costs: pageCostsRef.current,
+    });
+    const desired = new Set(selection.pages);
+    desiredPagesRef.current = desired;
 
-    const end = Math.min(start + PRELOAD_AHEAD, imgs.length);
-    const toLoad: number[] = [];
-    for (let i = start; i < end; i++) {
-      if (!loadedSetRef.current.has(i) && !inflightRef.current.has(i)) {
-        toLoad.push(i);
-      }
+    const nextMap = evictResidentPageUrls(blobMapRef.current, desired, revokeBlobUrl);
+    if (nextMap !== blobMapRef.current) commitBlobMap(nextMap);
+
+    for (const [pageIndex, controller] of inflightRef.current) {
+      if (!desired.has(pageIndex)) controller.abort();
     }
-    if (toLoad.length === 0) return;
 
-    for (const idx of toLoad) inflightRef.current.add(idx);
+    for (const pageIndex of selection.pages) {
+      if (blobMapRef.current.has(pageIndex) || inflightRef.current.has(pageIndex) || failedPages.has(pageIndex)) continue;
+      const image = images[pageIndex];
+      if (!image) continue;
 
-    const limit = pLimit(PRELOAD_PARALLEL);
-    for (const idx of toLoad) {
-      limit(async () => {
+      const controller = new AbortController();
+      inflightRef.current.set(pageIndex, controller);
+      void imageLoadLimitRef.current!(async () => {
         try {
-          const img = imgs[idx];
-          const data = await decryptImageWithRetry(img.url, p.id, p.scrambleId);
-          if (!data) return;
+          if (controller.signal.aborted) return;
+          const processed = await getProcessedPhotoImage(photo, image, controller.signal);
+          if (
+            controller.signal.aborted
+            || generation !== loadGenerationRef.current
+            || chapterId !== chapterIdRef.current
+            || !desiredPagesRef.current.has(pageIndex)
+          ) return;
 
-          const blobUrl = URL.createObjectURL(new Blob([data], { type: 'image/jpeg' }));
-          if (!isCurrentChapterLoad({
-            generation,
-            currentGeneration: loadGenerationRef.current,
-            chapterId,
-            currentChapterId: chapterIdRef.current,
-          })) {
+          const blobUrl = URL.createObjectURL(new Blob([processed.data], { type: 'image/jpeg' }));
+          if (
+            controller.signal.aborted
+            || generation !== loadGenerationRef.current
+            || chapterId !== chapterIdRef.current
+            || !desiredPagesRef.current.has(pageIndex)
+          ) {
             URL.revokeObjectURL(blobUrl);
             return;
           }
-          setBlobMap((prev) => {
-            if (!isCurrentChapterLoad({
-              generation,
-              currentGeneration: loadGenerationRef.current,
-              chapterId,
-              currentChapterId: chapterIdRef.current,
-            })) {
-              URL.revokeObjectURL(blobUrl);
-              return prev;
-            }
-            if (prev.has(idx)) {
-              URL.revokeObjectURL(blobUrl);
-              return prev;
-            }
-            const next = new Map(prev);
-            next.set(idx, blobUrl);
-            return next;
-          });
-          loadedSetRef.current.add(idx);
+
+          pageCostsRef.current.set(
+            pageIndex,
+            estimateResidentImageBytes(processed.width, processed.height, processed.byteLength),
+          );
+          recordPageDimensions(chapterId, pageIndex, processed.width, processed.height);
+
+          if (blobMapRef.current.has(pageIndex)) {
+            URL.revokeObjectURL(blobUrl);
+            return;
+          }
+          const updated = new Map(blobMapRef.current);
+          updated.set(pageIndex, blobUrl);
+          commitBlobMap(updated);
+        } catch (error) {
+          if (!controller.signal.aborted && generation === loadGenerationRef.current) {
+            console.error(`加载第 ${pageIndex + 1} 页失败:`, error);
+            setFailedPages((current) => {
+              const updated = new Set(current);
+              updated.add(pageIndex);
+              return updated;
+            });
+          }
         } finally {
-          if (generation === loadGenerationRef.current) inflightRef.current.delete(idx);
+          if (inflightRef.current.get(pageIndex) === controller) {
+            inflightRef.current.delete(pageIndex);
+            if (generation === loadGenerationRef.current) {
+              setResidencyRevision((value) => value + 1);
+            }
+          }
         }
       });
     }
-  }, []);
+  }, [commitBlobMap, currentChapterId, currentPage, failedPages, images, lazyRenderRange, photo, recordPageDimensions, residencyRevision, revokeBlobUrl]);
 
   // ── photo-ready: resolve the chapter-scoped target, then scroll and unlock ──
   useEffect(() => {
@@ -1209,9 +1245,9 @@ export default function ReaderPage() {
     }
 
     pending.resolvedPage = targetPage;
+    visiblePagesRef.current = new Set([targetPage]);
     setReaderPage(targetPage);
     setLandingAnchor(currentChapterId, targetPage);
-    preloadRange(targetPage);
 
     const el = containerRef.current;
     if (!el) {
@@ -1252,11 +1288,6 @@ export default function ReaderPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo, currentChapterId, images.length]);
 
-  useEffect(() => {
-    if (images.length === 0) return;
-    preloadRange(currentPage);
-  }, [currentPage, preloadRange, images.length]);
-
   // ─── one-shot: restore last-read chapter within the series ─────────────────
   const initialChapterRestoreDoneRef = useRef(false);
   useEffect(() => {
@@ -1274,6 +1305,31 @@ export default function ReaderPage() {
   }, [sortedChapters]);
 
   // ─── scroll observer (page detection only, no snap) ────────────────────────
+
+  const updateVisiblePages = useCallback((container: HTMLDivElement) => {
+    const horizontal = isRTLRef.current;
+    const viewportStart = horizontal ? container.scrollLeft : container.scrollTop;
+    const viewportEnd = viewportStart + (horizontal ? container.clientWidth : container.clientHeight);
+    const next = new Set<number>();
+    const count = Math.min(imagesCountRef.current, container.children.length);
+    for (let pageIndex = 0; pageIndex < count; pageIndex++) {
+      const page = container.children[pageIndex] as HTMLElement;
+      const pageStart = horizontal ? page.offsetLeft : page.offsetTop;
+      const pageEnd = pageStart + (horizontal ? page.offsetWidth : page.offsetHeight);
+      if (pageEnd > viewportStart && pageStart < viewportEnd) next.add(pageIndex);
+    }
+    if (next.size === 0 && count > 0) next.add(Math.max(0, Math.min(count - 1, currentPageRef.current)));
+
+    const previous = visiblePagesRef.current;
+    if (previous.size === next.size && [...next].every((page) => previous.has(page))) return;
+    visiblePagesRef.current = next;
+    setResidencyRevision((value) => value + 1);
+  }, []);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (container) updateVisiblePages(container);
+  }, [direction, pageAspectRatios, seamlessMode, updateVisiblePages]);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -1302,6 +1358,7 @@ export default function ReaderPage() {
     const onScroll = () => {
       const children = el.children;
       if (children.length === 0) return;
+      updateVisiblePages(el);
       if (isHorizontal) {
         if (pendingNavigationRef.current !== null) return;
         const programmaticTarget = programmaticPageTargetRef.current;
@@ -1341,13 +1398,19 @@ export default function ReaderPage() {
     };
 
     el.addEventListener('scroll', onScroll, { passive: true });
+    updateVisiblePages(el);
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => updateVisiblePages(el));
+    resizeObserver?.observe(el);
 
     return () => {
       clearHorizontalSnapTimer();
+      resizeObserver?.disconnect();
       el.removeEventListener('scroll', onScroll);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length, autoSnap, seamlessMode]);
+  }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length, autoSnap, seamlessMode, updateVisiblePages]);
 
   useEffect(() => {
     if (!currentChapterId || images.length === 0) return;
@@ -1660,8 +1723,14 @@ export default function ReaderPage() {
       ? 'block w-full h-auto max-h-full object-contain'
       : 'block h-auto w-full object-contain';
 
-  const lazyRenderStart = Math.max(0, currentPage - lazyRenderRange);
-  const lazyRenderEnd = Math.min(images.length - 1, currentPage + lazyRenderRange);
+  const loadingPages = new Set(selectResidentPages({
+    pageCount: images.length,
+    currentPage,
+    visiblePages: visiblePagesRef.current,
+    pinnedPages: zoomRef.current?.pageIndexes ?? [],
+    prefetchRange: lazyRenderRange,
+    costs: pageCostsRef.current,
+  }).pages);
 
   return (
     <div
@@ -1673,7 +1742,7 @@ export default function ReaderPage() {
       <div ref={containerRef} className="h-full w-full" style={scrollDivStyle}>
         {images.map((img, i) => {
           const url = blobMap.get(i);
-          const shouldRenderImage = i >= lazyRenderStart && i <= lazyRenderEnd;
+          const shouldRenderImage = loadingPages.has(i);
           return (
             <div
               key={img.name}
@@ -1694,27 +1763,16 @@ export default function ReaderPage() {
                   className={imgCls}
                   onLoad={(event) => handleImageLoad(photo.id, i, event.currentTarget)}
                 />
-              ) : !shouldRenderImage ? (
-                <div className={`relative overflow-hidden bg-gray-900/60 ${imgCls}`}>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur-sm">
-                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-500/70 border-t-white" />
-                    </div>
-                  </div>
-                </div>
               ) : (
-                <DecryptedImage
-                  image={img}
-                  photo={photo}
-                  className={imgCls}
-                  onLoad={(blobUrl, imageElement) => {
-                    if (chapterIdRef.current !== photo.id) return;
-                    recordPageDimensions(photo.id, i, imageElement.naturalWidth, imageElement.naturalHeight);
-                    loadedSetRef.current.add(i);
-                    inflightRef.current.delete(i);
-                    setBlobMap((prev) => { const next = new Map(prev); if (!next.has(i)) next.set(i, blobUrl); return next; });
-                  }}
-                />
+                <div className="relative h-full w-full overflow-hidden bg-gray-900/60">
+                  {shouldRenderImage && !failedPages.has(i) && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur-sm">
+                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-500/70 border-t-white" />
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           );

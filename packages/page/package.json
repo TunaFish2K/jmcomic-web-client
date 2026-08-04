@@ -11,7 +11,7 @@
         "icons:generate": "node ./scripts/generate-icons.mjs",
         "test:client": "tsx ./test/client.ts",
         "test:icons": "tsx --test ./test/icon-assets.test.ts",
-        "test:reader": "tsx --test ./test/reader-layout.test.ts ./test/reader-navigation.test.ts ./test/reader-store.test.ts ./test/reader-zoom.test.ts",
+        "test:reader": "tsx --test ./test/reader-layout.test.ts ./test/reader-navigation.test.ts ./test/reader-residency.test.ts ./test/reader-store.test.ts ./test/reader-zoom.test.ts",
         "test:theme": "tsx --test ./test/theme.test.ts"
     },
     "dependencies": {
@@ -21,11 +21,9 @@
         "@tiny-client/shared": "workspace:*",
         "crypto-js": "^4.2.0",
         "embla-carousel-react": "^8.6.0",
-        "fflate": "^0.8.2",
         "framer-motion": "^12.34.0",
         "lucide-react": "^0.564.0",
         "p-limit": "^7.3.0",
-        "pdf-lib": "^1.17.1",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
         "react-router-dom": "^7.13.0",
