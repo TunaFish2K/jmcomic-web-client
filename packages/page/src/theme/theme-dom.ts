@@ -5,6 +5,7 @@ import {
   resolveThemeMode,
   type ThemePreferences,
 } from './theme';
+import { updateFavicon } from './favicon';
 
 function systemPrefersDark() {
   return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -20,6 +21,7 @@ export function applyThemeToRoot(preferences: ThemePreferences, systemDark = sys
   root.dataset.accent = preferences.accent.kind === 'preset' ? preferences.accent.id : 'custom';
   root.style.setProperty('--theme-accent', accentColor);
   root.style.setProperty('--theme-accent-foreground', getAccentForeground(accentColor));
+  updateFavicon(document, accentColor, resolvedMode);
   return resolvedMode;
 }
 

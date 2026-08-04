@@ -17,6 +17,14 @@ import {
   THEME_STORAGE_KEY,
   type ThemeStorage,
 } from '../src/theme/theme';
+import {
+  APP_ICON_PATH,
+  createFaviconDataUrl,
+  createFaviconSvg,
+  ensureFaviconContrast,
+  getFaviconPalette,
+  updateFavicon,
+} from '../src/theme/favicon';
 
 class MemoryStorage implements ThemeStorage {
   private values = new Map<string, string>();
@@ -114,5 +122,43 @@ describe('theme preferences', () => {
       const foreground = getAccentForeground(color);
       assert.ok(getContrastRatio(color, foreground) >= 4.5, `${color} should contrast with ${foreground}`);
     }
+  });
+
+  it('uses the resolved theme as the favicon background', () => {
+    assert.equal(getFaviconPalette('#00DD99', 'light').backgroundColor, '#FFFFFF');
+    assert.equal(getFaviconPalette('#00DD99', 'dark').backgroundColor, '#000000');
+  });
+
+  it('keeps contrasting favicon accents and adjusts only when needed', () => {
+    assert.equal(ensureFaviconContrast('#00DD99', '#000000'), '#00DD99');
+
+    const lightMark = ensureFaviconContrast('#00DD99', '#FFFFFF');
+    const darkMark = ensureFaviconContrast('#001122', '#000000');
+    assert.notEqual(lightMark, '#00DD99');
+    assert.notEqual(darkMark, '#001122');
+    assert.ok(getContrastRatio(lightMark, '#FFFFFF') >= 4.5);
+    assert.ok(getContrastRatio(darkMark, '#000000') >= 4.5);
+  });
+
+  it('creates a data URL with the fixed geometric mark', () => {
+    const svg = createFaviconSvg('#E85D75', 'dark');
+    assert.match(svg, new RegExp(APP_ICON_PATH));
+    assert.match(svg, /fill="#000000"/);
+    assert.ok(createFaviconDataUrl('#E85D75', 'dark').startsWith('data:image/svg+xml,'));
+  });
+
+  it('updates the favicon link when the active theme changes', () => {
+    let href = '';
+    const documentNode = {
+      getElementById: () => ({
+        setAttribute: (name: string, value: string) => {
+          if (name === 'href') href = value;
+        },
+      }),
+    } as unknown as Document;
+
+    updateFavicon(documentNode, '#00DD99', 'light');
+    assert.match(decodeURIComponent(href), /fill="#FFFFFF"/);
+    assert.match(decodeURIComponent(href), /fill="#00(?:[0-9A-F]{4})"/);
   });
 });

@@ -8,7 +8,9 @@
         "build": "vite build",
         "lint": "eslint .",
         "preview": "vite preview",
+        "icons:generate": "node ./scripts/generate-icons.mjs",
         "test:client": "tsx ./test/client.ts",
+        "test:icons": "tsx --test ./test/icon-assets.test.ts",
         "test:reader": "tsx --test ./test/reader-navigation.test.ts",
         "test:theme": "tsx --test ./test/theme.test.ts"
     },
@@ -47,6 +49,7 @@
         "eslint-plugin-react-refresh": "^0.4.24",
         "globals": "^16.5.0",
         "prettier": "^3.8.1",
+        "sharp": "^0.34.5",
         "tailwindcss": "^4.0.0",
         "tsx": "^4.21.0",
         "typescript": "~5.9.3",
