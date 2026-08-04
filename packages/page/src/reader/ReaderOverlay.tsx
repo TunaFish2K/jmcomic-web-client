@@ -71,12 +71,10 @@ function BoundaryHint({
   hint,
   boundaryToast,
   direction,
-  onDismiss,
 }: {
   hint: { dir: 'prev' | 'next'; progress: number; chapterName: string } | null;
   boundaryToast: 'prev' | 'next' | null;
   direction: ReadingDirection;
-  onDismiss: () => void;
 }) {
   const isVertical = direction === 'top-down';
 
@@ -94,14 +92,14 @@ function BoundaryHint({
   const pct = Math.round(hint.progress * 100);
   const label = hint.dir === 'prev' ? '上一章' : '下一章';
   const Arrow = isVertical
-    ? (hint.dir === 'prev' ? ChevronUp : ChevronDown)
-    : (hint.dir === 'prev' ? ChevronLeft : ChevronRight);
+    ? (hint.dir === 'prev' ? ChevronDown : ChevronUp)
+    : (hint.dir === 'prev' ? ChevronRight : ChevronLeft);
   const hint2 = isVertical
-    ? (hint.dir === 'prev' ? '继续向上滑进入' : '继续向下滑进入')
-    : (hint.dir === 'prev' ? '继续向左滑进入' : '继续向右滑进入');
+    ? (hint.dir === 'prev' ? '继续向下拉进入' : '继续向上拉进入')
+    : (hint.dir === 'prev' ? '继续向右拉进入' : '继续向左拉进入');
 
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center" onClick={onDismiss}>
+    <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center">
       <div
         className="flex flex-col items-center gap-2 bg-gray-900/85 backdrop-blur-md rounded-2xl shadow-2xl px-6 py-5 ring-1 ring-white/10 transition-all pointer-events-none"
         style={{ opacity: Math.max(0.25, hint.progress), transform: `scale(${0.92 + hint.progress * 0.08})` }}
@@ -266,8 +264,6 @@ export function ReaderOverlay({
   isZoomed,
   onToggleVisibility,
   onClose,
-  onPrevPage,
-  onNextPage,
   onPrevChapter,
   onNextChapter,
   onGoToChapter,
@@ -279,7 +275,6 @@ export function ReaderOverlay({
   onResetZoom,
   onScrollByInputStep,
   onSeekPage,
-  onBoundaryDismiss,
 }: {
   visible: boolean;
   title: string;
@@ -302,8 +297,6 @@ export function ReaderOverlay({
   isZoomed: boolean;
   onToggleVisibility: () => void;
   onClose: () => void;
-  onPrevPage: () => void;
-  onNextPage: () => void;
   onPrevChapter: () => void;
   onNextChapter: () => void;
   onGoToChapter: (id: string) => void;
@@ -315,7 +308,6 @@ export function ReaderOverlay({
   onResetZoom: () => void;
   onScrollByInputStep: (step: number) => void;
   onSeekPage?: (page: number) => void;
-  onBoundaryDismiss: () => void;
 }) {
   const [showChapterDrawer, setShowChapterDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -430,7 +422,6 @@ export function ReaderOverlay({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  const isVertical = direction === 'top-down';
   const isHorizontalBar = barSide === 'bottom';
 
   return (
@@ -446,7 +437,7 @@ export function ReaderOverlay({
       )}
 
       {(hint || boundaryToast) && (
-        <BoundaryHint hint={hint} boundaryToast={boundaryToast} direction={direction} onDismiss={onBoundaryDismiss} />
+        <BoundaryHint hint={hint} boundaryToast={boundaryToast} direction={direction} />
       )}
 
       {visible && showSettings && (
@@ -569,13 +560,6 @@ export function ReaderOverlay({
       </div>
       )}
 
-      {!isVertical && (
-        <div className={`absolute inset-0 z-10 flex transition-opacity duration-300 ${visible || isZoomed ? 'pointer-events-none' : 'pointer-events-auto'}`}>
-          <div className="w-1/3 h-full" onClick={onPrevPage} />
-          <div className="w-1/3 h-full" onClick={onToggleVisibility} />
-          <div className="w-1/3 h-full" onClick={onNextPage} />
-        </div>
-      )}
     </>
   );
 }

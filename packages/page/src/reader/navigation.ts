@@ -2,7 +2,28 @@ export type ChapterDirection = 'prev' | 'next';
 
 export const SCROLL_EDGE_TOLERANCE_PX = 2;
 export const BOUNDARY_SWITCH_THRESHOLD = 60;
+export const TOUCH_BOUNDARY_DIRECTION_LOCK_PX = 6;
 export const MOUSE_WHEEL_BOUNDARY_CONTRIBUTION = BOUNDARY_SWITCH_THRESHOLD;
+
+export type BoundaryPullIntent = 'pending' | 'inward' | 'outward';
+
+export function classifyBoundaryPull({
+  direction,
+  axisDelta,
+  lockThreshold = TOUCH_BOUNDARY_DIRECTION_LOCK_PX,
+}: {
+  direction: ChapterDirection;
+  axisDelta: number;
+  lockThreshold?: number;
+}): { intent: BoundaryPullIntent; distance: number } {
+  const outwardDistance = direction === 'prev' ? axisDelta : -axisDelta;
+  const intent = outwardDistance >= lockThreshold
+    ? 'outward'
+    : outwardDistance <= -lockThreshold
+      ? 'inward'
+      : 'pending';
+  return { intent, distance: Math.max(0, outwardDistance) };
+}
 
 export function getBoundaryDirection({
   position,

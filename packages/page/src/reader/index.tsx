@@ -31,6 +31,8 @@ import pLimit from 'p-limit';
 import { getProcessedPhotoImage, type PhotoWithScrambleId } from '@tiny-client/shared';
 import {
   accumulateBoundaryGesture,
+  BOUNDARY_SWITCH_THRESHOLD,
+  classifyBoundaryPull,
   getBoundaryDirection,
   getChapterLandingPage,
   getDominantWheelDelta,
@@ -124,6 +126,13 @@ type PinchGesture = {
 type PanGesture = {
   startPoint: ZoomPoint;
   initialTransform: ZoomTransform;
+};
+type BoundaryTouchTracking = {
+  boundaryDir: ChapterDirection;
+  startX: number;
+  startY: number;
+  distance: number;
+  lockedOutward: boolean;
 };
 
 const IMAGE_LOAD_PARALLEL = 2;
@@ -233,7 +242,7 @@ export default function ReaderPage() {
   const boundaryDirectionRef = useRef<ChapterDirection | null>(null);
   const boundaryTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
-  const touchTrackingRef = useRef<{ boundaryDir: 'prev' | 'next'; startX: number; startY: number; startScroll: number; distance: number } | null>(null);
+  const touchTrackingRef = useRef<BoundaryTouchTracking | null>(null);
 
   // ── chapter-transition snapshot (keeps last page visible while switching) ──
   const [snapshot, setSnapshot] = useState<{ url: string; w: number; h: number } | null>(null);
@@ -278,7 +287,7 @@ export default function ReaderPage() {
   const pageAspectRatiosRef = useRef(pageAspectRatios);
   const zoomGestureMovedRef = useRef(false);
   const lastZoomTapRef = useRef<{ time: number; point: ZoomPoint } | null>(null);
-  const suppressZoomClickUntilRef = useRef(0);
+  const suppressReaderClickUntilRef = useRef(0);
   const snapshotUrlRef = useRef<string | null>(null);
   const deferredSnapshotUrlsRef = useRef(new Set<string>());
 
@@ -794,7 +803,7 @@ export default function ReaderPage() {
         touchTrackingRef.current = null;
         cancelBoundaryHint();
         zoomGestureMovedRef.current = false;
-        suppressZoomClickUntilRef.current = Date.now() + 500;
+        suppressReaderClickUntilRef.current = Date.now() + 500;
         return;
       }
 
@@ -829,7 +838,7 @@ export default function ReaderPage() {
           currentDistance: getPointDistance(first, second),
         });
         zoomGestureMovedRef.current = true;
-        suppressZoomClickUntilRef.current = Date.now() + 500;
+        suppressReaderClickUntilRef.current = Date.now() + 500;
         applyZoomTransform(transform);
         return;
       }
@@ -840,7 +849,7 @@ export default function ReaderPage() {
       event.preventDefault();
       const currentPoint = pointFromTouch(event.touches[0]);
       if (getPointDistance(panGesture.startPoint, currentPoint) > 3) zoomGestureMovedRef.current = true;
-      suppressZoomClickUntilRef.current = Date.now() + 500;
+      suppressReaderClickUntilRef.current = Date.now() + 500;
       applyZoomTransform(getPannedZoomTransform({
         initialTransform: panGesture.initialTransform,
         imageRect: active.contentRect,
@@ -880,7 +889,7 @@ export default function ReaderPage() {
         const now = Date.now();
         const previous = lastZoomTapRef.current;
         if (previous && now - previous.time <= 300 && getPointDistance(previous.point, point) <= 32) {
-          suppressZoomClickUntilRef.current = now + 500;
+          suppressReaderClickUntilRef.current = now + 500;
           resetZoom();
           return;
         }
@@ -1063,12 +1072,6 @@ export default function ReaderPage() {
   const triggerChapterSwitch = useCallback((dir: ChapterDirection) => {
     switchAdjacentChapter(dir);
   }, [switchAdjacentChapter]);
-
-  const onBoundaryDismiss = useCallback(() => {
-    cancelBoundaryHint();
-    if (toastTimerRef.current !== null) { window.clearTimeout(toastTimerRef.current); toastTimerRef.current = null; }
-    setBoundaryToast(null);
-  }, [cancelBoundaryHint]);
 
   useEffect(() => () => {
     loadGenerationRef.current += 1;
@@ -1557,10 +1560,14 @@ export default function ReaderPage() {
     const el = containerRef.current;
     if (!el) return;
 
+    const cancelTouchTracking = () => {
+      touchTrackingRef.current = null;
+      cancelBoundaryHint();
+    };
+
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 1 || zoomRef.current) {
-        touchTrackingRef.current = null;
-        if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+        cancelTouchTracking();
         return;
       }
       clearProgrammaticPageTarget();
@@ -1570,23 +1577,24 @@ export default function ReaderPage() {
       if (!metrics) return;
       const atPrev = getBoundaryDirection({ ...metrics, step: -1 }) === 'prev';
       const atNext = getBoundaryDirection({ ...metrics, step: 1 }) === 'next';
-      if (!atPrev && !atNext) return;
+      if (!atPrev && !atNext) {
+        touchTrackingRef.current = null;
+        return;
+      }
+      cancelBoundaryHint();
       releaseLandingAnchor();
       touchTrackingRef.current = {
         boundaryDir: atPrev ? 'prev' : 'next',
         startX: t.clientX,
         startY: t.clientY,
-        startScroll: metrics.position,
         distance: 0,
+        lockedOutward: false,
       };
-      boundaryAccumRef.current = 0;
-      boundaryDirectionRef.current = null;
     };
 
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 1 || zoomRef.current) {
-        touchTrackingRef.current = null;
-        if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+        cancelTouchTracking();
         return;
       }
       const tr = touchTrackingRef.current;
@@ -1596,18 +1604,30 @@ export default function ReaderPage() {
       const stillAtBoundary = metrics
         ? getBoundaryDirection({ ...metrics, step: tr.boundaryDir === 'next' ? 1 : -1 }) === tr.boundaryDir
         : false;
-      if (!stillAtBoundary) { touchTrackingRef.current = null; cancelBoundaryHint(); return; }
+      if (!stillAtBoundary) {
+        cancelTouchTracking();
+        return;
+      }
 
       const t = e.touches[0];
-      let raw: number;
-      if (isRTLRef.current) {
-        raw = tr.boundaryDir === 'prev' ? t.clientX - tr.startX : tr.startX - t.clientX;
-      } else {
-        raw = tr.boundaryDir === 'prev' ? t.clientY - tr.startY : tr.startY - t.clientY;
+      const axisDelta = isRTLRef.current ? t.clientX - tr.startX : t.clientY - tr.startY;
+      const pull = classifyBoundaryPull({ direction: tr.boundaryDir, axisDelta });
+      if (!tr.lockedOutward) {
+        if (pull.intent === 'pending') return;
+        suppressReaderClickUntilRef.current = Date.now() + 500;
+        if (pull.intent === 'inward') {
+          cancelTouchTracking();
+          return;
+        }
+        tr.lockedOutward = true;
       }
-      const distance = Math.max(0, raw);
-      tr.distance = distance;
-      const progress = Math.min(1, distance / 60);
+      if (pull.intent === 'inward') {
+        cancelTouchTracking();
+        return;
+      }
+
+      tr.distance = pull.distance;
+      const progress = Math.min(1, pull.distance / BOUNDARY_SWITCH_THRESHOLD);
       const hasChapter = tr.boundaryDir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
       if (!hasChapter) {
         // no chapter: don't show progress hint, just a toast (already shown on threshold pass)
@@ -1619,14 +1639,16 @@ export default function ReaderPage() {
 
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length > 0 || zoomRef.current) {
-        touchTrackingRef.current = null;
-        if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
+        cancelTouchTracking();
         return;
       }
       const tr = touchTrackingRef.current;
       touchTrackingRef.current = null;
-      if (!tr) return;
-      const progress = Math.min(1, tr.distance / 60);
+      if (!tr?.lockedOutward) {
+        cancelBoundaryHint();
+        return;
+      }
+      const progress = Math.min(1, tr.distance / BOUNDARY_SWITCH_THRESHOLD);
       if (progress >= 1) {
         const hasChapter = tr.boundaryDir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
         if (hasChapter) {
@@ -1641,22 +1663,24 @@ export default function ReaderPage() {
       }
     };
 
+    const onTouchCancel = () => cancelTouchTracking();
+
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: true });
     el.addEventListener('touchend', onTouchEnd, { passive: true });
-    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchCancel, { passive: true });
     return () => {
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
-      el.removeEventListener('touchcancel', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchCancel);
     };
   }, [photo, clearProgrammaticPageTarget, getScrollMetrics, releaseLandingAnchor, showBoundaryToast, cancelBoundaryHint, triggerChapterSwitch]);
 
-  // ── click-to-flip overlay (click left/right edges for RTL, top/bottom for vertical) ──
+  // ── click-to-flip handling (touch scrolling stays on the reader container) ──
 
   const handleFlipClick = useCallback((e: React.MouseEvent) => {
-    if (Date.now() < suppressZoomClickUntilRef.current) return;
+    if (Date.now() < suppressReaderClickUntilRef.current) return;
     if (zoomedRef.current) {
       if (!showUI) setShowUI(true);
       return;
@@ -1742,7 +1766,7 @@ export default function ReaderPage() {
       style={{ touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y') }}
     >
       <style>{`::-webkit-scrollbar { display: none; }`}</style>
-      <div ref={containerRef} className="h-full w-full" style={scrollDivStyle}>
+      <div ref={containerRef} className="h-full w-full" style={scrollDivStyle} onClick={handleFlipClick}>
         {images.map((img, i) => {
           const url = blobMap.get(i);
           const shouldRenderImage = loadingPages.has(i);
@@ -1781,11 +1805,6 @@ export default function ReaderPage() {
           );
         })}
       </div>
-
-      {/* click-to-flip zone — only active when UI hidden */}
-      {!showUI && (
-        <div className="absolute inset-0 z-10" onClick={handleFlipClick} />
-      )}
 
       {/* chapter-switch transition overlay — keeps the last page visible until the new chapter is ready */}
       {snapshot && (
@@ -1829,8 +1848,6 @@ export default function ReaderPage() {
         isZoomed={isZoomed}
         onToggleVisibility={() => setShowUI((v) => !v)}
         onClose={() => navigate(-1)}
-        onPrevPage={goPrevPage}
-        onNextPage={goNextPage}
         onPrevChapter={goPrevChapter}
         onNextChapter={goNextChapter}
         onGoToChapter={goToChapter}
@@ -1842,7 +1859,6 @@ export default function ReaderPage() {
         onResetZoom={resetZoom}
         onScrollByInputStep={scrollByInputStep}
         onSeekPage={seekPage}
-        onBoundaryDismiss={onBoundaryDismiss}
       />
     </div>
   );

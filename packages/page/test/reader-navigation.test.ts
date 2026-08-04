@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   accumulateBoundaryGesture,
+  classifyBoundaryPull,
   getBoundaryDirection,
   getChapterLandingPage,
   getDominantWheelDelta,
@@ -10,6 +11,7 @@ import {
   isMatchingChapterTransition,
   isScrollTargetReached,
   MOUSE_WHEEL_BOUNDARY_CONTRIBUTION,
+  TOUCH_BOUNDARY_DIRECTION_LOCK_PX,
 } from '../src/reader/navigation';
 
 describe('reader navigation', () => {
@@ -25,6 +27,45 @@ describe('reader navigation', () => {
     assert.equal(getBoundaryDirection({ position: 1.5, maxPosition: 800, step: -1 }), 'prev');
     assert.equal(getBoundaryDirection({ position: 798.5, maxPosition: 800, step: 1 }), 'next');
     assert.equal(getBoundaryDirection({ position: 3, maxPosition: 800, step: -1 }), null);
+  });
+
+  it('keeps inward horizontal swipes available for normal page turns', () => {
+    assert.deepEqual(classifyBoundaryPull({ direction: 'prev', axisDelta: -30 }), {
+      intent: 'inward',
+      distance: 0,
+    });
+    assert.deepEqual(classifyBoundaryPull({ direction: 'next', axisDelta: 30 }), {
+      intent: 'inward',
+      distance: 0,
+    });
+  });
+
+  it('locks only outward pulls for adjacent chapter navigation', () => {
+    assert.deepEqual(classifyBoundaryPull({ direction: 'prev', axisDelta: 30 }), {
+      intent: 'outward',
+      distance: 30,
+    });
+    assert.deepEqual(classifyBoundaryPull({ direction: 'next', axisDelta: -30 }), {
+      intent: 'outward',
+      distance: 30,
+    });
+  });
+
+  it('ignores boundary pull jitter before the direction lock threshold', () => {
+    assert.deepEqual(classifyBoundaryPull({
+      direction: 'prev',
+      axisDelta: TOUCH_BOUNDARY_DIRECTION_LOCK_PX - 1,
+    }), {
+      intent: 'pending',
+      distance: TOUCH_BOUNDARY_DIRECTION_LOCK_PX - 1,
+    });
+    assert.deepEqual(classifyBoundaryPull({
+      direction: 'next',
+      axisDelta: -(TOUCH_BOUNDARY_DIRECTION_LOCK_PX - 1),
+    }), {
+      intent: 'pending',
+      distance: TOUCH_BOUNDARY_DIRECTION_LOCK_PX - 1,
+    });
   });
 
   it('keeps a programmatic page target until the smooth scroll reaches it', () => {
