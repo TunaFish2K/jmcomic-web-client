@@ -109,8 +109,8 @@ html.dark input:-webkit-autofill:active {
 .search-input-group::after {
     position: absolute;
     z-index: 20;
-    inset: 0;
-    border-radius: inherit;
+    inset: 2px;
+    border-radius: calc(var(--field-radius, 12px) - 2px) 0 0 calc(var(--field-radius, 12px) - 2px);
     pointer-events: none;
     content: "";
     transition: box-shadow 150ms var(--ease-out);
