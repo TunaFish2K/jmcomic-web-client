@@ -3,11 +3,19 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const releaseMetadata = {
+  commit: process.env.CF_PAGES_COMMIT_SHA?.trim() || 'local',
+  branch: process.env.CF_PAGES_BRANCH?.trim() || 'local',
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  // Keep recovery assets outside both cache namespaces poisoned by earlier workers.
+  // Isolate recovery assets from the legacy namespaces implicated in the incident.
   build: {
     assetsDir: 'assets-v3',
+  },
+  define: {
+    __APP_RELEASE_ID__: JSON.stringify(releaseMetadata.commit),
   },
   plugins: [
     react({
@@ -16,6 +24,16 @@ export default defineConfig({
       },
     }),
     tailwindcss(),
+    {
+      name: 'release-metadata',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'release.json',
+          source: `${JSON.stringify(releaseMetadata, null, 2)}\n`,
+        })
+      },
+    },
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: null,
@@ -24,34 +42,14 @@ export default defineConfig({
         globPatterns: ['pwa-cache-cleanup-v3.txt'],
         navigateFallback: null,
         inlineWorkboxRuntime: true,
+        cleanupOutdatedCaches: true,
         manifestTransforms: [
           async (entries) => ({
-            manifest: entries.filter((entry) => entry.url === 'pwa-cache-cleanup-v3.txt'),
+            manifest: entries.filter(
+              (entry) => entry.url === 'pwa-cache-cleanup-v3.txt',
+            ),
             warnings: [],
           }),
-        ],
-        // API calls to the backend worker are always network-only
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) =>
-              url.pathname.startsWith('/search') ||
-              url.pathname.startsWith('/album') ||
-              url.pathname.startsWith('/photo') ||
-              url.pathname.startsWith('/batch-album'),
-            handler: 'NetworkOnly',
-          },
-          // Cover images: cache-first, 7-day expiry, max 500 entries
-          {
-            urlPattern: ({ request }) => request.destination === 'image',
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'cover-images',
-              expiration: {
-                maxEntries: 500,
-                maxAgeSeconds: 60 * 60 * 24 * 7,
-              },
-            },
-          },
         ],
       },
     }),

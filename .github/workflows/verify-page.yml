@@ -1,0 +1,38 @@
+name: Verify Page
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "recovery/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-page-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-page:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @tiny-client/page exec playwright install --with-deps chromium firefox
+      - run: pnpm --filter @tiny-client/page run lint
+      - run: pnpm run page:build
+      - run: pnpm --filter @tiny-client/page test
+      - run: pnpm --filter @tiny-client/page run test:browser
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: page-test-results
+          path: packages/page/test-results
+          if-no-files-found: ignore

@@ -29,6 +29,8 @@ Worker 不代理图片文件。排查图片问题时，应分别检查 Worker �
 | 名称 | 使用位置 | 是否必需 | 说明 |
 | --- | --- | --- | --- |
 | `VITE_BACKEND_URL` | 前端构建和开发服务器 | 是 | Worker 的完整基础地址。根目录的 `pnpm run dev` 会自动将其设置为 `http://localhost:8787`。 |
+| `CF_PAGES_COMMIT_SHA` | Cloudflare Pages 构建 | 自动注入 | 写入 `/release.json` 的生产提交 ID。本地构建使用 `local`。 |
+| `CF_PAGES_BRANCH` | Cloudflare Pages 构建 | 自动注入 | 写入 `/release.json` 的部署分支。本地构建使用 `local`。 |
 | `CF_API_TOKEN` | GitHub Actions Secret | 自动部署时必需 | 工作流将其映射为 Wrangler 使用的 `CLOUDFLARE_API_TOKEN`。 |
 | `CF_ACCOUNT_ID` | GitHub Actions Secret | 自动部署时必需 | 工作流将其映射为 Wrangler 使用的 `CLOUDFLARE_ACCOUNT_ID`。 |
 | `CLOUDFLARE_API_TOKEN` | 本地 shell | 可选 | 不使用 `wrangler login` 时，可以通过该变量向 Wrangler 提供令牌。 |
@@ -68,6 +70,8 @@ Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker �
 | `pnpm run worker:dev` | 在 `0.0.0.0:8787` 启动本地 Worker。 |
 | `pnpm run worker:deploy` | 使用 Wrangler 部署 Worker。 |
 | `pnpm --filter @tiny-client/page run lint` | 检查前端 TypeScript 和 React 代码。 |
+| `pnpm --filter @tiny-client/page test` | 运行前端单元测试和构建产物测试。必须先构建前端。 |
+| `pnpm --filter @tiny-client/page run test:browser` | 使用 Playwright 验证旧 PWA 升级和搜索栏状态。必须先构建前端并安装浏览器。 |
 | `pnpm --filter @tiny-client/worker exec vitest run` | 运行 Worker 单元测试一次。 |
 | `pnpm run test:integration` | 启动 Worker，并对实时上游服务执行集成测试。 |
 | `pnpm --filter @tiny-client/page run test:client` | 直接连接实时上游服务，检查共享客户端。 |
@@ -130,7 +134,9 @@ Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker �
 | Worker 搜索客户端 | Worker 实例内存 | 60 秒 |
 | Worker 作品数据 | Cloudflare KV | 配置 `ALBUM_CACHE_KV` 后保存 1 小时 |
 
-PWA 会预缓存前端静态资源。搜索、作品和章节接口使用网络请求，因此不能依赖 PWA 缓存离线访问这些接口。
+Service Worker 不缓存或代理 HTML、CSS、JavaScript、API 和图片。它只保留一个无业务内容的清理标记，用于删除事故前的 Workbox 应用壳缓存。PWA 启动和页面导航依赖网络，应用数据和已处理图片只通过上表中的 IndexedDB 缓存持久化。
+
+`/release.json` 包含当前 Pages 构建的提交和分支。该文件、HTML、manifest 和 `/sw.js` 都必须使用 `no-store`。hash 资源位于 `/assets-v3`，恢复期间每次使用前必须重验证。
 
 ## 测试建议
 
@@ -148,26 +154,41 @@ pnpm --filter @tiny-client/page run lint
 pnpm run page:build
 ```
 
-3. 修改阅读器或主题后，运行对应的前端测试。
+3. 运行全部前端测试。
+
+```bash
+pnpm --filter @tiny-client/page test
+```
+
+4. 修改 PWA、搜索栏或发布配置后，运行浏览器测试。
+
+```bash
+pnpm --filter @tiny-client/page exec playwright install chromium firefox
+pnpm --filter @tiny-client/page run test:browser
+```
+
+浏览器测试会先安装一个持有旧应用壳和损坏 CSS 的 Worker，再在同一 origin 切换到当前构建。测试必须确认客户端无需清缓存即可恢复，并且不会无限刷新。
+
+5. 修改阅读器或主题后，运行对应的前端测试。
 
 ```bash
 pnpm --filter @tiny-client/page run test:reader
 pnpm --filter @tiny-client/page run test:theme
 ```
 
-4. 修改 Worker 后，运行 Worker 单元测试。
+6. 修改 Worker 后，运行 Worker 单元测试。
 
 ```bash
 pnpm --filter @tiny-client/worker exec vitest run
 ```
 
-5. 修改接口或上游客户端后，运行集成测试。
+7. 修改接口或上游客户端后，运行集成测试。
 
 ```bash
 pnpm run test:integration
 ```
 
-项目当前没有自动化浏览器界面测试。修改搜索、阅读器或下载交互后，还应在桌面和移动端浏览器中手动检查对应流程。
+Playwright 覆盖 Chromium、Firefox 和移动端 Chromium 视口。它不能替代真实 iOS Safari、iOS PWA 和 Android PWA 验收；修改触控或 PWA 生命周期后，仍要在真机检查。
 
 阅读器触控改动至少应在 iOS Safari、iOS PWA、Android Chrome 和 Android PWA 中检查双指缩放、单指拖动和缩放复位。左右与上下阅读方向都要覆盖以下四种组合：
 

@@ -9,7 +9,9 @@
         "lint": "eslint .",
         "preview": "vite preview",
         "icons:generate": "node ./scripts/generate-icons.mjs",
+        "test": "tsx --test ./test/*.test.ts",
         "test:album-cache": "tsx --test ./test/album-cache.test.ts",
+        "test:browser": "playwright test",
         "test:client": "tsx ./test/client.ts",
         "test:icons": "tsx --test ./test/icon-assets.test.ts",
         "test:pwa": "tsx --test ./test/pwa-update.test.ts",
@@ -31,11 +33,11 @@
         "react-router-dom": "^7.13.0",
         "set-cookie-parser": "^3.0.1",
         "tailwind-merge": "^3.4.0",
-        "tailwind-variants": "^3.2.2",
-        "workbox-window": "^7.4.0"
+        "tailwind-variants": "^3.2.2"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.1",
+        "@playwright/test": "^1.62.1",
         "@tailwindcss/vite": "^4.1.18",
         "@types/crypto-js": "^4.2.2",
         "@types/node": "^24.10.1",

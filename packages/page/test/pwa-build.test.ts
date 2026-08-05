@@ -20,6 +20,11 @@ interface WebAppManifest {
   }>;
 }
 
+interface ReleaseMetadata {
+  commit?: string;
+  branch?: string;
+}
+
 const distDirectory = fileURLToPath(new URL('../dist/', import.meta.url));
 
 async function readDistFile(filename: string) {
@@ -48,7 +53,7 @@ describe('PWA build output', () => {
     }
   });
 
-  it('uses a self-contained worker only to remove poisoned app-shell caches', async () => {
+  it('uses a self-contained worker only to remove legacy app-shell caches', async () => {
     const serviceWorker = await readDistFile('sw.js');
 
     assert.match(serviceWorker, /skipWaiting\(\)/);
@@ -56,6 +61,9 @@ describe('PWA build output', () => {
     assert.doesNotMatch(serviceWorker, /importScripts\(/);
     assert.doesNotMatch(serviceWorker, /assets-v[23]\//);
     assert.doesNotMatch(serviceWorker, /pdfkit\.standalone-/);
+    assert.doesNotMatch(serviceWorker, /cover-images/);
+    assert.doesNotMatch(serviceWorker, /\/(?:search|album|photo|batch-album)/);
+    assert.doesNotMatch(serviceWorker, /createHandlerBoundToURL\("index\.html"\)/);
 
     const precachedUrls = [...serviceWorker.matchAll(/url:"([^"]+)"/g)].map((match) => match[1]);
     assert.deepEqual(precachedUrls, ['pwa-cache-cleanup-v3.txt']);
@@ -68,7 +76,18 @@ describe('PWA build output', () => {
     assert.ok(!emittedFiles.some((file) => /^workbox-.*\.js$/.test(file)));
   });
 
-  it('keeps generated assets outside the poisoned legacy cache namespace', async () => {
+  it('emits uncached release metadata without adding it to the worker cache', async () => {
+    const release = JSON.parse(await readDistFile('release.json')) as ReleaseMetadata;
+    const serviceWorker = await readDistFile('sw.js');
+
+    assert.equal(typeof release.commit, 'string');
+    assert.ok(release.commit);
+    assert.equal(typeof release.branch, 'string');
+    assert.ok(release.branch);
+    assert.doesNotMatch(serviceWorker, /release\.json/);
+  });
+
+  it('keeps generated assets outside the legacy cache namespace', async () => {
     const html = await readDistFile('index.html');
     const generatedAssetUrls = [...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)].map(
       (match) => match[1],
@@ -87,6 +106,9 @@ describe('PWA build output', () => {
 
     assert.match(headers, /\/sw\.js\s+Cache-Control: no-cache, no-store, must-revalidate/);
     assert.match(headers, /\/manifest\.webmanifest\s+Cache-Control: no-cache, no-store, must-revalidate/);
+    assert.match(headers, /\/release\.json\s+Cache-Control: no-cache, no-store, must-revalidate/);
+    assert.match(headers, /^\/\s+Cache-Control: no-cache, no-store, must-revalidate/m);
+    assert.match(headers, /\/reader\/\*\s+Cache-Control: no-cache, no-store, must-revalidate/);
     assert.match(headers, /\/assets-v3\/\*\s+Cache-Control: public, max-age=0, must-revalidate/);
     assert.doesNotMatch(headers, /\/assets\/\*/);
     assert.doesNotMatch(headers, /immutable/);

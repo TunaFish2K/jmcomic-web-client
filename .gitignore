@@ -175,6 +175,10 @@ dist
 
 .vscode-test
 
+# Browser test output
+packages/page/playwright-report/
+packages/page/test-results/
+
 # yarn v2
 
 .yarn/cache

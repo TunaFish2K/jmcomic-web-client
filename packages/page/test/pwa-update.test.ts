@@ -11,17 +11,10 @@ class FakeUpdateEnvironment implements PwaUpdateEnvironment {
   currentTime = 0;
   online = true;
   visible = true;
-  fetchCalls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-  fetchImplementation: PwaUpdateEnvironment['fetch'] = async () => new Response(null, { status: 200 });
   intervals = new Map<number, () => void>();
   onlineListeners = new Set<() => void>();
   visibilityListeners = new Set<() => void>();
   private nextIntervalId = 1;
-
-  fetch(input: RequestInfo | URL, init?: RequestInit) {
-    this.fetchCalls.push({ input, init });
-    return this.fetchImplementation(input, init);
-  }
 
   now() {
     return this.currentTime;
@@ -76,9 +69,11 @@ class FakeUpdateRegistration implements PwaUpdateRegistration {
   installing: ServiceWorker | null = null;
   waiting: ServiceWorker | null = null;
   updateCalls = 0;
+  updateImplementation: () => Promise<unknown> = async () => undefined;
 
   async update() {
     this.updateCalls++;
+    return this.updateImplementation();
   }
 }
 
@@ -87,31 +82,24 @@ function flushAsyncWork() {
 }
 
 describe('PWA update checks', () => {
-  it('checks with a fresh request after the minimum gap', async () => {
+  it('checks the registration after the minimum gap', async () => {
     const environment = new FakeUpdateEnvironment();
     const registration = new FakeUpdateRegistration();
-    const controller = startPwaUpdateChecks({ swUrl: '/sw.js', registration, environment });
+    const controller = startPwaUpdateChecks({ registration, environment });
 
     await controller.checkForUpdate();
-    assert.equal(environment.fetchCalls.length, 0);
+    assert.equal(registration.updateCalls, 0);
 
     environment.advance(PWA_UPDATE_MIN_GAP_MS);
     await controller.checkForUpdate();
 
-    assert.equal(environment.fetchCalls.length, 1);
-    assert.equal(environment.fetchCalls[0].input, '/sw.js');
-    assert.equal(environment.fetchCalls[0].init?.cache, 'no-store');
-    assert.deepEqual(environment.fetchCalls[0].init?.headers, {
-      cache: 'no-store',
-      'cache-control': 'no-cache',
-    });
     assert.equal(registration.updateCalls, 1);
   });
 
   it('checks when connectivity returns and when a visible app resumes', async () => {
     const environment = new FakeUpdateEnvironment();
     const registration = new FakeUpdateRegistration();
-    startPwaUpdateChecks({ swUrl: '/sw.js', registration, environment });
+    startPwaUpdateChecks({ registration, environment });
 
     environment.emitOnline();
     await flushAsyncWork();
@@ -133,7 +121,6 @@ describe('PWA update checks', () => {
     const environment = new FakeUpdateEnvironment();
     const registration = new FakeUpdateRegistration();
     const controller = startPwaUpdateChecks({
-      swUrl: '/sw.js',
       registration,
       environment,
       minGapMs: 0,
@@ -152,7 +139,6 @@ describe('PWA update checks', () => {
     registration.waiting = {} as ServiceWorker;
     await controller.checkForUpdate(true);
 
-    assert.equal(environment.fetchCalls.length, 0);
     assert.equal(registration.updateCalls, 0);
   });
 
@@ -160,12 +146,11 @@ describe('PWA update checks', () => {
     const environment = new FakeUpdateEnvironment();
     const registration = new FakeUpdateRegistration();
     const errors: unknown[] = [];
-    let resolveFetch: ((response: Response) => void) | undefined;
-    environment.fetchImplementation = () => new Promise((resolve) => {
-      resolveFetch = resolve;
+    let resolveUpdate: (() => void) | undefined;
+    registration.updateImplementation = () => new Promise((resolve) => {
+      resolveUpdate = resolve;
     });
     const controller = startPwaUpdateChecks({
-      swUrl: '/sw.js',
       registration,
       environment,
       onError: (error) => errors.push(error),
@@ -173,12 +158,12 @@ describe('PWA update checks', () => {
 
     const first = controller.checkForUpdate(true);
     const second = controller.checkForUpdate(true);
-    assert.equal(environment.fetchCalls.length, 1);
-    resolveFetch?.(new Response(null, { status: 200 }));
+    assert.equal(registration.updateCalls, 1);
+    resolveUpdate?.();
     await Promise.all([first, second]);
     assert.equal(registration.updateCalls, 1);
 
-    environment.fetchImplementation = async () => {
+    registration.updateImplementation = async () => {
       throw new Error('offline');
     };
     await controller.checkForUpdate(true);
@@ -189,7 +174,7 @@ describe('PWA update checks', () => {
   it('stops timers and listeners when disposed', async () => {
     const environment = new FakeUpdateEnvironment();
     const registration = new FakeUpdateRegistration();
-    const controller = startPwaUpdateChecks({ swUrl: '/sw.js', registration, environment });
+    const controller = startPwaUpdateChecks({ registration, environment });
 
     controller.dispose();
     controller.dispose();
@@ -202,6 +187,6 @@ describe('PWA update checks', () => {
     assert.equal(environment.intervals.size, 0);
     assert.equal(environment.onlineListeners.size, 0);
     assert.equal(environment.visibilityListeners.size, 0);
-    assert.equal(environment.fetchCalls.length, 0);
+    assert.equal(registration.updateCalls, 0);
   });
 });

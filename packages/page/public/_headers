@@ -1,16 +1,19 @@
 /
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: no-cache, no-store, must-revalidate
 
 /index.html
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: no-cache, no-store, must-revalidate
 
 /reader/*
-  Cache-Control: public, max-age=0, must-revalidate
+  Cache-Control: no-cache, no-store, must-revalidate
 
 /sw.js
   Cache-Control: no-cache, no-store, must-revalidate
 
 /manifest.webmanifest
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/release.json
   Cache-Control: no-cache, no-store, must-revalidate
 
 /assets-v3/*

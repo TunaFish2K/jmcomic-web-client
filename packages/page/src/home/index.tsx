@@ -1,5 +1,5 @@
 import { useState, useRef, createContext, useContext, useCallback, useEffect, useMemo } from "react";
-import { Button, InputGroup, Select, ListBox, FieldError } from "@heroui/react";
+import { Button, InputGroup, Select, ListBox } from "@heroui/react";
 import { SearchIcon, ChevronDown, ChevronUp, X, Download, FileArchive, FileText, BookOpen, RefreshCw } from "lucide-react";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { search, getPhoto, getBatchAlbum, getBatchPhoto } from "../api";
@@ -1300,6 +1300,8 @@ export default function Home() {
                                     name="query"
                                     value={query}
                                     onChange={handleQueryChange}
+                                    aria-describedby={queryError ? "search-query-error" : undefined}
+                                    aria-invalid={!!queryError}
                                     className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
                                 />
                             </InputGroup>
@@ -1316,7 +1318,11 @@ export default function Home() {
                                     : <SearchIcon size={18} />}
                             </Button>
                         </div>
-                        {queryError && <FieldError className="mt-1 ml-1">{queryError}</FieldError>}
+                        {queryError && (
+                            <p id="search-query-error" role="alert" className="field-error mt-1 ml-1" data-visible="true">
+                                {queryError}
+                            </p>
+                        )}
 
                         {/* sort & time */}
                         <div className="flex gap-2 mt-2 items-center">

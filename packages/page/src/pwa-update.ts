@@ -8,7 +8,6 @@ export interface PwaUpdateRegistration {
 }
 
 export interface PwaUpdateEnvironment {
-  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   now(): number;
   isOnline(): boolean;
   isVisible(): boolean;
@@ -24,7 +23,6 @@ export interface PwaUpdateController {
 }
 
 export interface StartPwaUpdateChecksOptions {
-  swUrl: string;
   registration: PwaUpdateRegistration;
   environment?: PwaUpdateEnvironment;
   intervalMs?: number;
@@ -34,7 +32,6 @@ export interface StartPwaUpdateChecksOptions {
 
 export function createBrowserPwaUpdateEnvironment(): PwaUpdateEnvironment {
   return {
-    fetch: window.fetch.bind(window),
     now: Date.now,
     isOnline: () => navigator.onLine,
     isVisible: () => document.visibilityState === 'visible',
@@ -52,7 +49,6 @@ export function createBrowserPwaUpdateEnvironment(): PwaUpdateEnvironment {
 }
 
 export function startPwaUpdateChecks({
-  swUrl,
   registration,
   environment = createBrowserPwaUpdateEnvironment(),
   intervalMs = PWA_UPDATE_INTERVAL_MS,
@@ -64,25 +60,20 @@ export function startPwaUpdateChecks({
   let lastAttemptAt = environment.now();
 
   const checkForUpdate = (force = false) => {
-    if (disposed || !environment.isOnline() || registration.installing || registration.waiting) {
-      return Promise.resolve();
-    }
-    if (!force && environment.now() - lastAttemptAt < minGapMs) {
+    if (disposed || !environment.isOnline()) {
       return Promise.resolve();
     }
     if (currentCheck) return currentCheck;
+    if (registration.installing || registration.waiting)
+      return Promise.resolve();
+    if (!force && environment.now() - lastAttemptAt < minGapMs) {
+      return Promise.resolve();
+    }
 
     lastAttemptAt = environment.now();
     currentCheck = (async () => {
       try {
-        const response = await environment.fetch(swUrl, {
-          cache: 'no-store',
-          headers: {
-            cache: 'no-store',
-            'cache-control': 'no-cache',
-          },
-        });
-        if (response.ok) await registration.update();
+        await registration.update();
       } catch (error) {
         onError(error);
       } finally {
