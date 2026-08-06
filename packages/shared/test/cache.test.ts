@@ -58,4 +58,14 @@ describe('image cache v2 metadata', () => {
         await cache.clearAllCache();
         assert.deepEqual(await cache.getCacheStats(), { count: 0, totalSize: 0 });
     });
+
+    it('generates distinct cover cache keys per album and file', async () => {
+        const cache = await import('../src/cache');
+        const a = cache.generateCoverCacheKey('123', 'https://cdn.example/path/cover.jpg');
+        const b = cache.generateCoverCacheKey('123', 'https://cdn.example/path/cover_thumb.jpg');
+        const c = cache.generateCoverCacheKey('456', 'https://cdn.example/path/cover.jpg');
+        assert.equal(a, 'cover/123/cover.jpg');
+        assert.notEqual(a, b);
+        assert.notEqual(a, c);
+    });
 });

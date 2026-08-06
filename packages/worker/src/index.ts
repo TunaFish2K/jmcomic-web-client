@@ -1,6 +1,7 @@
 import { getClientDataAndCreateClient, getDomainsFromDomainServer } from '@tiny-client/shared/client';
 import { DOMAIN_SERVER_URL, SEARCH_PAGE_SIZE } from '@tiny-client/shared/constants';
 import { assertDistinctSearchResult, selectFirstDistinctSearchResult } from './search';
+import { SearchResultCache, SEARCH_RESULT_CACHE_TTL_MS } from './search-cache';
 
 const BATCH_PHOTO_MAX_IDS = 20;
 const BATCH_ALBUM_MAX_IDS = 15;
@@ -45,6 +46,12 @@ function setCachedSearchClient(key: string, context: ClientContext) {
 	searchClientCache.set(key, { context, ts: Date.now() });
 }
 
+// ─── Search result cache ─────────────────────────────────────────
+// Caches the final search result (post duplicate-guard) per query+page so
+// repeated pagination round-trips don't hammer upstream. Short TTL: search
+// results change often. Warmup still runs on the first (miss) request.
+const searchResultCache = new SearchResultCache<unknown>();
+
 // ─── KV-backed persistent cache (L2) ─────────────────────────────
 const KV_CACHE_PREFIX = 'album:';
 const KV_CACHE_TTL_SECONDS = 3600;
@@ -82,6 +89,16 @@ const corsHeaders = {
 	'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
 	'Access-Control-Allow-Headers': '*',
 };
+
+// Add a short browser-side Cache-Control TTL to responses whose payload is
+// already cached server-side (in-memory / KV). Static resources are excluded
+// on purpose: the PWA recovery strategy requires no-cache for those.
+function withCacheHeaders(ttlSeconds: number): Record<string, string> {
+	return {
+		...corsHeaders,
+		'Cache-Control': `public, max-age=${ttlSeconds}`,
+	};
+}
 
 class UpstreamError extends Error {
 	stage: WorkerBatchErrorStage;
@@ -269,6 +286,13 @@ export default {
 				};
 				const duplicateGuardIds = searchOptions.page > 1 ? previousIds : [];
 
+				// ── Search result cache (short TTL) ───────────────────
+				const resultCacheKey = `search:${query}:${searchOptions.mainTag}:${searchOptions.orderBy}:${searchOptions.time}:${searchOptions.page}`;
+				const cachedResult = searchResultCache.get(resultCacheKey);
+				if (cachedResult !== undefined) {
+					return Response.json(cachedResult, { headers: withCacheHeaders(30) });
+				}
+
 				// Reuse the same upstream client so pagination keeps its domain and cookie.
 				const sessionKey = `search:${query}:${searchOptions.mainTag}:${searchOptions.orderBy}:${searchOptions.time}`;
 				const cachedContext = getCachedSearchClient(sessionKey);
@@ -313,6 +337,8 @@ export default {
 					}
 				}
 
+				searchResultCache.set(resultCacheKey, result);
+
 				// ── Warmup: prefetch album data in background ──────
 				if (url.searchParams.get('warmup') === '1') {
 					const sr = result as any;
@@ -351,7 +377,7 @@ export default {
 					}
 				}
 
-				return Response.json(result, { headers: corsHeaders });
+				return Response.json(result, { headers: withCacheHeaders(30) });
 			}
 
 			if (url.pathname.startsWith('/album/')) {
@@ -455,7 +481,7 @@ export default {
 			}
 
 			if (remainingIds.length === 0) {
-				return Response.json(cached, { headers: corsHeaders });
+				return Response.json(cached, { headers: withCacheHeaders(60) });
 			}
 
 			// getClient() is called once but its failure is caught per-item so one bad
@@ -495,7 +521,7 @@ export default {
 				}
 			}
 
-			return Response.json([...cached, ...freshResults], { headers: corsHeaders });
+			return Response.json([...cached, ...freshResults], { headers: withCacheHeaders(60) });
 		}
 
 			return new Response('Not found', { status: 404, headers: corsHeaders });

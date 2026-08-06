@@ -244,6 +244,15 @@ export function generateImageCacheKey(photoId: string, imageName: string): strin
     return `${photoId}/${imageName}`;
 }
 
+// Cover images are stored separately from reader photos: the stored bytes are
+// the *unscrambled* JPEG so a cache hit skips both the fetch and the
+// reverse-by-slice work. Keyed by albumId + filename to keep re-uploaded
+// covers distinct.
+export function generateCoverCacheKey(albumId: string, coverUrl: string): string {
+    const filename = coverUrl.split('/').pop() ?? 'cover';
+    return `cover/${albumId}/${filename}`;
+}
+
 export async function clearAllCache(): Promise<void> {
     try {
         const database = await openDB();

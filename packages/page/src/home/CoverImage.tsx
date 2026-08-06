@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getSliceCount, reverseImageBySlice } from "@tiny-client/shared";
+import { generateCoverCacheKey, getCachedImageEntry, setCachedImage } from "@tiny-client/shared/cache";
 import pLimit from "p-limit";
 
 // Global concurrency limiter for cover image fetches (shared across all CoverImage instances)
@@ -19,7 +20,25 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
         let created: string | null = null;
         setObjectUrl(null);
         setFailed(false);
+        const cacheKey = generateCoverCacheKey(albumId, coverUrl);
+
+        const render = (data: ArrayBuffer) => {
+            const blob = new Blob([data], { type: 'image/jpeg' });
+            created = URL.createObjectURL(blob);
+            if (!cancelled) {
+                setObjectUrl(created);
+                setFailed(false);
+            }
+        };
+
         coverLimit(async () => {
+            const cached = await getCachedImageEntry(cacheKey);
+            if (cancelled) return;
+            if (cached) {
+                render(cached.data);
+                return;
+            }
+
             const RETRY_DELAYS = [400, 1000, 2000];
             for (let attempt = 0; attempt <= RETRY_DELAYS.length && !cancelled; attempt++) {
                 try {
@@ -31,12 +50,8 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
                     const { data } = slices > 0
                         ? await reverseImageBySlice(buffer, slices)
                         : { data: buffer };
-                    const blob = new Blob([data], { type: 'image/jpeg' });
-                    created = URL.createObjectURL(blob);
-                    if (!cancelled) {
-                        setObjectUrl(created);
-                        setFailed(false);
-                    }
+                    setCachedImage(cacheKey, data).catch(() => {});
+                    render(data);
                     return;
                 } catch {
                     if (cancelled) return;

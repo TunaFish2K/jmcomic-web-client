@@ -73,6 +73,7 @@ describe('worker routes', () => {
 
 		const response = await SELF.fetch(`https://example.com/batch-album?ids=${albumId}`);
 		expect(response.status).toBe(200);
+		expect(response.headers.get('cache-control')).toBe('public, max-age=60');
 
 		const body = (await response.json()) as Array<{ albumId: string; album: { name: string } | null }>;
 		expect(body).toHaveLength(1);

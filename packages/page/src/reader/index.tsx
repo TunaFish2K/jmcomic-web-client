@@ -54,6 +54,7 @@ import {
   type ZoomPoint,
   type ZoomTransform,
 } from './zoom';
+import { PageOffsetCache, computeVisiblePageIndexes, findCenterPage, findPageAtCenter } from './page-geometry';
 import {
   BOUNDARY_RESET_DELAY_MS,
   CHAPTER_SWITCH_UNLOCK_DELAY_MS,
@@ -138,6 +139,7 @@ export default function ReaderPage() {
   const switchingRef = useRef(false);
   const readerRootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pageOffsetCacheRef = useRef(new PageOffsetCache());
   const blobMapRef = useRef(blobMap);
   const pageCostsRef = useRef(new Map<number, number>());
   const desiredPagesRef = useRef(new Set<number>());
@@ -289,22 +291,13 @@ export default function ReaderPage() {
     const center = isRTLRef.current
       ? el.scrollLeft + el.clientWidth / 2
       : el.scrollTop + el.clientHeight / 2;
-    let pageIndex = 0;
-    let bestDistance = Infinity;
-    for (let index = 0; index < pages.length; index++) {
-      const page = pages[index];
-      const start = isRTLRef.current ? page.offsetLeft : page.offsetTop;
-      const size = isRTLRef.current ? page.offsetWidth : page.offsetHeight;
-      const distance = center < start ? start - center : center > start + size ? center - start - size : 0;
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        pageIndex = index;
-      }
-    }
+    const horizontal = isRTLRef.current;
+    const cache = pageOffsetCacheRef.current;
+    const pageIndex = findPageAtCenter(pages.length, center, (index) => cache.get(index, pages[index], horizontal)) ?? 0;
 
     const page = pages[pageIndex];
-    const start = isRTLRef.current ? page.offsetLeft : page.offsetTop;
-    const size = Math.max(isRTLRef.current ? page.offsetWidth : page.offsetHeight, 1);
+    const start = horizontal ? page.offsetLeft : page.offsetTop;
+    const size = Math.max(horizontal ? page.offsetWidth : page.offsetHeight, 1);
     return {
       pageIndex,
       offsetRatio: getReaderAnchorRatio(center, start, size),
@@ -1175,14 +1168,10 @@ export default function ReaderPage() {
     const horizontal = isRTLRef.current;
     const viewportStart = horizontal ? container.scrollLeft : container.scrollTop;
     const viewportEnd = viewportStart + (horizontal ? container.clientWidth : container.clientHeight);
-    const next = new Set<number>();
     const count = Math.min(imagesCountRef.current, container.children.length);
-    for (let pageIndex = 0; pageIndex < count; pageIndex++) {
-      const page = container.children[pageIndex] as HTMLElement;
-      const pageStart = horizontal ? page.offsetLeft : page.offsetTop;
-      const pageEnd = pageStart + (horizontal ? page.offsetWidth : page.offsetHeight);
-      if (pageEnd > viewportStart && pageStart < viewportEnd) next.add(pageIndex);
-    }
+    const cache = pageOffsetCacheRef.current;
+    const getOffset = (pageIndex: number) => cache.get(pageIndex, container.children[pageIndex] as HTMLElement, horizontal);
+    const next = computeVisiblePageIndexes(count, viewportStart, viewportEnd, getOffset);
     if (next.size === 0 && count > 0) next.add(Math.max(0, Math.min(count - 1, currentPageRef.current)));
 
     const previous = visiblePagesRef.current;
@@ -1193,6 +1182,7 @@ export default function ReaderPage() {
 
   useLayoutEffect(() => {
     const container = containerRef.current;
+    pageOffsetCacheRef.current.invalidate();
     if (container) updateVisiblePages(container);
   }, [direction, pageAspectRatios, seamlessMode, updateVisiblePages]);
 
@@ -1236,13 +1226,9 @@ export default function ReaderPage() {
           clearProgrammaticPageTarget();
         }
         const center = el.scrollLeft + el.clientWidth / 2;
-        let best = 0, bestDist = Infinity;
-        for (let i = 0; i < children.length; i++) {
-          const child = children[i] as HTMLElement;
-          const mid = child.offsetLeft + child.offsetWidth / 2;
-          const dist = Math.abs(center - mid);
-          if (dist < bestDist) { bestDist = dist; best = i; }
-        }
+        const cache = pageOffsetCacheRef.current;
+        const getOffset = (i: number) => cache.get(i, children[i] as HTMLElement, true);
+        const best = findCenterPage(children.length, center, getOffset) ?? currentPageRef.current;
         if (best !== currentPageRef.current) setReaderPage(best);
         if (shouldSettleHorizontal) {
           clearHorizontalSnapTimer();
@@ -1251,22 +1237,22 @@ export default function ReaderPage() {
       } else {
         if (pendingNavigationRef.current !== null) return;
         const center = el.scrollTop + el.clientHeight / 2;
-        let best = 0, bestDist = Infinity;
-        for (let i = 0; i < children.length; i++) {
-          const child = children[i] as HTMLElement;
-          const mid = child.offsetTop + child.offsetHeight / 2;
-          const dist = Math.abs(center - mid);
-          if (dist < bestDist) { bestDist = dist; best = i; }
-        }
+        const cache = pageOffsetCacheRef.current;
+        const getOffset = (i: number) => cache.get(i, children[i] as HTMLElement, false);
+        const best = findCenterPage(children.length, center, getOffset) ?? currentPageRef.current;
         if (best !== currentPageRef.current) setReaderPage(best);
       }
     };
 
     el.addEventListener('scroll', onScroll, { passive: true });
+    pageOffsetCacheRef.current.invalidate();
     updateVisiblePages(el);
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? null
-      : new ResizeObserver(() => updateVisiblePages(el));
+      : new ResizeObserver(() => {
+          pageOffsetCacheRef.current.invalidate();
+          updateVisiblePages(el);
+        });
     resizeObserver?.observe(el);
 
     return () => {

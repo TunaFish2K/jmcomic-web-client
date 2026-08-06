@@ -5,7 +5,8 @@
     ".": "./src/index.ts",
     "./client": "./src/client.ts",
     "./data": "./src/data.ts",
-    "./constants": "./src/constants.ts"
+    "./constants": "./src/constants.ts",
+    "./cache": "./src/cache.ts"
   },
   "type": "module",
   "scripts": {
