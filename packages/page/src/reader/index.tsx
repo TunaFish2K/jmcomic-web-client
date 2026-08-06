@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { getAlbum, getPhoto } from '../api';
-import { getCachedAlbum, setCachedAlbum } from '../album-cache';
 import { ReaderOverlay } from './ReaderOverlay';
 import {
   getReaderAnchorRatio,
   getReaderAnchorScrollPosition,
   getReaderInteractionPolicy,
-  getReaderPageStyle,
 } from './layout';
 import type { ReadingDirection } from './reader-store';
 import {
@@ -24,11 +20,9 @@ import {
   saveLazyRenderRange,
   getBarSide,
   saveReadingProgress,
-  getAlbumMeta,
-  saveAlbumMeta,
 } from './reader-store';
 import pLimit from 'p-limit';
-import { getProcessedPhotoImage, type PhotoWithScrambleId } from '@tiny-client/shared';
+import { getProcessedPhotoImage } from '@tiny-client/shared';
 import {
   accumulateBoundaryGesture,
   BOUNDARY_SWITCH_THRESHOLD,
@@ -58,169 +52,53 @@ import {
   IDENTITY_ZOOM_TRANSFORM,
   ZOOM_RESET_EPSILON,
   type ZoomPoint,
-  type ZoomRect,
   type ZoomTransform,
 } from './zoom';
-
-function parseSeriesOrder(value: string | number | undefined) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
-}
-
-type ChapterInfo = { id: string; name: string; order: number };
-type PendingNavigation = {
-  chapterId: string;
-  requestedPage: number | 'last' | null;
-  resolvedPage: number | null;
-  transitionId: number | null;
-};
-type LandingAnchor = { chapterId: string; page: number };
-type ReaderLayoutAnchor = {
-  pageIndex: number;
-  offsetRatio: number;
-  snapToStart: boolean;
-};
-type SavedZoomElementStyle = {
-  transform: string;
-  transformOrigin: string;
-  willChange: string;
-  position: string;
-  zIndex: string;
-  width: string;
-  height: string;
-  minWidth: string;
-  minHeight: string;
-  maxWidth: string;
-  maxHeight: string;
-  flex: string;
-  flexBasis: string;
-  aspectRatio: string;
-};
-type ZoomTarget = {
-  element: HTMLElement;
-  rect: ZoomRect;
-  style: SavedZoomElementStyle;
-};
-type ZoomLayer = {
-  element: HTMLElement;
-  position: string;
-  zIndex: string;
-};
-type ActiveImageZoom = {
-  targets: ZoomTarget[];
-  layers: ZoomLayer[];
-  contentRect: ZoomRect;
-  viewportRect: ZoomRect;
-  transform: ZoomTransform;
-  scrollLeft: number;
-  scrollTop: number;
-  grouped: boolean;
-  pageIndexes: number[];
-};
-type PinchGesture = {
-  startDistance: number;
-  startMidpoint: ZoomPoint;
-  initialTransform: ZoomTransform;
-};
-type PanGesture = {
-  startPoint: ZoomPoint;
-  initialTransform: ZoomTransform;
-};
-type BoundaryTouchTracking = {
-  boundaryDir: ChapterDirection;
-  startX: number;
-  startY: number;
-  distance: number;
-  lockedOutward: boolean;
-};
-
-const IMAGE_LOAD_PARALLEL = 2;
-const BOUNDARY_RESET_DELAY_MS = 2000;
-const CHAPTER_SWITCH_UNLOCK_DELAY_MS = 5000;
-const LANDING_ANCHOR_DELAY_MS = 5000;
-const PROGRAMMATIC_PAGE_TARGET_TIMEOUT_MS = 1500;
-const TRACKPAD_GESTURE_END_DELAY_MS = 140;
-
-function toZoomRect(rect: DOMRect): ZoomRect {
-  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
-}
-
-function saveZoomElementStyle(element: HTMLElement): SavedZoomElementStyle {
-  return {
-    transform: element.style.transform,
-    transformOrigin: element.style.transformOrigin,
-    willChange: element.style.willChange,
-    position: element.style.position,
-    zIndex: element.style.zIndex,
-    width: element.style.width,
-    height: element.style.height,
-    minWidth: element.style.minWidth,
-    minHeight: element.style.minHeight,
-    maxWidth: element.style.maxWidth,
-    maxHeight: element.style.maxHeight,
-    flex: element.style.flex,
-    flexBasis: element.style.flexBasis,
-    aspectRatio: element.style.aspectRatio,
-  };
-}
-
-function restoreZoomElementStyle(element: HTMLElement, style: SavedZoomElementStyle) {
-  Object.assign(element.style, style);
-}
+import {
+  BOUNDARY_RESET_DELAY_MS,
+  CHAPTER_SWITCH_UNLOCK_DELAY_MS,
+  IMAGE_LOAD_PARALLEL,
+  LANDING_ANCHOR_DELAY_MS,
+  PROGRAMMATIC_PAGE_TARGET_TIMEOUT_MS,
+  restoreZoomElementStyle,
+  saveZoomElementStyle,
+  toZoomRect,
+  TRACKPAD_GESTURE_END_DELAY_MS,
+  type ActiveImageZoom,
+  type BoundaryTouchTracking,
+  type LandingAnchor,
+  type PanGesture,
+  type PendingNavigation,
+  type PinchGesture,
+  type ReaderLayoutAnchor,
+} from './reader-types';
+import { useReaderData } from './useReaderData';
+import { ReaderLoadingView } from './ReaderLoadingView';
+import { ReaderPageCanvas } from './ReaderPageCanvas';
+import { ChapterTransitionOverlay } from './ChapterTransitionOverlay';
 
 export default function ReaderPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
-  const initialAlbumRef = useRef(location.state?.album ?? (albumId ? getAlbumMeta(albumId) : null));
-  const initialPhotoRef = useRef(location.state?.photo ?? null);
-
-  const isSeries = location.state?.isSeries === true;
-  const seriesItems = useMemo(
-    () => (location.state?.seriesItems as ChapterInfo[] | undefined) ?? [],
-    [location.state?.seriesItems],
-  );
-
-  const { data: album } = useQuery({
-    queryKey: ['album', albumId],
-    queryFn: async () => {
-      const cached = await getCachedAlbum(albumId!);
-      if (cached?.album) {
-        saveAlbumMeta(albumId!, cached.album);
-        return cached.album;
-      }
-      const fetched = await getAlbum(albumId!);
-      if (fetched) saveAlbumMeta(albumId!, fetched);
-      return fetched;
-    },
-    enabled: !!albumId,
-    initialData: initialAlbumRef.current,
-  });
-
-  useEffect(() => {
-    initialAlbumRef.current = location.state?.album ?? (albumId ? getAlbumMeta(albumId) : null);
-  }, [albumId, location.state]);
-
-  useEffect(() => {
-    initialPhotoRef.current = location.state?.photo ?? null;
-  }, [location.state]);
-
-  useEffect(() => {
-    if (albumId && album) saveAlbumMeta(albumId, album);
-  }, [albumId, album]);
-
-  const sortedChapters: ChapterInfo[] = useMemo(() => {
-    if (isSeries && seriesItems.length > 0) return seriesItems;
-    if (album?.series?.length) {
-      return [...album.series]
-        .sort((a, b) => parseSeriesOrder(a.sort) - parseSeriesOrder(b.sort))
-        .map((s, i) => ({ id: s.id, name: s.name || `第${i + 1}章`, order: parseSeriesOrder(s.sort) }));
-    }
-    return [{ id: albumId!, name: album?.name ?? '', order: 0 }];
-  }, [isSeries, seriesItems, album, albumId]);
 
   const [currentChapterId, setCurrentChapterId] = useState(albumId!);
+  const mountAlbumIdRef = useRef<string | undefined>(albumId);
+
+  const {
+    album,
+    isSeries,
+    sortedChapters,
+    currentChapterIndex,
+    photo,
+    images,
+  } = useReaderData({
+    albumId,
+    locationState: location.state,
+    currentChapterId,
+    mountAlbumId: mountAlbumIdRef.current,
+  });
+
   const [direction, setDirection] = useState<ReadingDirection>(getReadingDirection);
   const [autoSnap, setAutoSnap] = useState(getAutoSnap);
   const [seamlessMode, setSeamlessMode] = useState(getSeamlessMode);
@@ -249,7 +127,6 @@ export default function ReaderPage() {
   const [transitioning, setTransitioning] = useState(false);
 
   const isRTL = direction === 'left-right';
-  const currentChapterIndex = sortedChapters.findIndex((c) => c.id === currentChapterId);
 
   const pendingNavigationRef = useRef<PendingNavigation | null>(null);
   const landingAnchorRef = useRef<LandingAnchor | null>(null);
@@ -304,7 +181,6 @@ export default function ReaderPage() {
   const albumIdRef = useRef(albumId);
   albumIdRef.current = albumId;
   const seriesRootRef = useRef<string>(albumId ?? '');
-  const mountAlbumIdRef = useRef<string | undefined>(albumId);
   // Stable canonical series id for progress keys: prefer album.seriesID once known.
   useEffect(() => {
     const root = album?.seriesID;
@@ -338,23 +214,6 @@ export default function ReaderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedChapters, currentPage, currentChapterId]);
 
-  const { data: photo } = useQuery({
-    queryKey: ['photo', currentChapterId],
-    queryFn: async ({ signal }) => {
-      const cached = await getCachedAlbum(currentChapterId);
-      if (cached?.photo) return cached.photo;
-      const fetched = await getPhoto(currentChapterId, signal);
-      if (fetched && album) {
-        // Persist photo in IndexedDB under the chapter id so re-entry is instant.
-        setCachedAlbum(currentChapterId, album, fetched);
-      }
-      return fetched;
-    },
-    enabled: !!currentChapterId,
-    initialData: currentChapterId === mountAlbumIdRef.current ? initialPhotoRef.current : undefined,
-  });
-
-  const images: PhotoWithScrambleId['images'] = useMemo(() => photo?.images ?? [], [photo]);
   imagesCountRef.current = images.length;
 
   const commitBlobMap = useCallback((next: Map<number, string>) => {
@@ -1709,16 +1568,7 @@ export default function ReaderPage() {
   // First mount with no photo yet and nothing to show → full-screen loading.
   // During a chapter switch we keep the previous page visible via the snapshot overlay instead.
   if (!photo && !snapshot) {
-    return (
-      <div className="fixed inset-0 bg-black select-none">
-        <div className="flex items-center justify-center h-full">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-gray-500 border-t-white rounded-full animate-spin" />
-            <span className="text-gray-400 text-sm">加载中...</span>
-          </div>
-        </div>
-      </div>
-    );
+    return <ReaderLoadingView />;
   }
 
   const barPad = barVisible ? {
@@ -1766,65 +1616,25 @@ export default function ReaderPage() {
       style={{ touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y') }}
     >
       <style>{`::-webkit-scrollbar { display: none; }`}</style>
-      <div ref={containerRef} className="h-full w-full" style={scrollDivStyle} onClick={handleFlipClick}>
-        {images.map((img, i) => {
-          const url = blobMap.get(i);
-          const shouldRenderImage = loadingPages.has(i);
-          return (
-            <div
-              key={img.name}
-              data-reader-page={i}
-              className="shrink-0"
-              style={getReaderPageStyle({
-                direction,
-                seamlessMode,
-                aspectRatio: pageAspectRatios.get(i),
-                snapEnabled: readerPolicy.snapEnabled,
-              })}
-            >
-              {url ? (
-                <img
-                  src={url}
-                  alt=""
-                  draggable={false}
-                  className={imgCls}
-                  onLoad={(event) => handleImageLoad(photo.id, i, event.currentTarget)}
-                />
-              ) : (
-                <div className="relative h-full w-full overflow-hidden bg-gray-900/60">
-                  {shouldRenderImage && !failedPages.has(i) && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur-sm">
-                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-500/70 border-t-white" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <ReaderPageCanvas
+        containerRef={containerRef}
+        images={images}
+        blobMap={blobMap}
+        loadingPages={loadingPages}
+        failedPages={failedPages}
+        pageAspectRatios={pageAspectRatios}
+        direction={direction}
+        seamlessMode={seamlessMode}
+        snapEnabled={readerPolicy.snapEnabled}
+        imgCls={imgCls}
+        chapterId={photo.id}
+        scrollDivStyle={scrollDivStyle}
+        onClick={handleFlipClick}
+        onImageLoad={handleImageLoad}
+      />
 
       {/* chapter-switch transition overlay — keeps the last page visible until the new chapter is ready */}
-      {snapshot && (
-        <div
-          className={`absolute inset-0 z-30 bg-black flex items-center justify-center transition-opacity duration-700 ${transitioning ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        >
-          <img
-            src={snapshot.url}
-            alt=""
-            className="max-w-full max-h-full object-contain"
-            style={{ width: snapshot.w ? 'auto' : undefined, maxHeight: '100%' }}
-            draggable={false}
-          />
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-9 h-9 border-2 border-brand-500/70 border-t-white rounded-full animate-spin" />
-            </div>
-          </div>
-        </div>
-      )}
+      <ChapterTransitionOverlay snapshot={snapshot} transitioning={transitioning} />
 
       <ReaderOverlay
         visible={showUI}

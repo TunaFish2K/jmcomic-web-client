@@ -60,4 +60,23 @@ describe('worker routes', () => {
 		expect(response.status).toBe(404);
 		expect(await response.text()).toBe('Not found');
 	});
+
+	it('serves /batch-album from the KV L2 cache when the entry exists', async () => {
+		const albumId = 'l2-cached-album';
+		const cachedItem = {
+			albumId,
+			album: { id: albumId, name: 'cached-album' },
+			photo: null,
+		};
+
+		await env.ALBUM_CACHE_KV.put(`album:${albumId}`, JSON.stringify(cachedItem));
+
+		const response = await SELF.fetch(`https://example.com/batch-album?ids=${albumId}`);
+		expect(response.status).toBe(200);
+
+		const body = (await response.json()) as Array<{ albumId: string; album: { name: string } | null }>;
+		expect(body).toHaveLength(1);
+		expect(body[0].albumId).toBe(albumId);
+		expect(body[0].album?.name).toBe('cached-album');
+	});
 });

@@ -17,6 +17,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --filter @tiny-client/worker run typecheck
+      - name: Test
+        run: pnpm --filter @tiny-client/worker exec vitest run
       - name: Deploy worker
         run: pnpm --filter @tiny-client/worker exec wrangler deploy
         env:
