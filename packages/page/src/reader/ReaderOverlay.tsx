@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, RotateCcw, Settings, Trash2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, ArrowDownUp, Bookmark, RotateCcw, Settings, Trash2, Languages, LoaderCircle } from 'lucide-react';
 import type { ReadingDirection, BarSide } from './reader-store';
 import { getCacheStats, clearAllCache } from '@tiny-client/shared';
 import { ThemePanel } from '../theme/ThemeControls';
@@ -122,11 +122,13 @@ function SettingsPanel({
   seamlessMode,
   lazyRenderRange,
   barVisible,
+  translationConfigured,
   onToggleDirection,
   onToggleAutoSnap,
   onToggleSeamlessMode,
   onChangeLazyRenderRange,
   onToggleBarVisible,
+  onOpenTranslationSettings,
   onClose,
   cacheStats,
   onClearCache,
@@ -136,11 +138,13 @@ function SettingsPanel({
   seamlessMode: boolean;
   lazyRenderRange: number;
   barVisible: boolean;
+  translationConfigured: boolean;
   onToggleDirection: () => void;
   onToggleAutoSnap: () => void;
   onToggleSeamlessMode: () => void;
   onChangeLazyRenderRange: (value: number) => void;
   onToggleBarVisible: () => void;
+  onOpenTranslationSettings: () => void;
   onClose: () => void;
   cacheStats: { count: number; totalSize: number } | null;
   onClearCache: () => void;
@@ -217,6 +221,16 @@ function SettingsPanel({
         </div>
 
         <div className="border-t border-gray-700/50 pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-gray-300 text-xs">漫画翻译</span>
+            <button onClick={onOpenTranslationSettings} className="flex items-center gap-1.5 rounded-md bg-gray-800 px-2.5 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700">
+              <Languages size={14} />
+              {translationConfigured ? '翻译配置' : '配置 LLM'}
+            </button>
+          </div>
+        </div>
+
+        <div className="border-t border-gray-700/50 pt-3">
           <div className="mb-3 text-xs font-medium text-gray-300">外观</div>
           <ThemePanel tone="dark" />
         </div>
@@ -262,6 +276,12 @@ export function ReaderOverlay({
   barSide,
   barVisible,
   isZoomed,
+  externalDialogOpen,
+  translationConfigured,
+  translationBusy,
+  translationProcessed,
+  translationHasResult,
+  translationVisible,
   onToggleVisibility,
   onClose,
   onPrevChapter,
@@ -273,6 +293,9 @@ export function ReaderOverlay({
   onChangeLazyRenderRange,
   onToggleBarVisible,
   onResetZoom,
+  onTranslationAction,
+  onToggleTranslation,
+  onOpenTranslationSettings,
   onScrollByInputStep,
   onSeekPage,
 }: {
@@ -295,6 +318,12 @@ export function ReaderOverlay({
   barSide: BarSide;
   barVisible: boolean;
   isZoomed: boolean;
+  externalDialogOpen: boolean;
+  translationConfigured: boolean;
+  translationBusy: boolean;
+  translationProcessed: boolean;
+  translationHasResult: boolean;
+  translationVisible: boolean;
   onToggleVisibility: () => void;
   onClose: () => void;
   onPrevChapter: () => void;
@@ -306,6 +335,9 @@ export function ReaderOverlay({
   onChangeLazyRenderRange: (value: number) => void;
   onToggleBarVisible: () => void;
   onResetZoom: () => void;
+  onTranslationAction: () => void;
+  onToggleTranslation: () => void;
+  onOpenTranslationSettings: () => void;
   onScrollByInputStep: (step: number) => void;
   onSeekPage?: (page: number) => void;
 }) {
@@ -405,6 +437,7 @@ export function ReaderOverlay({
   }, []);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (externalDialogOpen) return;
     if (e.key === 'Escape') {
       if (showSettings) { setShowSettings(false); return; }
       if (showChapterDrawer) { setShowChapterDrawer(false); return; }
@@ -415,7 +448,7 @@ export function ReaderOverlay({
     if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); onScrollByInputStep(-1); }
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); onScrollByInputStep(1); }
     if (e.key === 'f' || e.key === 'F') onToggleVisibility();
-  }, [showChapterDrawer, showSettings, onClose, onScrollByInputStep, onToggleVisibility]);
+  }, [externalDialogOpen, showChapterDrawer, showSettings, onClose, onScrollByInputStep, onToggleVisibility]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -448,6 +481,11 @@ export function ReaderOverlay({
           onToggleSeamlessMode={onToggleSeamlessMode}
           onChangeLazyRenderRange={onChangeLazyRenderRange}
           onToggleBarVisible={onToggleBarVisible}
+          translationConfigured={translationConfigured}
+          onOpenTranslationSettings={() => {
+            setShowSettings(false);
+            onOpenTranslationSettings();
+          }}
           onClose={() => setShowSettings(false)}
           cacheStats={cacheStats} onClearCache={handleClearCache}
         />
@@ -474,6 +512,14 @@ export function ReaderOverlay({
                 <RotateCcw size={18} />
               </button>
             )}
+            <button
+              onClick={translationHasResult ? onToggleTranslation : onTranslationAction}
+              disabled={translationBusy || (translationProcessed && !translationHasResult)}
+              className={`p-1 transition-colors disabled:cursor-default disabled:opacity-45 ${translationHasResult && translationVisible ? 'text-brand-400' : 'text-white/80 hover:text-white'}`}
+              title={translationBusy ? '正在翻译' : translationHasResult ? (translationVisible ? '隐藏本页译文' : '显示本页译文') : translationProcessed ? '本页未识别到文本' : translationConfigured ? '翻译当前页' : '配置漫画翻译'}
+            >
+              {translationBusy ? <LoaderCircle size={18} className="animate-spin" /> : <Languages size={18} />}
+            </button>
             {chapters.length >= 1 && (
               <button onClick={() => setShowChapterDrawer(true)} className="text-white/80 hover:text-white p-1" title="章节列表"><Bookmark size={18} /></button>
             )}

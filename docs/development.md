@@ -20,7 +20,9 @@
 2. Worker 从可用域名中选择上游服务，并通过 `@tiny-client/shared` 获取和解析数据。
 3. Worker 向前端返回作品信息、章节信息和图片地址。
 4. 浏览器直接获取图片，并在本地还原图片顺序。
-5. 浏览器将已处理的图片写入 IndexedDB。导出文件也在浏览器中生成。
+5. 浏览器将已处理的图片写入 IndexedDB。用户手动翻译或启用自动翻译时，浏览器在 Web Worker/WASM 中串行运行 OCR。
+6. 前端只把 OCR 文本和文本框位置发送到用户配置的 OpenAI 兼容 `/chat/completions` 接口，并将译文覆盖在原图上。
+7. 导出文件在浏览器中生成。翻译层不写入导出文件。
 
 Worker 不代理图片文件。排查图片问题时，应分别检查 Worker 接口和图片 CDN。
 
@@ -72,6 +74,7 @@ Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker �
 | `pnpm --filter @tiny-client/page run lint` | 检查前端 TypeScript 和 React 代码。 |
 | `pnpm --filter @tiny-client/page test` | 运行前端单元测试和构建产物测试。必须先构建前端。 |
 | `pnpm --filter @tiny-client/page run test:browser` | 使用 Playwright 验证旧 PWA 升级和搜索栏状态。必须先构建前端并安装浏览器。 |
+| `pnpm --filter @tiny-client/page run test:translation` | 运行翻译设置、几何、缓存键和 LLM 协议测试。 |
 | `pnpm --filter @tiny-client/worker exec vitest run` | 运行 Worker 单元测试一次。 |
 | `pnpm run test:integration` | 启动 Worker，并对实时上游服务执行集成测试。 |
 | `pnpm --filter @tiny-client/page run test:client` | 直接连接实时上游服务，检查共享客户端。 |
@@ -130,13 +133,25 @@ Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker �
 | 阅读器作品元数据 | `localStorage` | 6 小时，最多 100 条 |
 | 阅读进度和阅读设置 | `localStorage` | 不自动过期 |
 | 已还原图片 | IndexedDB `jm-image-cache` | 启动时清理超过 7 天的数据 |
+| OCR 结果和译文 | IndexedDB `jm-translation-cache` | 每类最多 500 页，按最近访问清理 |
+| 翻译服务、API Key、自动翻译范围、LLM 并发、思考和提示词设置 | `localStorage` | 不自动过期 |
 | Worker 作品数据 | Worker 实例内存 | 60 秒 |
 | Worker 搜索客户端 | Worker 实例内存 | 60 秒 |
 | Worker 作品数据 | Cloudflare KV | 配置 `ALBUM_CACHE_KV` 后保存 1 小时 |
 
-Service Worker 不缓存或代理 HTML、CSS、JavaScript、API 和图片。它只保留一个无业务内容的清理标记，用于删除事故前的 Workbox 应用壳缓存。PWA 启动和页面导航依赖网络，应用数据和已处理图片只通过上表中的 IndexedDB 缓存持久化。
+Service Worker 不缓存或代理 HTML、CSS、JavaScript、API 和图片。它只保留一个无业务内容的清理标记，用于删除事故前的 Workbox 应用壳缓存。PWA 启动和页面导航依赖网络，应用数据、已处理图片、OCR 结果和译文只通过上表中的 IndexedDB 缓存持久化。
 
 `/release.json` 包含当前 Pages 构建的提交和分支。该文件、HTML、manifest 和 `/sw.js` 都必须使用 `no-store`。hash 资源位于 `/assets-v3`，恢复期间每次使用前必须重验证。
+
+OCR 运行时、WASM 和 PP-OCRv5 mobile 模型不会进入 PWA 预缓存，也不会由 Service Worker 拦截。用户首次翻译时才会下载这些资源，后续复用取决于资源服务器提供的普通 HTTP 缓存策略。LLM 请求由浏览器直接发往用户配置的服务；Worker 不代理 API Key 或译文。
+
+自动翻译只处理当前章节。范围顺序是当前页、后一页、前一页，并继续按距离展开。本地 OCR 使用单例 Worker 串行执行，OCR 完成后的 LLM 请求按用户设置的 `1–6` 并发数运行。后台任务失败后会暂停当前范围，直到用户翻页、修改设置或手动翻译。Chat Completions 请求不发送 `temperature`；`reasoning_effort` 根据“跟随服务、关闭、开启”三态决定是否发送及使用的等级。
+
+任务相关性由章节、请求配置和当前预翻译范围共同决定。API Key 参与运行任务身份但不参与译文缓存身份；因此切换密钥会中止旧请求，同时仍允许复用同模型、同提示词产生的缓存。翻页保留新范围交集内的自动任务，章节或请求配置不匹配的任务会中止且不显示错误。
+
+翻译状态仅跟踪当前页。取消自动当前页不会终止其他后台任务；该页在翻页、修改设置或手动翻译前不会重新进入自动队列。每个运行任务都有独立的 `AbortController`；PaddleOCR 的单次 `predict` 无法中途终止，因此取消发生在 OCR 阶段时会保留 OCR 缓存并跳过后续 LLM 请求。
+
+V3 翻译设置包含可编辑的翻译风格和内容处理提示词。V1/V2 设置加载后使用默认模板，显式空字符串保持为空。两段提示词的稳定哈希参与译文缓存键与自动完成键，固定 JSON 输出协议追加在组合 system 消息末尾。
 
 ## 测试建议
 
@@ -174,6 +189,12 @@ pnpm --filter @tiny-client/page run test:browser
 ```bash
 pnpm --filter @tiny-client/page run test:reader
 pnpm --filter @tiny-client/page run test:theme
+```
+
+修改翻译设置、OCR 几何、缓存键或 LLM 协议后，还要运行：
+
+```bash
+pnpm --filter @tiny-client/page run test:translation
 ```
 
 6. 修改 Worker 后，运行 Worker 单元测试。

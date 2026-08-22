@@ -13,6 +13,13 @@ export default defineConfig({
   // Isolate recovery assets from the legacy namespaces implicated in the incident.
   build: {
     assetsDir: 'assets-v3',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/@paddleocr/paddleocr-js/')) return 'ocr-runtime'
+        },
+      },
+    },
   },
   define: {
     __APP_RELEASE_ID__: JSON.stringify(releaseMetadata.commit),

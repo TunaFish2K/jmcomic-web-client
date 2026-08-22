@@ -1,4 +1,6 @@
 import type { PhotoWithScrambleId } from '@tiny-client/shared';
+import { ReaderTranslatedImage } from '../translation/TranslationLayer';
+import type { PageTranslationRecord } from '../translation/types';
 import { getReaderPageStyle } from './layout';
 import type { ReadingDirection } from './reader-store';
 
@@ -15,6 +17,9 @@ type ReaderPageCanvasProps = {
   imgCls: string;
   chapterId: string;
   scrollDivStyle: React.CSSProperties;
+  currentPage: number;
+  translationRecord: PageTranslationRecord | null;
+  translationVisible: boolean;
   onClick: React.MouseEventHandler<HTMLDivElement>;
   onImageLoad: (chapterId: string, pageIndex: number, image: HTMLImageElement) => void;
 };
@@ -32,6 +37,9 @@ export function ReaderPageCanvas({
   imgCls,
   chapterId,
   scrollDivStyle,
+  currentPage,
+  translationRecord,
+  translationVisible,
   onClick,
   onImageLoad,
 }: ReaderPageCanvasProps) {
@@ -53,11 +61,11 @@ export function ReaderPageCanvas({
             })}
           >
             {url ? (
-              <img
+              <ReaderTranslatedImage
                 src={url}
-                alt=""
-                draggable={false}
                 className={imgCls}
+                record={i === currentPage ? translationRecord : null}
+                translationVisible={translationVisible}
                 onLoad={(event) => onImageLoad(chapterId, i, event.currentTarget)}
               />
             ) : (

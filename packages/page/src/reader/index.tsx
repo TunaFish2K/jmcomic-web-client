@@ -6,6 +6,9 @@ import {
   getReaderAnchorScrollPosition,
   getReaderInteractionPolicy,
 } from './layout';
+import { TranslationSettingsDialog } from '../translation/TranslationSettingsDialog';
+import { useReaderTranslation } from '../translation/useReaderTranslation';
+import { X } from 'lucide-react';
 import type { ReadingDirection } from './reader-store';
 import {
   getReadingDirection,
@@ -239,6 +242,25 @@ export default function ReaderPage() {
     for (const controller of inflightRef.current.values()) controller.abort();
     inflightRef.current.clear();
   }, [commitBlobMap, revokeBlobUrl]);
+
+  const translationPages = useMemo(
+    () => images.map((image, index) => ({
+      imageName: image.name,
+      imageUrl: blobMap.get(index),
+      loadImageBlob: photo
+        ? async (signal: AbortSignal) => {
+            const processed = await getProcessedPhotoImage(photo, image, signal);
+            return new Blob([processed.data], { type: 'image/jpeg' });
+          }
+        : undefined,
+    })),
+    [blobMap, images, photo],
+  );
+  const translation = useReaderTranslation({
+    chapterId: photo?.id,
+    pages: translationPages,
+    currentPage,
+  });
 
   // ─── navigation ──────────────────────────────────────────────────────────────
 
@@ -1615,6 +1637,9 @@ export default function ReaderPage() {
         imgCls={imgCls}
         chapterId={photo.id}
         scrollDivStyle={scrollDivStyle}
+        currentPage={currentPage}
+        translationRecord={translation.currentRecord}
+        translationVisible={translation.visible}
         onClick={handleFlipClick}
         onImageLoad={handleImageLoad}
       />
@@ -1642,6 +1667,12 @@ export default function ReaderPage() {
         barSide={barSide}
         barVisible={barVisible}
         isZoomed={isZoomed}
+        externalDialogOpen={translation.dialogOpen}
+        translationConfigured={translation.configured}
+        translationBusy={translation.currentPageBusy}
+        translationProcessed={translation.currentRecord !== null}
+        translationHasResult={(translation.currentRecord?.regions.length ?? 0) > 0}
+        translationVisible={translation.visible}
         onToggleVisibility={() => setShowUI((v) => !v)}
         onClose={() => navigate(-1)}
         onPrevChapter={goPrevChapter}
@@ -1653,8 +1684,57 @@ export default function ReaderPage() {
         onChangeLazyRenderRange={changeLazyRenderRange}
         onToggleBarVisible={() => setBarVisible(v => !v)}
         onResetZoom={resetZoom}
+        onTranslationAction={() => {
+          void translation.translateCurrent();
+        }}
+        onToggleTranslation={translation.toggleVisible}
+        onOpenTranslationSettings={translation.openDialog}
         onScrollByInputStep={scrollByInputStep}
         onSeekPage={seekPage}
+      />
+
+      {(translation.task || translation.notice) && !translation.dialogOpen && (
+        <div className="absolute bottom-14 left-1/2 z-[60] max-w-[calc(100vw-24px)] -translate-x-1/2">
+          <div
+            className={`flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-xs shadow-xl backdrop-blur-md ${
+              !translation.task && translation.notice?.kind === 'error'
+                ? 'border-red-500/40 bg-red-950/90 text-red-100'
+                : 'border-white/10 bg-gray-900/90 text-gray-100'
+            }`}
+          >
+            {translation.task && <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-500 border-t-white" />}
+            <span className="wrap-break-word">
+              {translation.task
+                ? translation.task.stage === 'loading-model'
+                  ? '正在加载本页 OCR'
+                  : translation.task.stage === 'recognizing'
+                    ? '正在识别本页文字'
+                    : '正在翻译本页'
+                : translation.notice?.message}
+            </span>
+            <button
+              type="button"
+              onClick={translation.task ? translation.cancelCurrentTranslation : translation.dismissNotice}
+              className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center text-current opacity-70 hover:opacity-100"
+              title={translation.task ? '取消当前页翻译' : '关闭'}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <TranslationSettingsDialog
+        open={translation.dialogOpen}
+        settings={translation.settings}
+        busy={translation.busy}
+        canRetranslate={translation.currentRecord !== null}
+        onSave={translation.saveSettings}
+        onClearCache={translation.clearCache}
+        onRetranslate={() => {
+          void translation.retranslateCurrent();
+        }}
+        onClose={translation.closeDialog}
       />
     </div>
   );
