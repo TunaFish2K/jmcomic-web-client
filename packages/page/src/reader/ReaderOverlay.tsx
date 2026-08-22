@@ -3,6 +3,7 @@ import { X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ArrowLeftRight, A
 import type { ReadingDirection, BarSide } from './reader-store';
 import { getCacheStats, clearAllCache } from '@tiny-client/shared';
 import { ThemePanel } from '../theme/ThemeControls';
+import { getTranslationControlAction } from '../translation/scheduler';
 
 type ChapterInfo = { id: string; name: string; order: number };
 
@@ -280,6 +281,8 @@ export function ReaderOverlay({
   isZoomed,
   externalDialogOpen,
   translationConfigured,
+  translationAutoMode,
+  translationAutoActive,
   translationBusy,
   translationProcessed,
   translationHasResult,
@@ -296,6 +299,7 @@ export function ReaderOverlay({
   onToggleBarVisible,
   onResetZoom,
   onTranslationAction,
+  onToggleAutoTranslation,
   onToggleTranslation,
   onOpenTranslationSettings,
   onScrollByInputStep,
@@ -322,6 +326,8 @@ export function ReaderOverlay({
   isZoomed: boolean;
   externalDialogOpen: boolean;
   translationConfigured: boolean;
+  translationAutoMode: boolean;
+  translationAutoActive: boolean;
   translationBusy: boolean;
   translationProcessed: boolean;
   translationHasResult: boolean;
@@ -338,6 +344,7 @@ export function ReaderOverlay({
   onToggleBarVisible: () => void;
   onResetZoom: () => void;
   onTranslationAction: () => void;
+  onToggleAutoTranslation: () => void;
   onToggleTranslation: () => void;
   onOpenTranslationSettings: () => void;
   onScrollByInputStep: (step: number) => void;
@@ -356,6 +363,37 @@ export function ReaderOverlay({
     const stats = await getCacheStats();
     setCacheStats(stats);
   }, []);
+
+  const translationControlAction = getTranslationControlAction({
+    autoMode: translationAutoMode,
+    autoActive: translationAutoActive,
+    hasResult: translationHasResult,
+  });
+  const handleTranslationControl = () => {
+    if (translationControlAction === 'pause-auto' || translationControlAction === 'resume-auto') {
+      onToggleAutoTranslation();
+    } else if (translationControlAction === 'toggle-current') {
+      onToggleTranslation();
+    } else {
+      onTranslationAction();
+    }
+  };
+  const translationControlDisabled = !translationAutoMode
+    && (translationBusy || (translationProcessed && !translationHasResult));
+  const translationControlActive = translationAutoMode
+    ? translationAutoActive
+    : translationHasResult && translationVisible;
+  const translationControlTitle = translationAutoMode
+    ? translationAutoActive
+      ? translationBusy ? '正在自动翻译，点击暂停' : '暂停自动翻译'
+      : '继续自动翻译'
+    : translationBusy
+      ? '正在翻译'
+      : translationHasResult
+        ? translationVisible ? '隐藏本页译文' : '显示本页译文'
+        : translationProcessed
+          ? '本页未识别到文本'
+          : translationConfigured ? '翻译当前页' : '配置漫画翻译';
 
   // ─── Seek drag ─────────────────────────────────────────────────
   const progressRef = useRef<HTMLDivElement>(null);
@@ -515,12 +553,14 @@ export function ReaderOverlay({
               </button>
             )}
             <button
-              onClick={translationHasResult ? onToggleTranslation : onTranslationAction}
-              disabled={translationBusy || (translationProcessed && !translationHasResult)}
-              className={`p-1 transition-colors disabled:cursor-default disabled:opacity-45 ${translationHasResult && translationVisible ? 'text-brand-400' : 'text-white/80 hover:text-white'}`}
-              title={translationBusy ? '正在翻译' : translationHasResult ? (translationVisible ? '隐藏本页译文' : '显示本页译文') : translationProcessed ? '本页未识别到文本' : translationConfigured ? '翻译当前页' : '配置漫画翻译'}
+              onClick={handleTranslationControl}
+              disabled={translationControlDisabled}
+              className={`p-1 transition-colors disabled:cursor-default disabled:opacity-45 ${translationControlActive ? 'text-brand-400' : 'text-white/80 hover:text-white'}`}
+              title={translationControlTitle}
+              aria-label={translationControlTitle}
+              aria-pressed={translationAutoMode ? translationAutoActive : undefined}
             >
-              {translationBusy ? <LoaderCircle size={18} className="animate-spin" /> : <Languages size={18} />}
+              {translationBusy && (!translationAutoMode || translationAutoActive) ? <LoaderCircle size={18} className="animate-spin" /> : <Languages size={18} />}
             </button>
             {chapters.length >= 1 && (
               <button onClick={() => setShowChapterDrawer(true)} className="text-white/80 hover:text-white p-1" title="章节列表"><Bookmark size={18} /></button>

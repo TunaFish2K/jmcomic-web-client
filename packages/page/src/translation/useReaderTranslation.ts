@@ -10,7 +10,7 @@ import {
 import {
     cancelPendingPageJobs,
     countActiveTranslationJobs,
-    getActiveAutoJobsForWindow,
+    getActiveAutoJobs,
     getAlreadyChinesePageAction,
     getTranslationWindow,
     isTranslationJobRelevant,
@@ -63,7 +63,7 @@ type TranslationJob = {
     requestKey: string;
 };
 
-type AutoWindowPauseReason = "error" | "already-chinese" | "cache-cleared";
+type AutoWindowPauseReason = "error" | "cache-cleared";
 
 export type TranslationTask = {
     pageKey: string;
@@ -108,11 +108,13 @@ function buildTranslationJobContext({
     pages,
     currentPage,
     settings,
+    autoSessionEnabled,
 }: {
     chapterId?: string;
     pages: ReaderTranslationPage[];
     currentPage: number;
     settings: TranslationSettingsV6;
+    autoSessionEnabled: boolean;
 }) {
     const configured = isTranslationConfigured(settings);
     const currentImageName = pages[currentPage]?.imageName;
@@ -124,6 +126,7 @@ function buildTranslationJobContext({
         Boolean(chapterId) &&
         configured &&
         settings.autoTranslate &&
+        autoSessionEnabled &&
         pages.length > 0;
     const indices = autoEnabled
         ? getTranslationWindow(
@@ -168,6 +171,7 @@ export function useReaderTranslation({
     const [activePageKeys, setActivePageKeys] = useState<string[]>([]);
     const [activeJobCount, setActiveJobCount] = useState(0);
     const [notice, setNotice] = useState<TranslationNotice | null>(null);
+    const [autoSessionEnabled, setAutoSessionEnabled] = useState(true);
 
     const queueRef = useRef<TranslationJob[]>([]);
     const activeJobsRef = useRef(new Map<string, TranslationJob>());
@@ -187,12 +191,14 @@ export function useReaderTranslation({
     const pagesRef = useRef(pages);
     const currentPageRef = useRef(currentPage);
     const settingsRef = useRef(settings);
+    const autoSessionEnabledRef = useRef(autoSessionEnabled);
     const ocrInitializationRef = useRef(getOcrInitializationProgress());
 
     chapterIdRef.current = chapterId;
     pagesRef.current = pages;
     currentPageRef.current = currentPage;
     settingsRef.current = settings;
+    autoSessionEnabledRef.current = autoSessionEnabled;
 
     const getCurrentJobContext = useCallback(
         () =>
@@ -201,6 +207,7 @@ export function useReaderTranslation({
                 pages: pagesRef.current,
                 currentPage: currentPageRef.current,
                 settings: settingsRef.current,
+                autoSessionEnabled: autoSessionEnabledRef.current,
             }),
         [],
     );
@@ -256,50 +263,6 @@ export function useReaderTranslation({
         });
     }, []);
 
-    const pauseAutoTranslationForCurrentChinesePage = useCallback(
-        (completedJobId?: string) => {
-            const activeSettings = settingsRef.current;
-            const activeChapterId = chapterIdRef.current;
-            const activeCurrentPage = currentPageRef.current;
-            const { context } = getCurrentJobContext();
-            if (!context.autoEnabled || !activeChapterId) return;
-
-            const windowKey =
-                currentAutoWindowRef.current ??
-                getWindowKey({
-                    chapterId: activeChapterId,
-                    currentPage: activeCurrentPage,
-                    settings: activeSettings,
-                });
-            currentAutoWindowRef.current = windowKey;
-            pausedWindowRef.current = windowKey;
-            pausedWindowReasonRef.current = "already-chinese";
-            queueRef.current = pauseAutoJobs(queueRef.current);
-            const jobsToCancel = getActiveAutoJobsForWindow(
-                activeJobsRef.current.values(),
-                windowKey,
-                completedJobId,
-                cancelledJobIdsRef.current,
-            );
-            for (const job of jobsToCancel) {
-                cancelledJobIdsRef.current.add(job.id);
-                suppressedAutoCompletionsRef.current.add(job.completionKey);
-                jobControllersRef.current
-                    .get(job.id)
-                    ?.abort("already-chinese-current-page");
-            }
-            if (mountedRef.current) {
-                setNotice({
-                    kind: "info",
-                    message: "本页主要为中文，自动翻译将在翻页后继续",
-                });
-            }
-            publishActiveState();
-            pumpQueueRef.current();
-        },
-        [getCurrentJobContext, publishActiveState],
-    );
-
     useEffect(() => {
         let cancelled = false;
         setCurrentRecord(null);
@@ -316,12 +279,6 @@ export function useReaderTranslation({
                 autoCompletedRef.current.add(
                     getCompletionKey(chapterId, currentImageName, settings),
                 );
-                if (
-                    record.pageStatus === "already_chinese" &&
-                    settings.autoTranslate
-                ) {
-                    pauseAutoTranslationForCurrentChinesePage();
-                }
             })
             .catch(() => {
                 if (!cancelled) setCurrentRecord(null);
@@ -334,7 +291,6 @@ export function useReaderTranslation({
         configured,
         currentImageName,
         settings,
-        pauseAutoTranslationForCurrentChinesePage,
     ]);
 
     useEffect(
@@ -425,12 +381,9 @@ export function useReaderTranslation({
                     if (record.pageStatus === "already_chinese") {
                         const action = getAlreadyChinesePageAction({
                             isCurrentPage,
-                            autoTranslate: settingsRef.current.autoTranslate,
                             source: job.source,
                         });
-                        if (action === "pause-window") {
-                            pauseAutoTranslationForCurrentChinesePage(job.id);
-                        } else if (action === "notify-skip") {
+                        if (action === "notify-skip") {
                             setNotice({
                                 kind: "info",
                                 message: "本页主要为中文，已跳过",
@@ -494,7 +447,6 @@ export function useReaderTranslation({
         }
     }, [
         getCurrentJobContext,
-        pauseAutoTranslationForCurrentChinesePage,
         publishActiveState,
     ]);
     pumpQueueRef.current = pumpQueue;
@@ -594,34 +546,60 @@ export function useReaderTranslation({
         void pumpQueue();
     }, [getCurrentJobContext, publishActiveState, pumpQueue]);
 
+    const toggleAutoTranslation = useCallback(() => {
+        if (!settingsRef.current.autoTranslate) return;
+
+        const nextEnabled = !autoSessionEnabledRef.current;
+        autoSessionEnabledRef.current = nextEnabled;
+        setAutoSessionEnabled(nextEnabled);
+        setVisible(nextEnabled);
+        setNotice(null);
+        pausedWindowRef.current = null;
+        pausedWindowReasonRef.current = null;
+        suppressedAutoCompletionsRef.current.clear();
+
+        if (nextEnabled) {
+            syncAutoQueue();
+            return;
+        }
+
+        currentAutoWindowRef.current = null;
+        queueRef.current = pauseAutoJobs(queueRef.current);
+        for (const job of getActiveAutoJobs(
+            activeJobsRef.current.values(),
+            cancelledJobIdsRef.current,
+        )) {
+            cancelledJobIdsRef.current.add(job.id);
+            jobControllersRef.current.get(job.id)?.abort("auto-session-paused");
+        }
+        publishActiveState();
+        pumpQueueRef.current();
+    }, [publishActiveState, syncAutoQueue]);
+
     useEffect(() => {
         syncAutoQueue();
     }, [chapterId, currentPage, pages, settings, syncAutoQueue]);
 
-    const commitSettings = useCallback((next: TranslationSettingsV6) => {
-        const saved = saveTranslationSettings(window.localStorage, next);
-        suppressedAutoCompletionsRef.current.clear();
-        if (
-            pausedWindowReasonRef.current === "already-chinese" &&
-            saved.autoTranslate &&
-            chapterIdRef.current
-        ) {
-            const windowKey = getWindowKey({
-                chapterId: chapterIdRef.current,
-                currentPage: currentPageRef.current,
-                settings: saved,
-            });
-            pausedWindowRef.current = windowKey;
-            currentAutoWindowRef.current = windowKey;
-        } else {
+    const commitSettings = useCallback(
+        (next: TranslationSettingsV6) => {
+            const previousAutoTranslate = settingsRef.current.autoTranslate;
+            const saved = saveTranslationSettings(window.localStorage, next);
+            if (saved.autoTranslate !== previousAutoTranslate) {
+                autoSessionEnabledRef.current = true;
+                setAutoSessionEnabled(true);
+                if (saved.autoTranslate) setVisible(true);
+            }
+            suppressedAutoCompletionsRef.current.clear();
             pausedWindowRef.current = null;
             pausedWindowReasonRef.current = null;
-        }
-        settingsRef.current = saved;
-        setSettings(saved);
-        setNotice(null);
-        setDialogOpen(false);
-    }, []);
+            settingsRef.current = saved;
+            setSettings(saved);
+            setNotice(null);
+            setDialogOpen(false);
+            syncAutoQueue();
+        },
+        [syncAutoQueue],
+    );
 
     const makeRoomForManualTranslation = useCallback(() => {
         const activeJobCount = countActiveTranslationJobs(
@@ -666,11 +644,9 @@ export function useReaderTranslation({
                 return;
             }
 
-            if (pausedWindowReasonRef.current !== "already-chinese") {
-                pausedWindowRef.current = null;
-                pausedWindowReasonRef.current = null;
-                suppressedAutoCompletionsRef.current.clear();
-            }
+            pausedWindowRef.current = null;
+            pausedWindowReasonRef.current = null;
+            suppressedAutoCompletionsRef.current.clear();
             const pageKey = buildPageKey(activeChapterId, page.imageName);
             const completionKey = getCompletionKey(
                 activeChapterId,
@@ -753,6 +729,9 @@ export function useReaderTranslation({
         dialogOpen,
         currentRecord,
         visible,
+        autoMode: configured && settings.autoTranslate,
+        autoActive:
+            configured && settings.autoTranslate && autoSessionEnabled,
         task,
         busy: activeJobCount > 0,
         currentPageBusy: activePageKeys.includes(currentPageKey),
@@ -764,6 +743,7 @@ export function useReaderTranslation({
         translateCurrent: () => runCurrentTranslation(false),
         retranslateCurrent: () => runCurrentTranslation(true),
         cancelCurrentTranslation,
+        toggleAutoTranslation,
         toggleVisible: () => setVisible((value) => !value),
         dismissNotice: () => setNotice(null),
     };

@@ -1695,6 +1695,8 @@ export default function ReaderPage() {
         isZoomed={isZoomed}
         externalDialogOpen={translation.dialogOpen}
         translationConfigured={translation.configured}
+        translationAutoMode={translation.autoMode}
+        translationAutoActive={translation.autoActive}
         translationBusy={translation.currentPageBusy}
         translationProcessed={translation.currentRecord !== null}
         translationHasResult={(translation.currentRecord?.regions.length ?? 0) > 0}
@@ -1713,6 +1715,7 @@ export default function ReaderPage() {
         onTranslationAction={() => {
           void translation.translateCurrent();
         }}
+        onToggleAutoTranslation={translation.toggleAutoTranslation}
         onToggleTranslation={translation.toggleVisible}
         onOpenTranslationSettings={translation.openDialog}
         onScrollByInputStep={scrollByInputStep}

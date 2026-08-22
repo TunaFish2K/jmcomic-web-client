@@ -40,16 +40,31 @@ export type TranslationJobContext = {
 
 export function getAlreadyChinesePageAction({
     isCurrentPage,
-    autoTranslate,
     source,
 }: {
     isCurrentPage: boolean;
-    autoTranslate: boolean;
     source: "manual" | "auto";
-}): "pause-window" | "notify-skip" | "complete-only" {
-    if (!isCurrentPage) return "complete-only";
-    if (autoTranslate) return "pause-window";
-    return source === "manual" ? "notify-skip" : "complete-only";
+}): "notify-skip" | "complete-only" {
+    return isCurrentPage && source === "manual"
+        ? "notify-skip"
+        : "complete-only";
+}
+
+export function getTranslationControlAction({
+    autoMode,
+    autoActive,
+    hasResult,
+}: {
+    autoMode: boolean;
+    autoActive: boolean;
+    hasResult: boolean;
+}):
+    | "pause-auto"
+    | "resume-auto"
+    | "toggle-current"
+    | "translate-current" {
+    if (autoMode) return autoActive ? "pause-auto" : "resume-auto";
+    return hasResult ? "toggle-current" : "translate-current";
 }
 
 export function isTranslationJobRelevant(
@@ -113,19 +128,15 @@ export function pauseAutoJobs<T extends SchedulableTranslationJob>(
     return pending.filter((job) => job.source === "manual");
 }
 
-export function getActiveAutoJobsForWindow<
-    T extends { id: string; source: "manual" | "auto"; windowKey: string },
+export function getActiveAutoJobs<
+    T extends { id: string; source: "manual" | "auto" },
 >(
     jobs: Iterable<T>,
-    windowKey: string,
-    excludedJobId?: string,
     cancelledJobIds: ReadonlySet<string> = new Set(),
 ) {
     return [...jobs].filter(
         (job) =>
             job.source === "auto" &&
-            job.windowKey === windowKey &&
-            job.id !== excludedJobId &&
             !cancelledJobIds.has(job.id),
     );
 }

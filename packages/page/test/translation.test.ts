@@ -43,8 +43,9 @@ import { ORT_WASM_GZIP_ASSET_PATH } from "../src/translation/ort-assets";
 import {
     cancelPendingPageJobs,
     countActiveTranslationJobs,
-    getActiveAutoJobsForWindow,
+    getActiveAutoJobs,
     getAlreadyChinesePageAction,
+    getTranslationControlAction,
     getTranslationWindow,
     partitionTranslationJobs,
     pauseAutoJobs,
@@ -756,19 +757,17 @@ test("builds a symmetric, forward-prioritized translation window", () => {
     assert.deepEqual(getTranslationWindow(0, 0, 2), []);
 });
 
-test("pauses only the current Chinese page window", () => {
+test("silently completes auto-translated Chinese pages", () => {
     assert.equal(
         getAlreadyChinesePageAction({
             isCurrentPage: true,
-            autoTranslate: true,
             source: "auto",
         }),
-        "pause-window",
+        "complete-only",
     );
     assert.equal(
         getAlreadyChinesePageAction({
             isCurrentPage: false,
-            autoTranslate: true,
             source: "auto",
         }),
         "complete-only",
@@ -776,7 +775,6 @@ test("pauses only the current Chinese page window", () => {
     assert.equal(
         getAlreadyChinesePageAction({
             isCurrentPage: true,
-            autoTranslate: false,
             source: "manual",
         }),
         "notify-skip",
@@ -790,13 +788,45 @@ test("pauses only the current Chinese page window", () => {
         { id: "other", source: "auto" as const, windowKey: "other" },
     ];
     assert.deepEqual(
-        getActiveAutoJobsForWindow(
-            active,
-            "current",
-            "completed",
-            new Set(["cancelled"]),
-        ).map((job) => job.id),
-        ["nearby"],
+        getActiveAutoJobs(active, new Set(["completed", "cancelled"])).map(
+            (job) => job.id,
+        ),
+        ["nearby", "other"],
+    );
+});
+
+test("uses the reader translation button as an auto switch when configured", () => {
+    assert.equal(
+        getTranslationControlAction({
+            autoMode: true,
+            autoActive: true,
+            hasResult: true,
+        }),
+        "pause-auto",
+    );
+    assert.equal(
+        getTranslationControlAction({
+            autoMode: true,
+            autoActive: false,
+            hasResult: false,
+        }),
+        "resume-auto",
+    );
+    assert.equal(
+        getTranslationControlAction({
+            autoMode: false,
+            autoActive: false,
+            hasResult: true,
+        }),
+        "toggle-current",
+    );
+    assert.equal(
+        getTranslationControlAction({
+            autoMode: false,
+            autoActive: false,
+            hasResult: false,
+        }),
+        "translate-current",
     );
 });
 
