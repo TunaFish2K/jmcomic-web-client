@@ -26,8 +26,13 @@ import {
     normalizeTranslationSettings,
     PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
     saveTranslationSettings,
+    V2_TRANSLATION_SETTINGS_STORAGE_KEY,
     validateTranslationSettings,
 } from "../src/translation/settings";
+import {
+    prepareOcrModelAssets,
+    subscribeOcrInitializationProgress,
+} from "../src/translation/ocr-models";
 import {
     cancelPendingPageJobs,
     getTranslationWindow,
@@ -43,11 +48,11 @@ import { loadTranslationImageBlob } from "../src/translation/service";
 import type {
     OcrPageResult,
     ReasoningEffort,
-    TranslationSettingsV3,
+    TranslationSettingsV4,
 } from "../src/translation/types";
 
-const settings: TranslationSettingsV3 = {
-    version: 3,
+const settings: TranslationSettingsV4 = {
+    version: 4,
     baseUrl: "https://llm.example.test/v1",
     model: "comic-translator",
     apiKey: "secret-key",
@@ -56,6 +61,7 @@ const settings: TranslationSettingsV3 = {
     translationConcurrency: 1,
     reasoningMode: "off",
     reasoningEffort: "medium",
+    smartSkipSoundEffects: true,
     translationStylePrompt: DEFAULT_TRANSLATION_STYLE_PROMPT,
     contentHandlingPrompt: DEFAULT_CONTENT_HANDLING_PROMPT,
 };
@@ -79,6 +85,117 @@ const ocr: OcrPageResult = {
         },
     ],
 };
+
+function createMemoryCacheStorage() {
+    const stores = new Map<string, Map<string, Response>>();
+    const storage = {
+        async open(name: string) {
+            let store = stores.get(name);
+            if (!store) {
+                store = new Map();
+                stores.set(name, store);
+            }
+            return {
+                async match(input: RequestInfo | URL) {
+                    const key =
+                        input instanceof Request ? input.url : String(input);
+                    return store.get(key)?.clone();
+                },
+                async put(input: RequestInfo | URL, response: Response) {
+                    const key =
+                        input instanceof Request ? input.url : String(input);
+                    store.set(key, response.clone());
+                },
+                async delete(input: RequestInfo | URL) {
+                    const key =
+                        input instanceof Request ? input.url : String(input);
+                    return store.delete(key);
+                },
+            } as Cache;
+        },
+        async keys() {
+            return [...stores.keys()];
+        },
+        async delete(name: string) {
+            return stores.delete(name);
+        },
+    } as CacheStorage;
+    return storage;
+}
+
+test("streams OCR model downloads and reuses the persistent cache", async () => {
+    const cacheStorage = createMemoryCacheStorage();
+    const progress: Array<{
+        phase: string;
+        loadedBytes: number;
+        totalBytes: number | null;
+    }> = [];
+    const unsubscribe = subscribeOcrInitializationProgress((value) => {
+        progress.push(value);
+    });
+    let fetchCount = 0;
+    let objectUrlCount = 0;
+    const fetchImpl: typeof fetch = async () => {
+        fetchCount += 1;
+        const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4])];
+        return new Response(
+            new ReadableStream({
+                pull(controller) {
+                    const chunk = chunks.shift();
+                    if (chunk) controller.enqueue(chunk);
+                    else controller.close();
+                },
+            }),
+            { headers: { "Content-Length": "4" } },
+        );
+    };
+    const options = {
+        cacheStorage,
+        fetchImpl,
+        createObjectURL: (blob: Blob) =>
+            `blob:model-${blob.size}-${++objectUrlCount}`,
+        revokeObjectURL: () => {},
+    };
+
+    const first = await prepareOcrModelAssets(options);
+    assert.equal(fetchCount, 2);
+    assert.equal(first.usedCache, false);
+    assert.match(first.detectionUrl, /^blob:model-4-/);
+    assert.equal(
+        progress.some(
+            (value) =>
+                value.phase === "downloading" &&
+                value.loadedBytes === 8 &&
+                value.totalBytes === 8,
+        ),
+        true,
+    );
+    first.release();
+
+    const second = await prepareOcrModelAssets(options);
+    assert.equal(fetchCount, 2);
+    assert.equal(second.usedCache, true);
+    second.release();
+    unsubscribe();
+});
+
+test("reports indeterminate OCR progress without Content-Length", async () => {
+    const observedTotals: Array<number | null> = [];
+    const unsubscribe = subscribeOcrInitializationProgress((value) => {
+        if (value.phase === "downloading") {
+            observedTotals.push(value.totalBytes);
+        }
+    });
+    const prepared = await prepareOcrModelAssets({
+        cacheStorage: null,
+        fetchImpl: async () => new Response(new Uint8Array([1, 2, 3])),
+        createObjectURL: () => "blob:model",
+        revokeObjectURL: () => {},
+    });
+    assert.equal(observedTotals.includes(null), true);
+    prepared.release();
+    unsubscribe();
+});
 
 test("loads a non-resident page directly for OCR without fetching a blob URL", async () => {
     const controller = new AbortController();
@@ -125,6 +242,7 @@ test("normalizes and persists BYOK settings, including the API key", () => {
     assert.equal(normalized.translationConcurrency, 1);
     assert.equal(normalized.reasoningMode, "off");
     assert.equal(normalized.reasoningEffort, "medium");
+    assert.equal(normalized.smartSkipSoundEffects, true);
     assert.equal(
         normalized.translationStylePrompt,
         DEFAULT_TRANSLATION_STYLE_PROMPT,
@@ -159,7 +277,7 @@ test("migrates V1 settings without losing credentials", () => {
     };
     const migrated = loadTranslationSettings(storage);
     assert.deepEqual(migrated, {
-        version: 3,
+        version: 4,
         baseUrl: "https://legacy.example/v1",
         model: "legacy-model",
         apiKey: "legacy-key",
@@ -168,6 +286,7 @@ test("migrates V1 settings without losing credentials", () => {
         translationConcurrency: 1,
         reasoningMode: "off",
         reasoningEffort: "medium",
+        smartSkipSoundEffects: true,
         translationStylePrompt: DEFAULT_TRANSLATION_STYLE_PROMPT,
         contentHandlingPrompt: DEFAULT_CONTENT_HANDLING_PROMPT,
     });
@@ -178,7 +297,7 @@ test("migrates V1 settings without losing credentials", () => {
 test("migrates V2 settings and preserves intentionally empty prompts", () => {
     const values = new Map<string, string>([
         [
-            PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
+            V2_TRANSLATION_SETTINGS_STORAGE_KEY,
             JSON.stringify({
                 version: 2,
                 baseUrl: "https://v2.example/v1",
@@ -198,7 +317,7 @@ test("migrates V2 settings and preserves intentionally empty prompts", () => {
         removeItem: (key: string) => values.delete(key),
     };
     const migrated = loadTranslationSettings(storage);
-    assert.equal(migrated.version, 3);
+    assert.equal(migrated.version, 4);
     assert.equal(migrated.translationConcurrency, 4);
     assert.equal(
         migrated.translationStylePrompt,
@@ -217,8 +336,33 @@ test("migrates V2 settings and preserves intentionally empty prompts", () => {
     assert.equal(empty.translationStylePrompt, "");
     assert.equal(empty.contentHandlingPrompt, "");
     saveTranslationSettings(storage, empty);
-    assert.equal(values.has(PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY), false);
+    assert.equal(values.has(V2_TRANSLATION_SETTINGS_STORAGE_KEY), false);
     assert.deepEqual(loadTranslationSettings(storage), empty);
+});
+
+test("migrates V3 settings with smart skipping enabled by default", () => {
+    const values = new Map<string, string>([
+        [
+            PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
+            JSON.stringify({
+                ...settings,
+                version: 3,
+                apiKey: "v3-key",
+                smartSkipSoundEffects: undefined,
+            }),
+        ],
+    ]);
+    const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+    };
+    const migrated = loadTranslationSettings(storage);
+    assert.equal(migrated.version, 4);
+    assert.equal(migrated.apiKey, "v3-key");
+    assert.equal(migrated.smartSkipSoundEffects, true);
+    saveTranslationSettings(storage, migrated);
+    assert.equal(values.has(PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY), false);
 });
 
 test("clamps automatic translation settings and validates reasoning values", () => {
@@ -351,6 +495,10 @@ test("translation cache keys ignore API keys and include OCR/provider versions",
         }),
     );
     assert.notEqual(
+        getPromptKey(settings),
+        getPromptKey({ ...settings, smartSkipSoundEffects: false }),
+    );
+    assert.notEqual(
         first,
         buildTranslationCacheKey(ocrKey, ocr, {
             ...settings,
@@ -393,6 +541,13 @@ test("request identity includes credentials but ignores scheduler settings", () 
         getTranslationRequestKey({
             ...settings,
             translationStylePrompt: "another style",
+        }),
+    );
+    assert.notEqual(
+        requestKey,
+        getTranslationRequestKey({
+            ...settings,
+            smartSkipSoundEffects: false,
         }),
     );
     assert.equal(
@@ -545,25 +700,54 @@ test("composes editable prompts before the immutable JSON protocol", () => {
         /\[Translation style\]|\[Content handling\]/,
     );
     assert.match(emptyPrompt, /Output protocol/);
+    assert.match(
+        buildTranslationSystemPrompt({
+            ...settings,
+            smartSkipSoundEffects: false,
+        }),
+        /Do not use the sound_effect skip reason/,
+    );
 });
 
 test("strictly parses complete translation JSON", () => {
     const result = parseTranslationResponse(
-        '```json\n{"translations":[{"id":"r1","translation":"你好"}]}\n```',
+        '```json\n{"translations":[{"id":"r1","action":"translate","translation":"你好"}]}\n```',
         ["r1"],
+        true,
     );
-    assert.equal(result.get("r1"), "你好");
+    assert.deepEqual(result.get("r1"), {
+        action: "translate",
+        translation: "你好",
+    });
+    assert.deepEqual(
+        parseTranslationResponse(
+            '{"translations":[{"id":"r1","action":"skip","reason":"ocr_noise"}]}',
+            ["r1"],
+            false,
+        ).get("r1"),
+        { action: "skip", reason: "ocr_noise" },
+    );
     assert.throws(
-        () => parseTranslationResponse('{"translations":[]}', ["r1"]),
+        () => parseTranslationResponse('{"translations":[]}', ["r1"], true),
         /全部文本框/,
     );
     assert.throws(
         () =>
             parseTranslationResponse(
-                '{"translations":[{"id":"r2","translation":"你好"}]}',
+                '{"translations":[{"id":"r2","action":"translate","translation":"你好"}]}',
                 ["r1"],
+                true,
             ),
         /未知或重复/,
+    );
+    assert.throws(
+        () =>
+            parseTranslationResponse(
+                '{"translations":[{"id":"r1","action":"skip","reason":"sound_effect"}]}',
+                ["r1"],
+                false,
+            ),
+        /关闭智能跳过/,
     );
 });
 
@@ -579,7 +763,7 @@ test("sends only OCR text and geometry to the OpenAI-compatible endpoint", async
                     {
                         message: {
                             content:
-                                '{"translations":[{"id":"r1","translation":"你好"}]}',
+                                '{"translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
                         },
                     },
                 ],
@@ -598,9 +782,14 @@ test("sends only OCR text and geometry to the OpenAI-compatible endpoint", async
         (requestInit?.headers as Record<string, string>).Authorization,
         "Bearer secret-key",
     );
-    assert.equal(output.get("r1"), "你好");
+    assert.deepEqual(output.get("r1"), {
+        action: "translate",
+        translation: "你好",
+    });
     assert.match(JSON.stringify(body), /こんにちは/);
     assert.doesNotMatch(JSON.stringify(body), /data:image|blob:/);
+    assert.deepEqual(body.messages[1].content.includes('"polygon"'), true);
+    assert.deepEqual(body.messages[1].content.includes('"position"'), false);
     assert.equal(body.reasoning_effort, "none");
     assert.equal("temperature" in body, false);
     const systemPrompt = body.messages[0].content as string;
@@ -644,7 +833,7 @@ test("supports provider-default and every configured reasoning effort", async ()
                     {
                         message: {
                             content:
-                                '{"translations":[{"id":"r1","translation":"你好"}]}',
+                                '{"translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
                         },
                     },
                 ],

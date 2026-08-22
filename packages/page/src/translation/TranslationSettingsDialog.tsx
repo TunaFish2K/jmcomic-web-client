@@ -22,7 +22,7 @@ import {
 import type {
     ReasoningEffort,
     ReasoningMode,
-    TranslationSettingsV3,
+    TranslationSettingsV4,
 } from "./types";
 
 const REASONING_MODES: Array<{ value: ReasoningMode; label: string }> = [
@@ -54,10 +54,10 @@ export function TranslationSettingsDialog({
     onClose,
 }: {
     open: boolean;
-    settings: TranslationSettingsV3;
+    settings: TranslationSettingsV4;
     busy: boolean;
     canRetranslate: boolean;
-    onSave: (settings: TranslationSettingsV3) => void;
+    onSave: (settings: TranslationSettingsV4) => void;
     onClearCache: () => Promise<void>;
     onRetranslate: () => void;
     onClose: () => void;
@@ -326,6 +326,38 @@ export function TranslationSettingsDialog({
                                     className="mt-2 h-1.5 w-full cursor-pointer accent-brand-500"
                                 />
                             </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 border-t border-gray-700 pt-4">
+                            <span className="text-xs text-gray-300">
+                                智能跳过拟声词
+                            </span>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-label="智能跳过拟声词"
+                                aria-checked={draft.smartSkipSoundEffects}
+                                onClick={() =>
+                                    setDraft((value) => ({
+                                        ...value,
+                                        smartSkipSoundEffects:
+                                            !value.smartSkipSoundEffects,
+                                    }))
+                                }
+                                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                                    draft.smartSkipSoundEffects
+                                        ? "bg-brand-500"
+                                        : "bg-gray-600"
+                                }`}
+                            >
+                                <span
+                                    className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                                        draft.smartSkipSoundEffects
+                                            ? "translate-x-4"
+                                            : "translate-x-0.5"
+                                    }`}
+                                />
+                            </button>
                         </div>
 
                         <div className="border-t border-gray-700 pt-4">

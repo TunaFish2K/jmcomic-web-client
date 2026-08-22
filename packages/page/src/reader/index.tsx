@@ -7,7 +7,7 @@ import {
   getReaderInteractionPolicy,
 } from './layout';
 import { TranslationSettingsDialog } from '../translation/TranslationSettingsDialog';
-import { useReaderTranslation } from '../translation/useReaderTranslation';
+import { useReaderTranslation, type TranslationTask } from '../translation/useReaderTranslation';
 import { X } from 'lucide-react';
 import type { ReadingDirection } from './reader-store';
 import {
@@ -80,6 +80,32 @@ import { useReaderData } from './useReaderData';
 import { ReaderLoadingView } from './ReaderLoadingView';
 import { ReaderPageCanvas } from './ReaderPageCanvas';
 import { ChapterTransitionOverlay } from './ChapterTransitionOverlay';
+
+function formatModelBytes(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(0, Math.round(bytes / 1024))} KB`;
+}
+
+function getTranslationTaskLabel(task: TranslationTask) {
+  if (task.stage === 'recognizing') return '正在识别本页文字';
+  if (task.stage === 'translating') return '正在翻译本页';
+  switch (task.ocrInitialization?.phase) {
+    case 'checking-cache':
+      return '正在检查 OCR 模型';
+    case 'downloading': {
+      const { loadedBytes, totalBytes } = task.ocrInitialization;
+      if (!totalBytes) return '首次使用，正在下载 OCR 模型';
+      const percent = Math.min(100, Math.round((loadedBytes / totalBytes) * 100));
+      return `首次使用，正在下载 OCR 模型 ${percent}%`;
+    }
+    case 'initializing':
+      return '正在初始化 OCR';
+    case 'ready':
+      return '正在准备本页 OCR';
+    default:
+      return '正在加载本页 OCR';
+  }
+}
 
 export default function ReaderPage() {
   const { albumId } = useParams<{ albumId: string }>();
@@ -1694,7 +1720,7 @@ export default function ReaderPage() {
       />
 
       {(translation.task || translation.notice) && !translation.dialogOpen && (
-        <div className="absolute bottom-14 left-1/2 z-[60] max-w-[calc(100vw-24px)] -translate-x-1/2">
+        <div className="absolute bottom-14 left-1/2 z-[60] w-[22rem] max-w-[calc(100vw-24px)] -translate-x-1/2">
           <div
             className={`flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-xs shadow-xl backdrop-blur-md ${
               !translation.task && translation.notice?.kind === 'error'
@@ -1703,15 +1729,61 @@ export default function ReaderPage() {
             }`}
           >
             {translation.task && <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-500 border-t-white" />}
-            <span className="wrap-break-word">
-              {translation.task
-                ? translation.task.stage === 'loading-model'
-                  ? '正在加载本页 OCR'
-                  : translation.task.stage === 'recognizing'
-                    ? '正在识别本页文字'
-                    : '正在翻译本页'
-                : translation.notice?.message}
-            </span>
+            <div className="min-w-0 flex-1">
+              <span className="wrap-break-word">
+                {translation.task
+                  ? getTranslationTaskLabel(translation.task)
+                  : translation.notice?.message}
+              </span>
+              {translation.task?.stage === 'loading-model' &&
+                translation.task.ocrInitialization?.phase === 'downloading' && (
+                  <div className="mt-1.5">
+                    <div
+                      role="progressbar"
+                      aria-label="OCR 模型下载进度"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={
+                        translation.task.ocrInitialization.totalBytes
+                          ? Math.min(
+                              100,
+                              Math.round(
+                                (translation.task.ocrInitialization.loadedBytes /
+                                  translation.task.ocrInitialization.totalBytes) * 100,
+                              ),
+                            )
+                          : undefined
+                      }
+                      className="h-1.5 overflow-hidden rounded-full bg-gray-700"
+                    >
+                      <div
+                        className={`h-full rounded-full bg-brand-400 transition-[width] duration-150 ${
+                          translation.task.ocrInitialization.totalBytes
+                            ? ''
+                            : 'w-1/3 animate-pulse'
+                        }`}
+                        style={
+                          translation.task.ocrInitialization.totalBytes
+                            ? {
+                                width: `${Math.min(
+                                  100,
+                                  (translation.task.ocrInitialization.loadedBytes /
+                                    translation.task.ocrInitialization.totalBytes) * 100,
+                                )}%`,
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                    <div className="mt-1 text-[10px] tabular-nums text-gray-400">
+                      {formatModelBytes(translation.task.ocrInitialization.loadedBytes)}
+                      {translation.task.ocrInitialization.totalBytes
+                        ? ` / ${formatModelBytes(translation.task.ocrInitialization.totalBytes)}`
+                        : ''}
+                    </div>
+                  </div>
+                )}
+            </div>
             <button
               type="button"
               onClick={translation.task ? translation.cancelCurrentTranslation : translation.dismissNotice}

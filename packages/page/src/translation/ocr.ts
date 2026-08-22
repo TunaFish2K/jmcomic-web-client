@@ -1,4 +1,9 @@
 import { getNormalizedPolygon } from "./geometry";
+import {
+    clearOcrModelCache,
+    prepareOcrModelAssets,
+    setOcrInitializationPhase,
+} from "./ocr-models";
 import type { OcrResult } from "@paddleocr/paddleocr-js";
 import {
     OCR_MODEL_VERSION,
@@ -18,27 +23,45 @@ type OcrRunner = {
 
 let runnerPromise: Promise<OcrRunner> | null = null;
 
+async function createRunner(retryCachedModels = true): Promise<OcrRunner> {
+    const assets = await prepareOcrModelAssets();
+    try {
+        setOcrInitializationPhase("initializing");
+        const { PaddleOCR } = await import("@paddleocr/paddleocr-js");
+        const runner = await PaddleOCR.create({
+            textDetectionModelName: "PP-OCRv5_mobile_det",
+            textRecognitionModelName: "PP-OCRv5_mobile_rec",
+            textDetectionModelAsset: { url: assets.detectionUrl },
+            textRecognitionModelAsset: { url: assets.recognitionUrl },
+            textRecognitionBatchSize: 6,
+            worker: true,
+            ortOptions: {
+                backend: "wasm",
+                wasmPaths: ORT_WASM_PATH,
+                numThreads: 1,
+                simd: true,
+            },
+        });
+        setOcrInitializationPhase("ready");
+        return runner;
+    } catch (error) {
+        if (retryCachedModels && assets.usedCache) {
+            await clearOcrModelCache();
+            return createRunner(false);
+        }
+        setOcrInitializationPhase("idle");
+        throw error;
+    } finally {
+        assets.release();
+    }
+}
+
 async function getRunner() {
     if (!runnerPromise) {
-        runnerPromise = import("@paddleocr/paddleocr-js")
-            .then(({ PaddleOCR }) =>
-                PaddleOCR.create({
-                    textDetectionModelName: "PP-OCRv5_mobile_det",
-                    textRecognitionModelName: "PP-OCRv5_mobile_rec",
-                    textRecognitionBatchSize: 6,
-                    worker: true,
-                    ortOptions: {
-                        backend: "wasm",
-                        wasmPaths: ORT_WASM_PATH,
-                        numThreads: 1,
-                        simd: true,
-                    },
-                }),
-            )
-            .catch((error) => {
-                runnerPromise = null;
-                throw error;
-            });
+        runnerPromise = createRunner().catch((error) => {
+            runnerPromise = null;
+            throw error;
+        });
     }
     return runnerPromise;
 }
@@ -69,9 +92,13 @@ async function resizeForOcr(blob: Blob) {
 export async function recognizeMangaPage(
     image: Blob,
     onStage?: (stage: TranslationStage) => void,
+    signal?: AbortSignal,
 ): Promise<OcrPageResult> {
     onStage?.("loading-model");
     const runner = await getRunner();
+    if (signal?.aborted) {
+        throw new DOMException("翻译已取消", "AbortError");
+    }
     const prepared = await resizeForOcr(image);
     onStage?.("recognizing");
     try {
@@ -108,4 +135,5 @@ export async function disposeOcrRuntime() {
     if (!active) return;
     const runner = await active.catch(() => null);
     await runner?.dispose();
+    setOcrInitializationPhase("idle");
 }

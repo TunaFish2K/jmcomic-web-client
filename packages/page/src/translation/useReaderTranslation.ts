@@ -28,9 +28,14 @@ import {
     type LoadTranslationImageBlob,
 } from "./service";
 import {
+    getOcrInitializationProgress,
+    subscribeOcrInitializationProgress,
+} from "./ocr-models";
+import {
     TRANSLATION_PROMPT_VERSION,
+    type OcrInitializationProgress,
     type PageTranslationRecord,
-    type TranslationSettingsV3,
+    type TranslationSettingsV4,
     type TranslationStage,
 } from "./types";
 
@@ -48,7 +53,7 @@ type TranslationJob = {
     imageName: string;
     imageUrl?: string;
     loadImageBlob?: LoadTranslationImageBlob;
-    settings: TranslationSettingsV3;
+    settings: TranslationSettingsV4;
     forceTranslation: boolean;
     source: "manual" | "auto";
     windowKey: string;
@@ -58,6 +63,7 @@ type TranslationJob = {
 export type TranslationTask = {
     pageKey: string;
     stage: TranslationStage;
+    ocrInitialization?: OcrInitializationProgress;
 };
 
 export type TranslationNotice = {
@@ -68,7 +74,7 @@ export type TranslationNotice = {
 function getCompletionKey(
     chapterId: string,
     imageName: string,
-    settings: TranslationSettingsV3,
+    settings: TranslationSettingsV4,
 ) {
     return `${buildPageKey(chapterId, imageName)}:${getProviderKey(settings)}:${getPromptKey(settings)}:${TRANSLATION_PROMPT_VERSION}`;
 }
@@ -80,7 +86,7 @@ function getWindowKey({
 }: {
     chapterId: string;
     currentPage: number;
-    settings: TranslationSettingsV3;
+    settings: TranslationSettingsV4;
 }) {
     return stableHash(
         JSON.stringify({
@@ -101,7 +107,7 @@ function buildTranslationJobContext({
     chapterId?: string;
     pages: ReaderTranslationPage[];
     currentPage: number;
-    settings: TranslationSettingsV3;
+    settings: TranslationSettingsV4;
 }) {
     const configured = isTranslationConfigured(settings);
     const currentImageName = pages[currentPage]?.imageName;
@@ -174,6 +180,7 @@ export function useReaderTranslation({
     const pagesRef = useRef(pages);
     const currentPageRef = useRef(currentPage);
     const settingsRef = useRef(settings);
+    const ocrInitializationRef = useRef(getOcrInitializationProgress());
 
     chapterIdRef.current = chapterId;
     pagesRef.current = pages;
@@ -262,11 +269,30 @@ export function useReaderTranslation({
             setTask(null);
             return;
         }
+        const stage = jobStagesRef.current.get(selected.id) ?? "loading-model";
         setTask({
             pageKey: selected.pageKey,
-            stage: jobStagesRef.current.get(selected.id) ?? "loading-model",
+            stage,
+            ocrInitialization:
+                stage === "loading-model"
+                    ? ocrInitializationRef.current
+                    : undefined,
         });
     }, []);
+
+    useEffect(
+        () =>
+            subscribeOcrInitializationProgress((progress) => {
+                ocrInitializationRef.current = progress;
+                if (!mountedRef.current) return;
+                setTask((current) =>
+                    current?.stage === "loading-model"
+                        ? { ...current, ocrInitialization: progress }
+                        : current,
+                );
+            }),
+        [],
+    );
 
     useEffect(() => {
         publishActiveState();
@@ -336,12 +362,16 @@ export function useReaderTranslation({
                         setCurrentRecord(record);
                         setVisible(true);
                         if (
-                            job.source === "manual" &&
-                            record.regions.length === 0
+                            record.regions.length === 0 &&
+                            (job.source === "manual" ||
+                                record.skippedRegionCount > 0)
                         ) {
                             setNotice({
                                 kind: "info",
-                                message: "本页未识别到日文文本",
+                                message:
+                                    record.skippedRegionCount > 0
+                                        ? "本页没有需要覆盖的文本"
+                                        : "本页未识别到日文文本",
                             });
                         }
                     }
@@ -487,7 +517,7 @@ export function useReaderTranslation({
         syncAutoQueue();
     }, [chapterId, currentPage, pages, settings, syncAutoQueue]);
 
-    const commitSettings = useCallback((next: TranslationSettingsV3) => {
+    const commitSettings = useCallback((next: TranslationSettingsV4) => {
         const saved = saveTranslationSettings(window.localStorage, next);
         pausedWindowRef.current = null;
         suppressedAutoCompletionsRef.current.clear();

@@ -1,9 +1,22 @@
-export const TRANSLATION_SETTINGS_VERSION = 3 as const;
+export const TRANSLATION_SETTINGS_VERSION = 4 as const;
 export const OCR_MODEL_VERSION = "ppocr-v5-mobile-ja@1";
 export const OCR_PREPROCESS_VERSION = "max-1600@1";
-export const TRANSLATION_PROMPT_VERSION = "ja-zh-cn@2";
+export const TRANSLATION_PROMPT_VERSION = "ja-zh-cn@3";
 
 export type TranslationStage = "loading-model" | "recognizing" | "translating";
+
+export type OcrInitializationPhase =
+    | "idle"
+    | "checking-cache"
+    | "downloading"
+    | "initializing"
+    | "ready";
+
+export type OcrInitializationProgress = {
+    phase: OcrInitializationPhase;
+    loadedBytes: number;
+    totalBytes: number | null;
+};
 
 export type ReasoningMode = "provider-default" | "off" | "on";
 export type ReasoningEffort =
@@ -14,7 +27,7 @@ export type ReasoningEffort =
     | "xhigh"
     | "max";
 
-export type TranslationSettingsV3 = {
+export type TranslationSettingsV4 = {
     version: typeof TRANSLATION_SETTINGS_VERSION;
     baseUrl: string;
     model: string;
@@ -24,6 +37,7 @@ export type TranslationSettingsV3 = {
     translationConcurrency: number;
     reasoningMode: ReasoningMode;
     reasoningEffort: ReasoningEffort;
+    smartSkipSoundEffects: boolean;
     translationStylePrompt: string;
     contentHandlingPrompt: string;
 };
@@ -61,6 +75,8 @@ export type PageTranslationRecord = {
     promptVersion: string;
     sourceWidth: number;
     sourceHeight: number;
+    sourceRegionCount: number;
+    skippedRegionCount: number;
     regions: TranslatedRegion[];
     updatedAt: number;
     lastAccessedAt: number;
