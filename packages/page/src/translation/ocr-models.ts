@@ -62,7 +62,9 @@ export function subscribeOcrInitializationProgress(
 ) {
     progressListeners.add(listener);
     listener(initializationProgress);
-    return () => progressListeners.delete(listener);
+    return () => {
+        progressListeners.delete(listener);
+    };
 }
 
 export function setOcrInitializationPhase(phase: OcrInitializationPhase) {

@@ -1,9 +1,14 @@
-export const TRANSLATION_SETTINGS_VERSION = 4 as const;
+export const TRANSLATION_SETTINGS_VERSION = 5 as const;
 export const OCR_MODEL_VERSION = "ppocr-v5-mobile-ja@1";
 export const OCR_PREPROCESS_VERSION = "max-1600@1";
-export const TRANSLATION_PROMPT_VERSION = "ja-zh-cn@3";
+export const TRANSLATION_PROMPT_VERSION = "ja-zh-cn@4";
 
 export type TranslationStage = "loading-model" | "recognizing" | "translating";
+
+export type TranslationPageStatus =
+    | "needs_translation"
+    | "already_chinese"
+    | "mixed";
 
 export type OcrInitializationPhase =
     | "idle"
@@ -19,6 +24,7 @@ export type OcrInitializationProgress = {
 };
 
 export type ReasoningMode = "provider-default" | "off" | "on";
+export type TranslationApiProtocol = "chat-completions" | "responses";
 export type ReasoningEffort =
     | "minimal"
     | "low"
@@ -27,8 +33,9 @@ export type ReasoningEffort =
     | "xhigh"
     | "max";
 
-export type TranslationSettingsV4 = {
+export type TranslationSettingsV5 = {
     version: typeof TRANSLATION_SETTINGS_VERSION;
+    apiProtocol: TranslationApiProtocol;
     baseUrl: string;
     model: string;
     apiKey: string;
@@ -75,6 +82,7 @@ export type PageTranslationRecord = {
     promptVersion: string;
     sourceWidth: number;
     sourceHeight: number;
+    pageStatus: TranslationPageStatus;
     sourceRegionCount: number;
     skippedRegionCount: number;
     regions: TranslatedRegion[];

@@ -17,16 +17,18 @@ import {
     parseTranslationResponse,
     translateOcrRegions,
 } from "../src/translation/llm";
+import { detectOcrPageStatus } from "../src/translation/language";
 import {
     DEFAULT_CONTENT_HANDLING_PROMPT,
     DEFAULT_TRANSLATION_STYLE_PROMPT,
-    getChatCompletionsUrl,
+    getTranslationApiUrl,
     LEGACY_TRANSLATION_SETTINGS_STORAGE_KEY,
     loadTranslationSettings,
     normalizeTranslationSettings,
     PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
     saveTranslationSettings,
     V2_TRANSLATION_SETTINGS_STORAGE_KEY,
+    V3_TRANSLATION_SETTINGS_STORAGE_KEY,
     validateTranslationSettings,
 } from "../src/translation/settings";
 import {
@@ -35,6 +37,7 @@ import {
 } from "../src/translation/ocr-models";
 import {
     cancelPendingPageJobs,
+    countActiveTranslationJobs,
     getTranslationWindow,
     partitionTranslationJobs,
     pauseAutoJobs,
@@ -48,11 +51,12 @@ import { loadTranslationImageBlob } from "../src/translation/service";
 import type {
     OcrPageResult,
     ReasoningEffort,
-    TranslationSettingsV4,
+    TranslationSettingsV5,
 } from "../src/translation/types";
 
-const settings: TranslationSettingsV4 = {
-    version: 4,
+const settings: TranslationSettingsV5 = {
+    version: 5,
+    apiProtocol: "chat-completions",
     baseUrl: "https://llm.example.test/v1",
     model: "comic-translator",
     apiKey: "secret-key",
@@ -228,9 +232,20 @@ test("normalizes and persists BYOK settings, including the API key", () => {
         apiKey: " key-a ",
     });
     assert.equal(normalized.baseUrl, "https://llm.example.test/v1");
+    assert.equal(normalized.apiProtocol, "chat-completions");
     assert.equal(
-        getChatCompletionsUrl(normalized),
+        getTranslationApiUrl(normalized),
         "https://llm.example.test/v1/chat/completions",
+    );
+    const responses = normalizeTranslationSettings({
+        ...normalized,
+        apiProtocol: "responses",
+        baseUrl: "https://llm.example.test/v1/responses/",
+    });
+    assert.equal(responses.baseUrl, "https://llm.example.test/v1");
+    assert.equal(
+        getTranslationApiUrl(responses),
+        "https://llm.example.test/v1/responses",
     );
     assert.equal(validateTranslationSettings(normalized), null);
     saveTranslationSettings(storage, normalized);
@@ -277,7 +292,8 @@ test("migrates V1 settings without losing credentials", () => {
     };
     const migrated = loadTranslationSettings(storage);
     assert.deepEqual(migrated, {
-        version: 4,
+        version: 5,
+        apiProtocol: "chat-completions",
         baseUrl: "https://legacy.example/v1",
         model: "legacy-model",
         apiKey: "legacy-key",
@@ -317,7 +333,8 @@ test("migrates V2 settings and preserves intentionally empty prompts", () => {
         removeItem: (key: string) => values.delete(key),
     };
     const migrated = loadTranslationSettings(storage);
-    assert.equal(migrated.version, 4);
+    assert.equal(migrated.version, 5);
+    assert.equal(migrated.apiProtocol, "chat-completions");
     assert.equal(migrated.translationConcurrency, 4);
     assert.equal(
         migrated.translationStylePrompt,
@@ -343,10 +360,11 @@ test("migrates V2 settings and preserves intentionally empty prompts", () => {
 test("migrates V3 settings with smart skipping enabled by default", () => {
     const values = new Map<string, string>([
         [
-            PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
+            V3_TRANSLATION_SETTINGS_STORAGE_KEY,
             JSON.stringify({
                 ...settings,
                 version: 3,
+                apiProtocol: undefined,
                 apiKey: "v3-key",
                 smartSkipSoundEffects: undefined,
             }),
@@ -358,9 +376,35 @@ test("migrates V3 settings with smart skipping enabled by default", () => {
         removeItem: (key: string) => values.delete(key),
     };
     const migrated = loadTranslationSettings(storage);
-    assert.equal(migrated.version, 4);
+    assert.equal(migrated.version, 5);
+    assert.equal(migrated.apiProtocol, "chat-completions");
     assert.equal(migrated.apiKey, "v3-key");
     assert.equal(migrated.smartSkipSoundEffects, true);
+    saveTranslationSettings(storage, migrated);
+    assert.equal(values.has(V3_TRANSLATION_SETTINGS_STORAGE_KEY), false);
+});
+
+test("migrates V4 settings to Chat Completions", () => {
+    const values = new Map<string, string>([
+        [
+            PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
+            JSON.stringify({
+                ...settings,
+                version: 4,
+                apiProtocol: undefined,
+                apiKey: "v4-key",
+            }),
+        ],
+    ]);
+    const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+    };
+    const migrated = loadTranslationSettings(storage);
+    assert.equal(migrated.version, 5);
+    assert.equal(migrated.apiProtocol, "chat-completions");
+    assert.equal(migrated.apiKey, "v4-key");
     saveTranslationSettings(storage, migrated);
     assert.equal(values.has(PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY), false);
 });
@@ -480,6 +524,13 @@ test("translation cache keys ignore API keys and include OCR/provider versions",
             model: "model-b",
         }),
     );
+    assert.notEqual(
+        first,
+        buildTranslationCacheKey(ocrKey, ocr, {
+            ...settings,
+            apiProtocol: "responses",
+        }),
+    );
     assert.equal(
         getProviderKey(settings),
         getProviderKey({
@@ -535,6 +586,13 @@ test("request identity includes credentials but ignores scheduler settings", () 
     assert.notEqual(
         requestKey,
         getTranslationRequestKey({ ...settings, model: "model-b" }),
+    );
+    assert.notEqual(
+        requestKey,
+        getTranslationRequestKey({
+            ...settings,
+            apiProtocol: "responses",
+        }),
     );
     assert.notEqual(
         requestKey,
@@ -607,6 +665,13 @@ test("reconciles auto jobs, prioritizes manual work, and pauses auto work", () =
     assert.deepEqual(
         cancelled.remaining.map((item) => item.pageKey),
         ["manual", "next"],
+    );
+    assert.equal(
+        countActiveTranslationJobs(
+            [{ id: "cancelled" }, { id: "retry" }],
+            new Set(["cancelled"]),
+        ),
+        1,
     );
 });
 
@@ -711,30 +776,55 @@ test("composes editable prompts before the immutable JSON protocol", () => {
 
 test("strictly parses complete translation JSON", () => {
     const result = parseTranslationResponse(
-        '```json\n{"translations":[{"id":"r1","action":"translate","translation":"你好"}]}\n```',
+        '```json\n{"pageStatus":"needs_translation","translations":[{"id":"r1","action":"translate","translation":"你好"}]}\n```',
         ["r1"],
         true,
     );
-    assert.deepEqual(result.get("r1"), {
+    assert.equal(result.pageStatus, "needs_translation");
+    assert.deepEqual(result.decisions.get("r1"), {
         action: "translate",
         translation: "你好",
     });
+    const chinese = parseTranslationResponse(
+        '{"pageStatus":"already_chinese","translations":[{"id":"r1","action":"skip","reason":"already_chinese"}]}',
+        ["r1"],
+        false,
+    );
+    assert.equal(chinese.pageStatus, "already_chinese");
+    assert.deepEqual(chinese.decisions.get("r1"), {
+        action: "skip",
+        reason: "already_chinese",
+    });
     assert.deepEqual(
         parseTranslationResponse(
-            '{"translations":[{"id":"r1","action":"skip","reason":"ocr_noise"}]}',
+            '{"pageStatus":"mixed","translations":[{"id":"r1","action":"skip","reason":"ocr_noise"}]}',
             ["r1"],
             false,
-        ).get("r1"),
+        ).decisions.get("r1"),
         { action: "skip", reason: "ocr_noise" },
     );
     assert.throws(
-        () => parseTranslationResponse('{"translations":[]}', ["r1"], true),
+        () =>
+            parseTranslationResponse(
+                '{"pageStatus":"needs_translation","translations":[]}',
+                ["r1"],
+                true,
+            ),
         /全部文本框/,
     );
     assert.throws(
         () =>
             parseTranslationResponse(
-                '{"translations":[{"id":"r2","action":"translate","translation":"你好"}]}',
+                '{"pageStatus":"unknown","translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
+                ["r1"],
+                true,
+            ),
+        /页面语言状态/,
+    );
+    assert.throws(
+        () =>
+            parseTranslationResponse(
+                '{"pageStatus":"needs_translation","translations":[{"id":"r2","action":"translate","translation":"你好"}]}',
                 ["r1"],
                 true,
             ),
@@ -743,12 +833,51 @@ test("strictly parses complete translation JSON", () => {
     assert.throws(
         () =>
             parseTranslationResponse(
-                '{"translations":[{"id":"r1","action":"skip","reason":"sound_effect"}]}',
+                '{"pageStatus":"needs_translation","translations":[{"id":"r1","action":"skip","reason":"sound_effect"}]}',
                 ["r1"],
                 false,
             ),
         /关闭智能跳过/,
     );
+});
+
+test("detects predominantly Chinese OCR locally before calling the LLM", async () => {
+    const chineseRegions = [
+        {
+            ...ocr.regions[0]!,
+            text: "这是已经翻译完成的中文漫画页面，不需要再次翻译。",
+        },
+    ];
+    assert.equal(detectOcrPageStatus(chineseRegions), "already_chinese");
+    assert.equal(
+        detectOcrPageStatus([{ ...ocr.regions[0]!, text: "中文短句" }]),
+        null,
+    );
+    assert.equal(
+        detectOcrPageStatus([
+            {
+                ...ocr.regions[0]!,
+                text: "今日は漫画を読んで、楽しい時間を過ごしましょう。",
+            },
+        ]),
+        null,
+    );
+
+    let requested = false;
+    const result = await translateOcrRegions({
+        settings,
+        regions: chineseRegions,
+        fetchImpl: async () => {
+            requested = true;
+            throw new Error("Chinese pages must not call the LLM");
+        },
+    });
+    assert.equal(requested, false);
+    assert.equal(result.pageStatus, "already_chinese");
+    assert.deepEqual(result.decisions.get("r1"), {
+        action: "skip",
+        reason: "already_chinese",
+    });
 });
 
 test("sends only OCR text and geometry to the OpenAI-compatible endpoint", async () => {
@@ -763,7 +892,7 @@ test("sends only OCR text and geometry to the OpenAI-compatible endpoint", async
                     {
                         message: {
                             content:
-                                '{"translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
+                                '{"pageStatus":"needs_translation","translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
                         },
                     },
                 ],
@@ -782,7 +911,8 @@ test("sends only OCR text and geometry to the OpenAI-compatible endpoint", async
         (requestInit?.headers as Record<string, string>).Authorization,
         "Bearer secret-key",
     );
-    assert.deepEqual(output.get("r1"), {
+    assert.equal(output.pageStatus, "needs_translation");
+    assert.deepEqual(output.decisions.get("r1"), {
         action: "translate",
         translation: "你好",
     });
@@ -799,6 +929,61 @@ test("sends only OCR text and geometry to the OpenAI-compatible endpoint", async
         systemPrompt.lastIndexOf("Output protocol") >
             systemPrompt.indexOf("成人向漫画"),
     );
+});
+
+test("uses the OpenAI Responses API request and output shapes", async () => {
+    let requestUrl = "";
+    let requestInit: RequestInit | undefined;
+    const fetchImpl: typeof fetch = async (input, init) => {
+        requestUrl = String(input);
+        requestInit = init;
+        return new Response(
+            JSON.stringify({
+                output: [
+                    { type: "reasoning", summary: [] },
+                    {
+                        type: "message",
+                        content: [
+                            {
+                                type: "output_text",
+                                text: '{"pageStatus":"needs_translation","translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
+                            },
+                        ],
+                    },
+                ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+    };
+    const output = await translateOcrRegions({
+        settings: {
+            ...settings,
+            apiProtocol: "responses",
+            reasoningMode: "on",
+            reasoningEffort: "high",
+        },
+        regions: ocr.regions,
+        fetchImpl,
+    });
+    const body = JSON.parse(String(requestInit?.body));
+    assert.equal(requestUrl, "https://llm.example.test/v1/responses");
+    assert.equal(
+        (requestInit?.headers as Record<string, string>).Authorization,
+        "Bearer secret-key",
+    );
+    assert.equal(body.model, "comic-translator");
+    assert.deepEqual(body.reasoning, { effort: "high" });
+    assert.equal(body.store, false);
+    assert.match(body.instructions, /Output protocol/);
+    assert.match(body.input, /こんにちは/);
+    assert.match(body.input, /polygon/);
+    assert.equal("messages" in body, false);
+    assert.equal("reasoning_effort" in body, false);
+    assert.equal("temperature" in body, false);
+    assert.deepEqual(output.decisions.get("r1"), {
+        action: "translate",
+        translation: "你好",
+    });
 });
 
 test("distinguishes an explicit LLM cancellation from a timeout", async () => {
@@ -833,7 +1018,7 @@ test("supports provider-default and every configured reasoning effort", async ()
                     {
                         message: {
                             content:
-                                '{"translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
+                                '{"pageStatus":"needs_translation","translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
                         },
                     },
                 ],

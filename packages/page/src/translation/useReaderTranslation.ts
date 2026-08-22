@@ -9,6 +9,7 @@ import {
 } from "./cache";
 import {
     cancelPendingPageJobs,
+    countActiveTranslationJobs,
     getTranslationWindow,
     isTranslationJobRelevant,
     partitionTranslationJobs,
@@ -35,7 +36,7 @@ import {
     TRANSLATION_PROMPT_VERSION,
     type OcrInitializationProgress,
     type PageTranslationRecord,
-    type TranslationSettingsV4,
+    type TranslationSettingsV5,
     type TranslationStage,
 } from "./types";
 
@@ -53,7 +54,7 @@ type TranslationJob = {
     imageName: string;
     imageUrl?: string;
     loadImageBlob?: LoadTranslationImageBlob;
-    settings: TranslationSettingsV4;
+    settings: TranslationSettingsV5;
     forceTranslation: boolean;
     source: "manual" | "auto";
     windowKey: string;
@@ -74,7 +75,7 @@ export type TranslationNotice = {
 function getCompletionKey(
     chapterId: string,
     imageName: string,
-    settings: TranslationSettingsV4,
+    settings: TranslationSettingsV5,
 ) {
     return `${buildPageKey(chapterId, imageName)}:${getProviderKey(settings)}:${getPromptKey(settings)}:${TRANSLATION_PROMPT_VERSION}`;
 }
@@ -86,7 +87,7 @@ function getWindowKey({
 }: {
     chapterId: string;
     currentPage: number;
-    settings: TranslationSettingsV4;
+    settings: TranslationSettingsV5;
 }) {
     return stableHash(
         JSON.stringify({
@@ -107,7 +108,7 @@ function buildTranslationJobContext({
     chapterId?: string;
     pages: ReaderTranslationPage[];
     currentPage: number;
-    settings: TranslationSettingsV4;
+    settings: TranslationSettingsV5;
 }) {
     const configured = isTranslationConfigured(settings);
     const currentImageName = pages[currentPage]?.imageName;
@@ -169,6 +170,7 @@ export function useReaderTranslation({
     const jobStagesRef = useRef(new Map<string, TranslationStage>());
     const jobControllersRef = useRef(new Map<string, AbortController>());
     const cancelledJobIdsRef = useRef(new Set<string>());
+    const jobSequenceRef = useRef(0);
     const pumpQueueRef = useRef<() => void>(() => {});
     const mountedRef = useRef(true);
     const autoCompletedRef = useRef(new Set<string>());
@@ -223,44 +225,13 @@ export function useReaderTranslation({
         };
     }, []);
 
-    useEffect(() => {
-        let cancelled = false;
-        setCurrentRecord(null);
-        if (!configured || !chapterId || !currentImageName) return;
-        getCachedPageTranslation({
-            chapterId,
-            imageName: currentImageName,
-            settings,
-        })
-            .then((record) => {
-                if (!cancelled) {
-                    setCurrentRecord(record);
-                    if (record) {
-                        autoCompletedRef.current.add(
-                            getCompletionKey(
-                                chapterId,
-                                currentImageName,
-                                settings,
-                            ),
-                        );
-                    }
-                }
-            })
-            .catch(() => {
-                if (!cancelled) setCurrentRecord(null);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [chapterId, configured, currentImageName, settings]);
-
     const publishActiveState = useCallback(() => {
         if (!mountedRef.current) return;
         const allJobs = [...activeJobsRef.current.values()];
         const visibleJobs = allJobs.filter(
             (job) => !cancelledJobIdsRef.current.has(job.id),
         );
-        setActiveJobCount(allJobs.length);
+        setActiveJobCount(visibleJobs.length);
         setActivePageKeys(visibleJobs.map((job) => job.pageKey));
         const selected = visibleJobs.find(
             (job) => job.pageKey === activePageKeyRef.current,
@@ -279,6 +250,81 @@ export function useReaderTranslation({
                     : undefined,
         });
     }, []);
+
+    const stopAutoTranslationForChinesePage = useCallback(
+        (completedJobId?: string) => {
+            const activeSettings = settingsRef.current;
+            if (!activeSettings.autoTranslate) return;
+
+            const saved = saveTranslationSettings(window.localStorage, {
+                ...activeSettings,
+                autoTranslate: false,
+            });
+            settingsRef.current = saved;
+            queueRef.current = pauseAutoJobs(queueRef.current);
+            currentAutoWindowRef.current = null;
+            pausedWindowRef.current = null;
+            for (const job of activeJobsRef.current.values()) {
+                if (
+                    job.source !== "auto" ||
+                    job.id === completedJobId ||
+                    cancelledJobIdsRef.current.has(job.id)
+                ) {
+                    continue;
+                }
+                cancelledJobIdsRef.current.add(job.id);
+                suppressedAutoCompletionsRef.current.add(job.completionKey);
+                jobControllersRef.current.get(job.id)?.abort("already-chinese");
+            }
+            setSettings(saved);
+            if (mountedRef.current) {
+                setNotice({
+                    kind: "info",
+                    message: "检测到页面主要为中文，已关闭自动翻译",
+                });
+            }
+            publishActiveState();
+            pumpQueueRef.current();
+        },
+        [publishActiveState],
+    );
+
+    useEffect(() => {
+        let cancelled = false;
+        setCurrentRecord(null);
+        if (!configured || !chapterId || !currentImageName) return;
+        getCachedPageTranslation({
+            chapterId,
+            imageName: currentImageName,
+            settings,
+        })
+            .then((record) => {
+                if (cancelled) return;
+                setCurrentRecord(record);
+                if (!record) return;
+                autoCompletedRef.current.add(
+                    getCompletionKey(chapterId, currentImageName, settings),
+                );
+                if (
+                    record.pageStatus === "already_chinese" &&
+                    settings.autoTranslate
+                ) {
+                    stopAutoTranslationForChinesePage();
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setCurrentRecord(null);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        chapterId,
+        configured,
+        currentImageName,
+        settings,
+        stopAutoTranslationForChinesePage,
+    ]);
 
     useEffect(
         () =>
@@ -300,10 +346,11 @@ export function useReaderTranslation({
 
     const pumpQueue = useCallback(() => {
         const concurrency = settingsRef.current.translationConcurrency;
-        while (
-            activeJobsRef.current.size < concurrency &&
-            queueRef.current.length > 0
-        ) {
+        let activeJobCount = countActiveTranslationJobs(
+            activeJobsRef.current.values(),
+            cancelledJobIdsRef.current,
+        );
+        while (activeJobCount < concurrency && queueRef.current.length > 0) {
             const job = queueRef.current.shift();
             if (!job) continue;
             if (
@@ -312,6 +359,7 @@ export function useReaderTranslation({
                 continue;
             }
             activeJobsRef.current.set(job.id, job);
+            activeJobCount += 1;
             jobStagesRef.current.set(job.id, "loading-model");
             const controller = new AbortController();
             jobControllersRef.current.set(job.id, controller);
@@ -331,7 +379,8 @@ export function useReaderTranslation({
                         onStage: (stage) => {
                             if (
                                 mountedRef.current &&
-                                activeJobsRef.current.has(job.id)
+                                activeJobsRef.current.has(job.id) &&
+                                !cancelledJobIdsRef.current.has(job.id)
                             ) {
                                 jobStagesRef.current.set(job.id, stage);
                                 publishActiveState();
@@ -349,7 +398,7 @@ export function useReaderTranslation({
                         return;
                     }
                     autoCompletedRef.current.add(job.completionKey);
-                    if (
+                    const isCurrentPage =
                         mountedRef.current &&
                         activePageKeyRef.current === job.pageKey &&
                         job.completionKey ===
@@ -357,23 +406,33 @@ export function useReaderTranslation({
                                 job.chapterId,
                                 job.imageName,
                                 settingsRef.current,
-                            )
-                    ) {
+                            );
+                    if (isCurrentPage) {
                         setCurrentRecord(record);
                         setVisible(true);
-                        if (
-                            record.regions.length === 0 &&
-                            (job.source === "manual" ||
-                                record.skippedRegionCount > 0)
-                        ) {
+                    }
+                    if (record.pageStatus === "already_chinese") {
+                        if (job.source === "auto") {
+                            stopAutoTranslationForChinesePage(job.id);
+                        } else if (isCurrentPage) {
                             setNotice({
                                 kind: "info",
-                                message:
-                                    record.skippedRegionCount > 0
-                                        ? "本页没有需要覆盖的文本"
-                                        : "本页未识别到日文文本",
+                                message: "本页主要为中文，已跳过",
                             });
                         }
+                    } else if (
+                        isCurrentPage &&
+                        record.regions.length === 0 &&
+                        (job.source === "manual" ||
+                            record.skippedRegionCount > 0)
+                    ) {
+                        setNotice({
+                            kind: "info",
+                            message:
+                                record.skippedRegionCount > 0
+                                    ? "本页没有需要覆盖的文本"
+                                    : "本页未识别到日文文本",
+                        });
                     }
                 } catch (error) {
                     if (
@@ -416,7 +475,11 @@ export function useReaderTranslation({
                 }
             })();
         }
-    }, [getCurrentJobContext, publishActiveState]);
+    }, [
+        getCurrentJobContext,
+        publishActiveState,
+        stopAutoTranslationForChinesePage,
+    ]);
     pumpQueueRef.current = pumpQueue;
 
     const syncAutoQueue = useCallback(() => {
@@ -491,7 +554,7 @@ export function useReaderTranslation({
                 continue;
             }
             jobs.push({
-                id: `auto:${windowKey}:${pageKey}`,
+                id: `auto:${++jobSequenceRef.current}:${pageKey}`,
                 completionKey,
                 pageKey,
                 chapterId: activeChapterId,
@@ -517,7 +580,7 @@ export function useReaderTranslation({
         syncAutoQueue();
     }, [chapterId, currentPage, pages, settings, syncAutoQueue]);
 
-    const commitSettings = useCallback((next: TranslationSettingsV4) => {
+    const commitSettings = useCallback((next: TranslationSettingsV5) => {
         const saved = saveTranslationSettings(window.localStorage, next);
         pausedWindowRef.current = null;
         suppressedAutoCompletionsRef.current.clear();
@@ -525,6 +588,27 @@ export function useReaderTranslation({
         setNotice(null);
         setDialogOpen(false);
     }, []);
+
+    const makeRoomForManualTranslation = useCallback(() => {
+        const activeJobCount = countActiveTranslationJobs(
+            activeJobsRef.current.values(),
+            cancelledJobIdsRef.current,
+        );
+        if (activeJobCount < settingsRef.current.translationConcurrency) {
+            return;
+        }
+        const autoJob = [...activeJobsRef.current.values()].find(
+            (job) =>
+                job.source === "auto" &&
+                !cancelledJobIdsRef.current.has(job.id),
+        );
+        if (!autoJob) return;
+
+        cancelledJobIdsRef.current.add(autoJob.id);
+        suppressedAutoCompletionsRef.current.add(autoJob.completionKey);
+        jobControllersRef.current.get(autoJob.id)?.abort("manual-priority");
+        publishActiveState();
+    }, [publishActiveState]);
 
     const runCurrentTranslation = useCallback(
         (forceTranslation = false) => {
@@ -569,7 +653,7 @@ export function useReaderTranslation({
             }
 
             const manualJob: TranslationJob = {
-                id: `manual:${completionKey}:${forceTranslation}:${Date.now()}`,
+                id: `manual:${++jobSequenceRef.current}:${pageKey}`,
                 completionKey,
                 pageKey,
                 chapterId: activeChapterId,
@@ -583,11 +667,12 @@ export function useReaderTranslation({
                 requestKey: getTranslationRequestKey(activeSettings),
             };
             queueRef.current = prioritizeManualJob(queueRef.current, manualJob);
+            makeRoomForManualTranslation();
             setNotice(null);
             syncAutoQueue();
             void pumpQueue();
         },
-        [pumpQueue, syncAutoQueue],
+        [makeRoomForManualTranslation, pumpQueue, syncAutoQueue],
     );
 
     const clearCache = useCallback(async () => {

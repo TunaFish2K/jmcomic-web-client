@@ -222,7 +222,9 @@ function SettingsPanel({
 
         <div className="border-t border-gray-700/50 pt-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-gray-300 text-xs">漫画翻译</span>
+            <span className="text-gray-300 text-xs">
+              漫画翻译 <span className="text-[9px] font-medium uppercase text-brand-400">Beta</span>
+            </span>
             <button onClick={onOpenTranslationSettings} className="flex items-center gap-1.5 rounded-md bg-gray-800 px-2.5 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700">
               <Languages size={14} />
               {translationConfigured ? '翻译配置' : '配置 LLM'}

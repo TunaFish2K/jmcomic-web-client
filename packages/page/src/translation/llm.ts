@@ -1,8 +1,10 @@
-import type { OcrRegion, TranslationSettingsV4 } from "./types";
-import {
-    getChatCompletionsUrl,
-    getReasoningEffortForRequest,
-} from "./settings";
+import type {
+    OcrRegion,
+    TranslationPageStatus,
+    TranslationSettingsV5,
+} from "./types";
+import { getReasoningEffortForRequest, getTranslationApiUrl } from "./settings";
+import { detectOcrPageStatus } from "./language";
 
 export type TranslationErrorCode =
     | "cancelled"
@@ -34,9 +36,13 @@ function buildOutputProtocol(smartSkipSoundEffects: boolean) {
         ? `- Use {"id":"r2","action":"skip","reason":"sound_effect"} for standalone visual sound effects or mimetic lettering that does not carry dialogue or narrative meaning.`
         : `- Do not use the sound_effect skip reason. Translate sound effects as naturally as possible.`;
     return `Output protocol (highest priority):
-Return JSON only in this shape: {"translations":[{"id":"r1","action":"translate","translation":"..."},{"id":"r2","action":"skip","reason":"ocr_noise"}]}.
+Return JSON only in this shape: {"pageStatus":"needs_translation","translations":[{"id":"r1","action":"translate","translation":"..."},{"id":"r2","action":"skip","reason":"ocr_noise"}]}.
 Return exactly one item for every supplied id. Do not add ids.
+- Set pageStatus to "needs_translation" when the meaningful text is predominantly Japanese and needs translation.
+- Set pageStatus to "already_chinese" only when the meaningful text is predominantly Chinese and there is no substantial Japanese text to translate.
+- Set pageStatus to "mixed" when meaningful Chinese and Japanese text are both present.
 - Use action "translate" with a non-empty translation for meaningful dialogue, narration, labels, dates, numbers, and other readable content.
+- Use {"id":"r2","action":"skip","reason":"already_chinese"} for meaningful text that is already Chinese. Do not create a Chinese-to-Chinese translation.
 - Use {"id":"r2","action":"skip","reason":"ocr_noise"} only for meaningless OCR fragments such as garbled characters, isolated punctuation, or digits that have no contextual meaning.
 ${soundEffectRule}
 - Short cries, breaths, or interjections that function as character speech are meaningful text, not sound_effect.
@@ -46,9 +52,17 @@ Do not wrap the JSON in Markdown or include explanations outside it.`;
 
 export type TranslationDecision =
     | { action: "translate"; translation: string }
-    | { action: "skip"; reason: "ocr_noise" | "sound_effect" };
+    | {
+          action: "skip";
+          reason: "ocr_noise" | "sound_effect" | "already_chinese";
+      };
 
-export function buildTranslationSystemPrompt(settings: TranslationSettingsV4) {
+export type TranslationResponse = {
+    pageStatus: TranslationPageStatus;
+    decisions: Map<string, TranslationDecision>;
+};
+
+export function buildTranslationSystemPrompt(settings: TranslationSettingsV5) {
     return [
         BASE_SYSTEM_PROMPT,
         settings.translationStylePrompt
@@ -87,6 +101,17 @@ export function parseTranslationResponse(
         throw new TranslationRequestError(
             "invalid-response",
             "模型返回结果缺少 translations",
+        );
+    }
+    const pageStatus = (parsed as { pageStatus?: unknown }).pageStatus;
+    if (
+        pageStatus !== "needs_translation" &&
+        pageStatus !== "already_chinese" &&
+        pageStatus !== "mixed"
+    ) {
+        throw new TranslationRequestError(
+            "invalid-response",
+            "模型返回了无效的页面语言状态",
         );
     }
     const translations = (parsed as { translations?: unknown }).translations;
@@ -137,7 +162,11 @@ export function parseTranslationResponse(
                 "模型返回了无效的处理动作",
             );
         }
-        if (reason !== "ocr_noise" && reason !== "sound_effect") {
+        if (
+            reason !== "ocr_noise" &&
+            reason !== "sound_effect" &&
+            reason !== "already_chinese"
+        ) {
             throw new TranslationRequestError(
                 "invalid-response",
                 "模型返回了无效的跳过原因",
@@ -157,7 +186,7 @@ export function parseTranslationResponse(
             "模型没有返回全部文本框的译文",
         );
     }
-    return output;
+    return { pageStatus, decisions: output } satisfies TranslationResponse;
 }
 
 function createRequestSignal(externalSignal?: AbortSignal) {
@@ -190,54 +219,124 @@ async function getHttpErrorMessage(response: Response) {
     return `LLM 请求失败（HTTP ${response.status}）`;
 }
 
+function getResponseContent(
+    body: unknown,
+    apiProtocol: TranslationSettingsV5["apiProtocol"],
+) {
+    if (apiProtocol === "chat-completions") {
+        const content = (
+            body as { choices?: Array<{ message?: { content?: unknown } }> }
+        )?.choices?.[0]?.message?.content;
+        if (typeof content === "string") return content;
+        throw new TranslationRequestError(
+            "invalid-response",
+            "LLM 响应缺少 choices[0].message.content",
+        );
+    }
+
+    const outputText = (body as { output_text?: unknown })?.output_text;
+    if (typeof outputText === "string") return outputText;
+    const output = (body as { output?: unknown })?.output;
+    if (Array.isArray(output)) {
+        const parts = output.flatMap((item) => {
+            if (!item || typeof item !== "object" || !("content" in item)) {
+                return [];
+            }
+            const content = (item as { content?: unknown }).content;
+            if (!Array.isArray(content)) return [];
+            return content.flatMap((part) => {
+                if (
+                    !part ||
+                    typeof part !== "object" ||
+                    (part as { type?: unknown }).type !== "output_text" ||
+                    typeof (part as { text?: unknown }).text !== "string"
+                ) {
+                    return [];
+                }
+                return [(part as { text: string }).text];
+            });
+        });
+        if (parts.length > 0) return parts.join("");
+    }
+    throw new TranslationRequestError(
+        "invalid-response",
+        "LLM Responses 响应缺少输出文本",
+    );
+}
+
 export async function translateOcrRegions({
     settings,
     regions,
     fetchImpl = fetch,
     signal,
 }: {
-    settings: TranslationSettingsV4;
+    settings: TranslationSettingsV5;
     regions: OcrRegion[];
     fetchImpl?: typeof fetch;
     signal?: AbortSignal;
 }) {
-    if (regions.length === 0) return new Map<string, TranslationDecision>();
+    if (regions.length === 0) {
+        return {
+            pageStatus: "needs_translation",
+            decisions: new Map<string, TranslationDecision>(),
+        } satisfies TranslationResponse;
+    }
+    if (detectOcrPageStatus(regions) === "already_chinese") {
+        return {
+            pageStatus: "already_chinese",
+            decisions: new Map(
+                regions.map((region) => [
+                    region.id,
+                    {
+                        action: "skip" as const,
+                        reason: "already_chinese" as const,
+                    },
+                ]),
+            ),
+        } satisfies TranslationResponse;
+    }
     const requestSignal = createRequestSignal(signal);
     const reasoningEffort = getReasoningEffortForRequest(settings);
+    const systemPrompt = buildTranslationSystemPrompt(settings);
+    const userPrompt = JSON.stringify({
+        targetLanguage: "zh-CN",
+        regions: regions.map((region) => ({
+            id: region.id,
+            text: region.text,
+            score: Number(region.score.toFixed(3)),
+            polygon: region.polygon,
+        })),
+    });
+    const requestBody =
+        settings.apiProtocol === "responses"
+            ? {
+                  model: settings.model,
+                  ...(reasoningEffort === null
+                      ? {}
+                      : { reasoning: { effort: reasoningEffort } }),
+                  instructions: systemPrompt,
+                  input: userPrompt,
+                  store: false,
+              }
+            : {
+                  model: settings.model,
+                  ...(reasoningEffort === null
+                      ? {}
+                      : { reasoning_effort: reasoningEffort }),
+                  messages: [
+                      { role: "system", content: systemPrompt },
+                      { role: "user", content: userPrompt },
+                  ],
+              };
     let response: Response;
     try {
-        response = await fetchImpl(getChatCompletionsUrl(settings), {
+        response = await fetchImpl(getTranslationApiUrl(settings), {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${settings.apiKey}`,
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify({
-                model: settings.model,
-                ...(reasoningEffort === null
-                    ? {}
-                    : {
-                          reasoning_effort: reasoningEffort,
-                      }),
-                messages: [
-                    {
-                        role: "system",
-                        content: buildTranslationSystemPrompt(settings),
-                    },
-                    {
-                        role: "user",
-                        content: JSON.stringify({
-                            targetLanguage: "zh-CN",
-                            regions: regions.map((region) => ({
-                                id: region.id,
-                                text: region.text,
-                                score: Number(region.score.toFixed(3)),
-                                polygon: region.polygon,
-                            })),
-                        }),
-                    },
-                ],
-            }),
+            body: JSON.stringify(requestBody),
             signal: requestSignal.signal,
         });
     } catch (error) {
@@ -288,15 +387,7 @@ export async function translateOcrRegions({
             "LLM 返回的响应不是 JSON",
         );
     }
-    const content = (
-        body as { choices?: Array<{ message?: { content?: unknown } }> }
-    )?.choices?.[0]?.message?.content;
-    if (typeof content !== "string") {
-        throw new TranslationRequestError(
-            "invalid-response",
-            "LLM 响应缺少 choices[0].message.content",
-        );
-    }
+    const content = getResponseContent(body, settings.apiProtocol);
     return parseTranslationResponse(
         content,
         regions.map((region) => region.id),

@@ -109,6 +109,17 @@ export function cancelPendingPageJobs<T extends SchedulableTranslationJob>(
     };
 }
 
+export function countActiveTranslationJobs<T extends { id: string }>(
+    jobs: Iterable<T>,
+    cancelledJobIds: ReadonlySet<string>,
+) {
+    let count = 0;
+    for (const job of jobs) {
+        if (!cancelledJobIds.has(job.id)) count += 1;
+    }
+    return count;
+}
+
 let ocrQueue: Promise<void> = Promise.resolve();
 
 export function runSerializedOcr<T>(task: () => Promise<T>) {

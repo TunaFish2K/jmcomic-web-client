@@ -22,8 +22,17 @@ import {
 import type {
     ReasoningEffort,
     ReasoningMode,
-    TranslationSettingsV4,
+    TranslationApiProtocol,
+    TranslationSettingsV5,
 } from "./types";
+
+const API_PROTOCOLS: Array<{
+    value: TranslationApiProtocol;
+    label: string;
+}> = [
+    { value: "chat-completions", label: "Chat Completions" },
+    { value: "responses", label: "Responses API" },
+];
 
 const REASONING_MODES: Array<{ value: ReasoningMode; label: string }> = [
     { value: "provider-default", label: "跟随服务" },
@@ -54,10 +63,10 @@ export function TranslationSettingsDialog({
     onClose,
 }: {
     open: boolean;
-    settings: TranslationSettingsV4;
+    settings: TranslationSettingsV5;
     busy: boolean;
     canRetranslate: boolean;
-    onSave: (settings: TranslationSettingsV4) => void;
+    onSave: (settings: TranslationSettingsV5) => void;
     onClearCache: () => Promise<void>;
     onRetranslate: () => void;
     onClose: () => void;
@@ -127,13 +136,23 @@ export function TranslationSettingsDialog({
                 className="flex max-h-[calc(100dvh-24px)] w-full max-w-md flex-col overflow-hidden rounded-lg border border-gray-700 bg-gray-900 text-white shadow-2xl"
             >
                 <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3">
-                    <h2
-                        id="translation-settings-title"
-                        className="flex items-center gap-2 text-sm font-semibold"
-                    >
+                    <div className="flex items-center gap-2">
                         <Languages size={17} />
-                        漫画翻译
-                    </h2>
+                        <div>
+                            <h2
+                                id="translation-settings-title"
+                                className="flex items-center gap-1.5 text-sm font-semibold"
+                            >
+                                漫画翻译
+                                <span className="text-[10px] font-medium uppercase text-brand-400">
+                                    Beta
+                                </span>
+                            </h2>
+                            <p className="mt-0.5 text-[10px] font-normal text-gray-400">
+                                支持日文 → 中文
+                            </p>
+                        </div>
+                    </div>
                     <button
                         type="button"
                         onClick={onClose}
@@ -146,9 +165,39 @@ export function TranslationSettingsDialog({
 
                 <div className="overflow-y-auto p-4">
                     <div className="space-y-4">
+                        <div>
+                            <span className="mb-1.5 block text-xs text-gray-300">
+                                API 协议
+                            </span>
+                            <div className="grid grid-cols-2 overflow-hidden rounded-md border border-gray-600">
+                                {API_PROTOCOLS.map((option) => (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        aria-pressed={
+                                            draft.apiProtocol === option.value
+                                        }
+                                        onClick={() =>
+                                            setDraft((value) => ({
+                                                ...value,
+                                                apiProtocol: option.value,
+                                            }))
+                                        }
+                                        className={`h-9 border-r border-gray-600 px-2 text-[11px] transition-colors last:border-r-0 ${
+                                            draft.apiProtocol === option.value
+                                                ? "bg-brand-500 text-brand-foreground"
+                                                : "bg-gray-950 text-gray-300 hover:bg-gray-800"
+                                        }`}
+                                    >
+                                        {option.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
                         <label className="block">
                             <span className="mb-1.5 block text-xs text-gray-300">
-                                OpenAI 兼容 Base URL
+                                OpenAI 兼容 API Base URL
                             </span>
                             <input
                                 ref={baseUrlRef}

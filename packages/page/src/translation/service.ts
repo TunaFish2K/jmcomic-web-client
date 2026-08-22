@@ -18,7 +18,7 @@ import {
     TRANSLATION_PROMPT_VERSION,
     type OcrPageResult,
     type PageTranslationRecord,
-    type TranslationSettingsV4,
+    type TranslationSettingsV5,
     type TranslationStage,
 } from "./types";
 
@@ -72,7 +72,7 @@ export async function getCachedPageTranslation({
 }: {
     chapterId: string;
     imageName: string;
-    settings: TranslationSettingsV4;
+    settings: TranslationSettingsV5;
 }) {
     const pageKey = buildPageKey(chapterId, imageName);
     const ocrKey = getOcrKey(pageKey);
@@ -98,7 +98,7 @@ export async function translatePage({
     imageName: string;
     imageUrl?: string;
     loadImageBlob?: LoadTranslationImageBlob;
-    settings: TranslationSettingsV4;
+    settings: TranslationSettingsV5;
     forceTranslation?: boolean;
     onStage?: (stage: TranslationStage) => void;
     fetchImpl?: typeof fetch;
@@ -156,12 +156,13 @@ export async function translatePage({
         promptVersion: TRANSLATION_PROMPT_VERSION,
         sourceWidth: ocr.sourceWidth,
         sourceHeight: ocr.sourceHeight,
+        pageStatus: translated.pageStatus,
         sourceRegionCount: ocr.regions.length,
-        skippedRegionCount: [...translated.values()].filter(
+        skippedRegionCount: [...translated.decisions.values()].filter(
             (decision) => decision.action === "skip",
         ).length,
         regions: ocr.regions.flatMap((region) => {
-            const decision = translated.get(region.id);
+            const decision = translated.decisions.get(region.id);
             return decision?.action === "translate"
                 ? [{ ...region, translation: decision.translation }]
                 : [];

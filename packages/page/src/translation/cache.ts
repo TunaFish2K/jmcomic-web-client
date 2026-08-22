@@ -1,7 +1,7 @@
 import type {
     OcrPageResult,
     PageTranslationRecord,
-    TranslationSettingsV4,
+    TranslationSettingsV5,
 } from "./types";
 import { TRANSLATION_PROMPT_VERSION } from "./types";
 import { getReasoningEffortForRequest } from "./settings";
@@ -122,25 +122,25 @@ export function buildOcrCacheKey(pageKey: string, result?: OcrPageResult) {
     return `${pageKey}:${modelVersion}:${preprocessVersion}`;
 }
 
-export function getProviderKey(settings: TranslationSettingsV4) {
+export function getProviderKey(settings: TranslationSettingsV5) {
     const reasoningEffort =
         getReasoningEffortForRequest(settings) ?? "provider-default";
     return stableHash(
-        `${settings.baseUrl}\n${settings.model}\n${reasoningEffort}`,
+        `${settings.apiProtocol}\n${settings.baseUrl}\n${settings.model}\n${reasoningEffort}`,
     );
 }
 
-export function getPromptKey(settings: TranslationSettingsV4) {
+export function getPromptKey(settings: TranslationSettingsV5) {
     return stableHash(
         `${settings.translationStylePrompt}\n\0${settings.contentHandlingPrompt}\n\0${settings.smartSkipSoundEffects}`,
     );
 }
 
-export function getTranslationRequestKey(settings: TranslationSettingsV4) {
+export function getTranslationRequestKey(settings: TranslationSettingsV5) {
     const reasoningEffort =
         getReasoningEffortForRequest(settings) ?? "provider-default";
     return stableHash(
-        `${settings.baseUrl}\n${settings.model}\n${settings.apiKey}\n${reasoningEffort}\n${getPromptKey(settings)}`,
+        `${settings.apiProtocol}\n${settings.baseUrl}\n${settings.model}\n${settings.apiKey}\n${reasoningEffort}\n${getPromptKey(settings)}`,
     );
 }
 
@@ -160,7 +160,7 @@ function getOcrDigest(result: OcrPageResult) {
 export function buildTranslationCacheKey(
     ocrKey: string,
     result: OcrPageResult,
-    settings: TranslationSettingsV4,
+    settings: TranslationSettingsV5,
 ) {
     return `${ocrKey}:${getOcrDigest(result)}:${getProviderKey(settings)}:${getPromptKey(settings)}:${TRANSLATION_PROMPT_VERSION}`;
 }
