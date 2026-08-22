@@ -19,6 +19,24 @@ type EncryptedResponse = {
   data: string;
 };
 
+export type SearchResult = {
+  search_query: string;
+  total: string;
+} & (
+  | {
+      redirect_aid: string;
+      content: [];
+    }
+  | {
+      redirect_aid: never;
+      content: {
+        id: string;
+        author: string;
+        name: string;
+      }[];
+    }
+);
+
 async function readEncryptedResponseData(res: Response) {
   const payload = (await res.json()) as EncryptedResponse;
   return payload.data;
@@ -196,7 +214,7 @@ export class Client {
       time?: "a" | "t" | "w" | "m";
       page?: number;
     },
-  ) {
+  ): Promise<SearchResult> {
     if (!options) options = {};
     if (!options.mainTag) options.mainTag = 0;
     if (!options.orderBy) options.orderBy = "mr";
@@ -223,23 +241,7 @@ export class Client {
       encryptedData,
       getToken(timestampSeconds, SECRET_APP_DATA),
     );
-    return JSON.parse(decryptedData) as {
-      search_query: string;
-      total: string;
-    } & (
-      | {
-          redirect_aid: string;
-          content: [];
-        }
-      | {
-          redirect_aid: never;
-          content: {
-            id: string;
-            author: string;
-            name: string;
-          }[];
-        }
-    );
+    return normalizeSearchResult(JSON.parse(decryptedData) as SearchResult);
   }
   async getAlbum(id: string) {
     const url = new URL("/album", this.baseURL);
@@ -368,12 +370,39 @@ export class Client {
   }
 }
 
-export type SearchResult = NonNullable<Awaited<ReturnType<Client["search"]>>>;
 export type Album = NonNullable<Awaited<ReturnType<Client["getAlbum"]>>>;
 export type Photo = NonNullable<Awaited<ReturnType<Client["getPhoto"]>>>;
 export type PhotoWithScrambleId = NonNullable<
   Awaited<ReturnType<Client["getPhotoWithScrambleId"]>>
 >;
+
+export function normalizeSearchResult(result: SearchResult): SearchResult {
+  const redirectAid = (result as { redirect_aid?: unknown }).redirect_aid;
+  if (
+    redirectAid !== undefined &&
+    redirectAid !== null &&
+    String(redirectAid).trim()
+  ) {
+    return {
+      ...result,
+      search_query: String(result.search_query),
+      total: String(result.total),
+      redirect_aid: String(redirectAid),
+      content: [],
+    };
+  }
+
+  return {
+    ...result,
+    search_query: String(result.search_query),
+    total: String(result.total),
+    redirect_aid: undefined as never,
+    content: result.content.map((item) => ({
+      ...item,
+      id: String(item.id),
+    })),
+  };
+}
 
 export function getSearchResultIds(result: SearchResult): string[] {
   return result.content.map((item) => item.id);

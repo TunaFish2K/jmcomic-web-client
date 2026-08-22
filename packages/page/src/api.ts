@@ -2,6 +2,7 @@ import {
     type SearchResult,
     type Album,
     type PhotoWithScrambleId,
+    normalizeSearchResult,
 } from "@tiny-client/shared";
 
 export type BatchError = {
@@ -106,7 +107,7 @@ export async function search(
             `${res.status} ${res.statusText}, message: ${errorMessage}`,
         );
     }
-    return (await res.json()) as SearchResult;
+    return normalizeSearchResult((await res.json()) as SearchResult);
 }
 
 export async function getAlbum(id: string) {
