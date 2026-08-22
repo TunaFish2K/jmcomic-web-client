@@ -38,6 +38,20 @@ export type TranslationJobContext = {
     autoPageKeys: ReadonlySet<string>;
 };
 
+export function getAlreadyChinesePageAction({
+    isCurrentPage,
+    autoTranslate,
+    source,
+}: {
+    isCurrentPage: boolean;
+    autoTranslate: boolean;
+    source: "manual" | "auto";
+}): "pause-window" | "notify-skip" | "complete-only" {
+    if (!isCurrentPage) return "complete-only";
+    if (autoTranslate) return "pause-window";
+    return source === "manual" ? "notify-skip" : "complete-only";
+}
+
 export function isTranslationJobRelevant(
     job: ContextualTranslationJob,
     context: TranslationJobContext,
@@ -97,6 +111,23 @@ export function pauseAutoJobs<T extends SchedulableTranslationJob>(
     pending: T[],
 ) {
     return pending.filter((job) => job.source === "manual");
+}
+
+export function getActiveAutoJobsForWindow<
+    T extends { id: string; source: "manual" | "auto"; windowKey: string },
+>(
+    jobs: Iterable<T>,
+    windowKey: string,
+    excludedJobId?: string,
+    cancelledJobIds: ReadonlySet<string> = new Set(),
+) {
+    return [...jobs].filter(
+        (job) =>
+            job.source === "auto" &&
+            job.windowKey === windowKey &&
+            job.id !== excludedJobId &&
+            !cancelledJobIds.has(job.id),
+    );
 }
 
 export function cancelPendingPageJobs<T extends SchedulableTranslationJob>(

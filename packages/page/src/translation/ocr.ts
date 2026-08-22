@@ -13,8 +13,11 @@ import {
 } from "./types";
 
 const MAX_OCR_SIDE = 1600;
-const ORT_WASM_PATH =
-    "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/";
+
+type OrtWasmFilePaths = {
+    mjs: string;
+    wasm: string;
+};
 
 type OcrRunner = {
     predict(input: unknown): Promise<OcrResult[]>;
@@ -37,7 +40,12 @@ async function createRunner(retryCachedModels = true): Promise<OcrRunner> {
             worker: true,
             ortOptions: {
                 backend: "wasm",
-                wasmPaths: ORT_WASM_PATH,
+                // PaddleOCR's type only accepts a prefix, while its bundled ORT
+                // runtime also supports exact mjs/wasm URL overrides.
+                wasmPaths: {
+                    mjs: assets.ortMjsUrl,
+                    wasm: assets.ortWasmUrl,
+                } as OrtWasmFilePaths as unknown as string,
                 numThreads: 1,
                 simd: true,
             },

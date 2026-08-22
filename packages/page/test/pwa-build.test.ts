@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import { access, readFile, readdir, stat } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import { gunzipSync } from 'node:zlib';
+import {
+  ORT_MJS_ASSET_PATH,
+  ORT_WASM_GZIP_ASSET_PATH,
+} from '../src/translation/ort-assets';
 
 interface WebAppManifest {
   id?: string;
@@ -27,6 +33,7 @@ interface ReleaseMetadata {
 
 const distDirectory = fileURLToPath(new URL('../dist/', import.meta.url));
 const cloudflarePagesFileLimit = 25 * 1024 * 1024;
+const require = createRequire(import.meta.url);
 
 async function readDistFile(filename: string) {
   return readFile(path.join(distDirectory, filename), 'utf8');
@@ -112,6 +119,26 @@ describe('PWA build output', () => {
         `${filename} is ${(info.size / 1024 / 1024).toFixed(1)} MiB`,
       );
     }
+  });
+
+  it('emits a browser-decompressible ORT runtime without the oversized WASM', async () => {
+    const compressed = await readFile(
+      path.join(distDirectory, ORT_WASM_GZIP_ASSET_PATH.replace(/^\//, '')),
+    );
+    const source = await readFile(
+      require.resolve('onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm'),
+    );
+    const emittedFiles = await readdir(distDirectory, { recursive: true });
+
+    assert.deepEqual(gunzipSync(compressed), source);
+    assert.ok(compressed.length < cloudflarePagesFileLimit);
+    await access(path.join(distDirectory, ORT_MJS_ASSET_PATH.replace(/^\//, '')));
+    assert.equal(
+      emittedFiles.some((file) =>
+        /ort-wasm-simd-threaded\.jsep(?:-[^/]+)?\.wasm$/.test(file),
+      ),
+      false,
+    );
   });
 
   it('emits restrictive headers for update-critical resources', async () => {

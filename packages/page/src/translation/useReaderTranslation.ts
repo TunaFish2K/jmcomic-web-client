@@ -10,6 +10,8 @@ import {
 import {
     cancelPendingPageJobs,
     countActiveTranslationJobs,
+    getActiveAutoJobsForWindow,
+    getAlreadyChinesePageAction,
     getTranslationWindow,
     isTranslationJobRelevant,
     partitionTranslationJobs,
@@ -60,6 +62,8 @@ type TranslationJob = {
     windowKey: string;
     requestKey: string;
 };
+
+type AutoWindowPauseReason = "error" | "already-chinese" | "cache-cleared";
 
 export type TranslationTask = {
     pageKey: string;
@@ -176,6 +180,7 @@ export function useReaderTranslation({
     const autoCompletedRef = useRef(new Set<string>());
     const suppressedAutoCompletionsRef = useRef(new Set<string>());
     const pausedWindowRef = useRef<string | null>(null);
+    const pausedWindowReasonRef = useRef<AutoWindowPauseReason | null>(null);
     const currentAutoWindowRef = useRef<string | null>(null);
     const pageContextRef = useRef<string | null>(null);
     const chapterIdRef = useRef(chapterId);
@@ -251,42 +256,48 @@ export function useReaderTranslation({
         });
     }, []);
 
-    const stopAutoTranslationForChinesePage = useCallback(
+    const pauseAutoTranslationForCurrentChinesePage = useCallback(
         (completedJobId?: string) => {
             const activeSettings = settingsRef.current;
-            if (!activeSettings.autoTranslate) return;
+            const activeChapterId = chapterIdRef.current;
+            const activeCurrentPage = currentPageRef.current;
+            const { context } = getCurrentJobContext();
+            if (!context.autoEnabled || !activeChapterId) return;
 
-            const saved = saveTranslationSettings(window.localStorage, {
-                ...activeSettings,
-                autoTranslate: false,
-            });
-            settingsRef.current = saved;
+            const windowKey =
+                currentAutoWindowRef.current ??
+                getWindowKey({
+                    chapterId: activeChapterId,
+                    currentPage: activeCurrentPage,
+                    settings: activeSettings,
+                });
+            currentAutoWindowRef.current = windowKey;
+            pausedWindowRef.current = windowKey;
+            pausedWindowReasonRef.current = "already-chinese";
             queueRef.current = pauseAutoJobs(queueRef.current);
-            currentAutoWindowRef.current = null;
-            pausedWindowRef.current = null;
-            for (const job of activeJobsRef.current.values()) {
-                if (
-                    job.source !== "auto" ||
-                    job.id === completedJobId ||
-                    cancelledJobIdsRef.current.has(job.id)
-                ) {
-                    continue;
-                }
+            const jobsToCancel = getActiveAutoJobsForWindow(
+                activeJobsRef.current.values(),
+                windowKey,
+                completedJobId,
+                cancelledJobIdsRef.current,
+            );
+            for (const job of jobsToCancel) {
                 cancelledJobIdsRef.current.add(job.id);
                 suppressedAutoCompletionsRef.current.add(job.completionKey);
-                jobControllersRef.current.get(job.id)?.abort("already-chinese");
+                jobControllersRef.current
+                    .get(job.id)
+                    ?.abort("already-chinese-current-page");
             }
-            setSettings(saved);
             if (mountedRef.current) {
                 setNotice({
                     kind: "info",
-                    message: "检测到页面主要为中文，已关闭自动翻译",
+                    message: "本页主要为中文，自动翻译将在翻页后继续",
                 });
             }
             publishActiveState();
             pumpQueueRef.current();
         },
-        [publishActiveState],
+        [getCurrentJobContext, publishActiveState],
     );
 
     useEffect(() => {
@@ -309,7 +320,7 @@ export function useReaderTranslation({
                     record.pageStatus === "already_chinese" &&
                     settings.autoTranslate
                 ) {
-                    stopAutoTranslationForChinesePage();
+                    pauseAutoTranslationForCurrentChinesePage();
                 }
             })
             .catch(() => {
@@ -323,7 +334,7 @@ export function useReaderTranslation({
         configured,
         currentImageName,
         settings,
-        stopAutoTranslationForChinesePage,
+        pauseAutoTranslationForCurrentChinesePage,
     ]);
 
     useEffect(
@@ -412,9 +423,14 @@ export function useReaderTranslation({
                         setVisible(true);
                     }
                     if (record.pageStatus === "already_chinese") {
-                        if (job.source === "auto") {
-                            stopAutoTranslationForChinesePage(job.id);
-                        } else if (isCurrentPage) {
+                        const action = getAlreadyChinesePageAction({
+                            isCurrentPage,
+                            autoTranslate: settingsRef.current.autoTranslate,
+                            source: job.source,
+                        });
+                        if (action === "pause-window") {
+                            pauseAutoTranslationForCurrentChinesePage(job.id);
+                        } else if (action === "notify-skip") {
                             setNotice({
                                 kind: "info",
                                 message: "本页主要为中文，已跳过",
@@ -454,6 +470,7 @@ export function useReaderTranslation({
                         pausedWindowRef.current === activeWindow;
                     if (activeWindow) {
                         pausedWindowRef.current = activeWindow;
+                        pausedWindowReasonRef.current = "error";
                         queueRef.current = pauseAutoJobs(queueRef.current);
                     }
                     if (mountedRef.current && !alreadyPaused) {
@@ -477,8 +494,8 @@ export function useReaderTranslation({
         }
     }, [
         getCurrentJobContext,
+        pauseAutoTranslationForCurrentChinesePage,
         publishActiveState,
-        stopAutoTranslationForChinesePage,
     ]);
     pumpQueueRef.current = pumpQueue;
 
@@ -494,6 +511,7 @@ export function useReaderTranslation({
         if (pageContextRef.current !== pageContext) {
             pageContextRef.current = pageContext;
             pausedWindowRef.current = null;
+            pausedWindowReasonRef.current = null;
             suppressedAutoCompletionsRef.current.clear();
             if (mountedRef.current) setNotice(null);
         }
@@ -582,8 +600,24 @@ export function useReaderTranslation({
 
     const commitSettings = useCallback((next: TranslationSettingsV6) => {
         const saved = saveTranslationSettings(window.localStorage, next);
-        pausedWindowRef.current = null;
         suppressedAutoCompletionsRef.current.clear();
+        if (
+            pausedWindowReasonRef.current === "already-chinese" &&
+            saved.autoTranslate &&
+            chapterIdRef.current
+        ) {
+            const windowKey = getWindowKey({
+                chapterId: chapterIdRef.current,
+                currentPage: currentPageRef.current,
+                settings: saved,
+            });
+            pausedWindowRef.current = windowKey;
+            currentAutoWindowRef.current = windowKey;
+        } else {
+            pausedWindowRef.current = null;
+            pausedWindowReasonRef.current = null;
+        }
+        settingsRef.current = saved;
         setSettings(saved);
         setNotice(null);
         setDialogOpen(false);
@@ -632,8 +666,11 @@ export function useReaderTranslation({
                 return;
             }
 
-            pausedWindowRef.current = null;
-            suppressedAutoCompletionsRef.current.clear();
+            if (pausedWindowReasonRef.current !== "already-chinese") {
+                pausedWindowRef.current = null;
+                pausedWindowReasonRef.current = null;
+                suppressedAutoCompletionsRef.current.clear();
+            }
             const pageKey = buildPageKey(activeChapterId, page.imageName);
             const completionKey = getCompletionKey(
                 activeChapterId,
@@ -681,6 +718,7 @@ export function useReaderTranslation({
         suppressedAutoCompletionsRef.current.clear();
         queueRef.current = pauseAutoJobs(queueRef.current);
         pausedWindowRef.current = currentAutoWindowRef.current;
+        pausedWindowReasonRef.current = "cache-cleared";
         setCurrentRecord(null);
         setNotice({ kind: "info", message: "翻译缓存已清除" });
     }, []);

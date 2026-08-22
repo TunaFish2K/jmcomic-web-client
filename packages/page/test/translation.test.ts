@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { gzipSync } from "node:zlib";
 import { resolveBackendUrl } from "../src/backend-url";
 import {
     buildOcrCacheKey,
@@ -38,9 +39,12 @@ import {
     prepareOcrModelAssets,
     subscribeOcrInitializationProgress,
 } from "../src/translation/ocr-models";
+import { ORT_WASM_GZIP_ASSET_PATH } from "../src/translation/ort-assets";
 import {
     cancelPendingPageJobs,
     countActiveTranslationJobs,
+    getActiveAutoJobsForWindow,
+    getAlreadyChinesePageAction,
     getTranslationWindow,
     partitionTranslationJobs,
     pauseAutoJobs,
@@ -93,6 +97,9 @@ const ocr: OcrPageResult = {
         },
     ],
 };
+
+const minimalWasm = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0]);
+const compressedMinimalWasm = gzipSync(minimalWasm);
 
 function createMemoryCacheStorage() {
     const stores = new Map<string, Map<string, Response>>();
@@ -162,8 +169,15 @@ test("streams OCR model downloads and reuses the persistent cache", async () => 
     });
     let fetchCount = 0;
     let objectUrlCount = 0;
-    const fetchImpl: typeof fetch = async () => {
+    const fetchImpl: typeof fetch = async (input) => {
         fetchCount += 1;
+        if (String(input).endsWith(ORT_WASM_GZIP_ASSET_PATH)) {
+            return new Response(compressedMinimalWasm, {
+                headers: {
+                    "Content-Length": String(compressedMinimalWasm.length),
+                },
+            });
+        }
         const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4])];
         return new Response(
             new ReadableStream({
@@ -185,22 +199,31 @@ test("streams OCR model downloads and reuses the persistent cache", async () => 
     };
 
     const first = await prepareOcrModelAssets(options);
-    assert.equal(fetchCount, 2);
+    assert.equal(fetchCount, 3);
     assert.equal(first.usedCache, false);
     assert.match(first.detectionUrl, /^blob:model-4-/);
     assert.equal(
         progress.some(
             (value) =>
                 value.phase === "downloading" &&
-                value.loadedBytes === 8 &&
-                value.totalBytes === 8,
+                value.loadedBytes === 8 + compressedMinimalWasm.length &&
+                value.totalBytes === 8 + compressedMinimalWasm.length,
         ),
         true,
     );
     first.release();
 
+    const runtimeCacheName = (await cacheStorage.keys()).find((name) =>
+        name.startsWith("jm-ocr-runtime:"),
+    );
+    assert.ok(runtimeCacheName);
+    const cachedRuntime = await (
+        await cacheStorage.open(runtimeCacheName)
+    ).match(ORT_WASM_GZIP_ASSET_PATH);
+    assert.equal((await cachedRuntime?.blob())?.size, compressedMinimalWasm.length);
+
     const second = await prepareOcrModelAssets(options);
-    assert.equal(fetchCount, 2);
+    assert.equal(fetchCount, 3);
     assert.equal(second.usedCache, true);
     second.release();
     unsubscribe();
@@ -215,13 +238,54 @@ test("reports indeterminate OCR progress without Content-Length", async () => {
     });
     const prepared = await prepareOcrModelAssets({
         cacheStorage: null,
-        fetchImpl: async () => new Response(new Uint8Array([1, 2, 3])),
+        fetchImpl: async (input) =>
+            new Response(
+                String(input).endsWith(ORT_WASM_GZIP_ASSET_PATH)
+                    ? compressedMinimalWasm
+                    : new Uint8Array([1, 2, 3]),
+            ),
         createObjectURL: () => "blob:model",
         revokeObjectURL: () => {},
     });
     assert.equal(observedTotals.includes(null), true);
     prepared.release();
     unsubscribe();
+});
+
+test("redownloads a corrupted cached OCR runtime", async () => {
+    const cacheStorage = createMemoryCacheStorage();
+    let fetchCount = 0;
+    const options = {
+        cacheStorage,
+        fetchImpl: (async (input: RequestInfo | URL) => {
+            fetchCount += 1;
+            return new Response(
+                String(input).endsWith(ORT_WASM_GZIP_ASSET_PATH)
+                    ? compressedMinimalWasm
+                    : new Uint8Array([1, 2, 3]),
+            );
+        }) as typeof fetch,
+        createObjectURL: (blob: Blob) => `blob:model-${blob.size}`,
+        revokeObjectURL: () => {},
+    };
+
+    const first = await prepareOcrModelAssets(options);
+    first.release();
+    assert.equal(fetchCount, 3);
+
+    const runtimeCacheName = (await cacheStorage.keys()).find((name) =>
+        name.startsWith("jm-ocr-runtime:"),
+    );
+    assert.ok(runtimeCacheName);
+    const runtimeCache = await cacheStorage.open(runtimeCacheName);
+    await runtimeCache.put(
+        ORT_WASM_GZIP_ASSET_PATH,
+        new Response(new Uint8Array([1, 2, 3])),
+    );
+
+    const second = await prepareOcrModelAssets(options);
+    assert.equal(fetchCount, 4);
+    second.release();
 });
 
 test("loads a non-resident page directly for OCR without fetching a blob URL", async () => {
@@ -690,6 +754,50 @@ test("builds a symmetric, forward-prioritized translation window", () => {
     assert.deepEqual(getTranslationWindow(0, 4, 3), [0, 1, 2, 3]);
     assert.deepEqual(getTranslationWindow(3, 4, 3), [3, 2, 1, 0]);
     assert.deepEqual(getTranslationWindow(0, 0, 2), []);
+});
+
+test("pauses only the current Chinese page window", () => {
+    assert.equal(
+        getAlreadyChinesePageAction({
+            isCurrentPage: true,
+            autoTranslate: true,
+            source: "auto",
+        }),
+        "pause-window",
+    );
+    assert.equal(
+        getAlreadyChinesePageAction({
+            isCurrentPage: false,
+            autoTranslate: true,
+            source: "auto",
+        }),
+        "complete-only",
+    );
+    assert.equal(
+        getAlreadyChinesePageAction({
+            isCurrentPage: true,
+            autoTranslate: false,
+            source: "manual",
+        }),
+        "notify-skip",
+    );
+
+    const active = [
+        { id: "completed", source: "auto" as const, windowKey: "current" },
+        { id: "nearby", source: "auto" as const, windowKey: "current" },
+        { id: "cancelled", source: "auto" as const, windowKey: "current" },
+        { id: "manual", source: "manual" as const, windowKey: "current" },
+        { id: "other", source: "auto" as const, windowKey: "other" },
+    ];
+    assert.deepEqual(
+        getActiveAutoJobsForWindow(
+            active,
+            "current",
+            "completed",
+            new Set(["cancelled"]),
+        ).map((job) => job.id),
+        ["nearby"],
+    );
 });
 
 test("reconciles auto jobs, prioritizes manual work, and pauses auto work", () => {
