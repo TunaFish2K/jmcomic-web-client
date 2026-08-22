@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, readFile, readdir } from 'node:fs/promises';
+import { access, readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
@@ -26,6 +26,7 @@ interface ReleaseMetadata {
 }
 
 const distDirectory = fileURLToPath(new URL('../dist/', import.meta.url));
+const cloudflarePagesFileLimit = 25 * 1024 * 1024;
 
 async function readDistFile(filename: string) {
   return readFile(path.join(distDirectory, filename), 'utf8');
@@ -98,6 +99,18 @@ describe('PWA build output', () => {
     for (const url of generatedAssetUrls) {
       assert.match(url, /^\/assets-v3\//);
       await access(path.join(distDirectory, url.replace(/^\//, '')));
+    }
+  });
+
+  it('keeps every deploy asset within the Cloudflare Pages file limit', async () => {
+    const emittedFiles = await readdir(distDirectory, { recursive: true });
+    for (const filename of emittedFiles) {
+      const info = await stat(path.join(distDirectory, filename));
+      if (!info.isFile()) continue;
+      assert.ok(
+        info.size <= cloudflarePagesFileLimit,
+        `${filename} is ${(info.size / 1024 / 1024).toFixed(1)} MiB`,
+      );
     }
   });
 

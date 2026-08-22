@@ -9,7 +9,7 @@ import {
 
 const MAX_OCR_SIDE = 1600;
 const ORT_WASM_PATH =
-    "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/";
+    "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/";
 
 type OcrRunner = {
     predict(input: unknown): Promise<OcrResult[]>;

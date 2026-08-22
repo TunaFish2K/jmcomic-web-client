@@ -10,6 +10,14 @@ const releaseMetadata = {
 
 // https://vite.dev/config/
 export default defineConfig({
+  resolve: {
+    conditions: [
+      'onnxruntime-web-use-extern-wasm',
+      'module',
+      'browser',
+      'development|production',
+    ],
+  },
   // Isolate recovery assets from the legacy namespaces implicated in the incident.
   build: {
     assetsDir: 'assets-v3',
