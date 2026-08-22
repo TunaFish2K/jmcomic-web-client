@@ -21,8 +21,9 @@
 3. Worker 向前端返回作品信息、章节信息和图片地址。
 4. 浏览器直接获取图片，并在本地还原图片顺序。
 5. 浏览器将已处理的图片写入 IndexedDB。用户手动翻译或启用自动翻译时，浏览器在 Web Worker/WASM 中串行运行 OCR。
-6. 前端只把 OCR 文本和文本框位置发送到用户配置的 OpenAI 兼容 `/chat/completions` 接口，并将译文覆盖在原图上。
-7. 导出文件在浏览器中生成。翻译层不写入导出文件。
+6. 前端只把 OCR 文本和文本框位置发送到用户配置的 OpenAI 兼容 `/chat/completions` 或 `/responses` 接口，并将译文覆盖在原图上。
+7. 用户可选择通过 Worker 转发 LLM 请求，以兼容未开放浏览器 CORS 的服务。API Key 仅用于单次上游请求，Worker 不保存、不缓存，也不主动记录 Key、目标完整 URL 或请求正文。
+8. 导出文件在浏览器中生成。翻译层不写入导出文件。
 
 Worker 不代理图片文件。排查图片问题时，应分别检查 Worker 接口和图片 CDN。
 
@@ -85,6 +86,19 @@ Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker �
 ## Worker API
 
 前端使用的 API 客户端位于 `packages/page/src/api.ts`。Worker 路由位于 `packages/worker/src/index.ts`。
+
+### `POST /llm-proxy`
+
+可选的漫画翻译 LLM 代理。前端在翻译设置中开启 Worker 代理后使用此接口。
+
+| 请求项 | 值 |
+| --- | --- |
+| `Authorization` | 用户配置的 `Bearer <API_KEY>`，仅转发给本次上游请求。 |
+| `Content-Type` | `application/json`。 |
+| `X-LLM-Target-URL` | 完整的公网 HTTPS LLM 地址，路径必须以 `/chat/completions` 或 `/responses` 结尾。 |
+| 正文 | 与直连模式相同的 LLM JSON 请求，最大 512 KiB。 |
+
+Worker 拒绝本机、私网/IP 字面量、自身地址、带凭据或查询参数的目标，并且不会跟随上游重定向。接口原样返回上游状态和 JSON 正文，所有响应均使用 `Cache-Control: no-store`。
 
 ### `GET /search`
 

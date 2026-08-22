@@ -23,7 +23,7 @@ import type {
     ReasoningEffort,
     ReasoningMode,
     TranslationApiProtocol,
-    TranslationSettingsV5,
+    TranslationSettingsV6,
 } from "./types";
 
 const API_PROTOCOLS: Array<{
@@ -63,10 +63,10 @@ export function TranslationSettingsDialog({
     onClose,
 }: {
     open: boolean;
-    settings: TranslationSettingsV5;
+    settings: TranslationSettingsV6;
     busy: boolean;
     canRetranslate: boolean;
-    onSave: (settings: TranslationSettingsV5) => void;
+    onSave: (settings: TranslationSettingsV6) => void;
     onClearCache: () => Promise<void>;
     onRetranslate: () => void;
     onClose: () => void;
@@ -273,6 +273,44 @@ export function TranslationSettingsDialog({
                                 </button>
                             </div>
                         </label>
+
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <span className="block text-xs text-gray-300">
+                                    Worker 代理
+                                </span>
+                                {draft.useWorkerProxy && (
+                                    <p className="mt-1 text-[10px] leading-4 text-gray-400">
+                                        开启表示你信任服务器传输你的API KEY。
+                                    </p>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                role="switch"
+                                aria-label="Worker 代理"
+                                aria-checked={draft.useWorkerProxy}
+                                onClick={() =>
+                                    setDraft((value) => ({
+                                        ...value,
+                                        useWorkerProxy: !value.useWorkerProxy,
+                                    }))
+                                }
+                                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                                    draft.useWorkerProxy
+                                        ? "bg-brand-500"
+                                        : "bg-gray-600"
+                                }`}
+                            >
+                                <span
+                                    className={`absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+                                        draft.useWorkerProxy
+                                            ? "translate-x-4"
+                                            : "translate-x-0.5"
+                                    }`}
+                                />
+                            </button>
+                        </div>
 
                         <div className="border-t border-gray-700 pt-4">
                             <div className="flex items-center justify-between gap-3">

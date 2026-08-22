@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolveBackendUrl } from "../src/backend-url";
 import {
     buildOcrCacheKey,
     buildTranslationCacheKey,
@@ -14,6 +15,7 @@ import {
 } from "../src/translation/geometry";
 import {
     buildTranslationSystemPrompt,
+    LLM_PROXY_TARGET_HEADER,
     parseTranslationResponse,
     translateOcrRegions,
 } from "../src/translation/llm";
@@ -29,6 +31,7 @@ import {
     saveTranslationSettings,
     V2_TRANSLATION_SETTINGS_STORAGE_KEY,
     V3_TRANSLATION_SETTINGS_STORAGE_KEY,
+    V4_TRANSLATION_SETTINGS_STORAGE_KEY,
     validateTranslationSettings,
 } from "../src/translation/settings";
 import {
@@ -51,15 +54,16 @@ import { loadTranslationImageBlob } from "../src/translation/service";
 import type {
     OcrPageResult,
     ReasoningEffort,
-    TranslationSettingsV5,
+    TranslationSettingsV6,
 } from "../src/translation/types";
 
-const settings: TranslationSettingsV5 = {
-    version: 5,
+const settings: TranslationSettingsV6 = {
+    version: 6,
     apiProtocol: "chat-completions",
     baseUrl: "https://llm.example.test/v1",
     model: "comic-translator",
     apiKey: "secret-key",
+    useWorkerProxy: false,
     autoTranslate: false,
     pretranslateRange: 2,
     translationConcurrency: 1,
@@ -126,6 +130,25 @@ function createMemoryCacheStorage() {
     } as CacheStorage;
     return storage;
 }
+
+test("resolves the shared Worker URL for local network development", () => {
+    assert.equal(
+        resolveBackendUrl({
+            rawUrl: "http://localhost:8787",
+            development: true,
+            hostname: "192.168.1.20",
+        }),
+        "http://192.168.1.20:8787",
+    );
+    assert.equal(
+        resolveBackendUrl({
+            rawUrl: "https://worker.example.com",
+            development: false,
+            hostname: "ignored.example.com",
+        }),
+        "https://worker.example.com",
+    );
+});
 
 test("streams OCR model downloads and reuses the persistent cache", async () => {
     const cacheStorage = createMemoryCacheStorage();
@@ -252,9 +275,18 @@ test("normalizes and persists BYOK settings, including the API key", () => {
     assert.deepEqual(loadTranslationSettings(storage), normalized);
     assert.match(values.values().next().value ?? "", /key-a/);
     assert.ok(validateTranslationSettings({ ...normalized, apiKey: "" }));
+    assert.match(
+        validateTranslationSettings({
+            ...normalized,
+            baseUrl: "http://llm.example.test/v1",
+            useWorkerProxy: true,
+        }) ?? "",
+        /HTTPS/,
+    );
     assert.equal(normalized.autoTranslate, false);
     assert.equal(normalized.pretranslateRange, 2);
     assert.equal(normalized.translationConcurrency, 1);
+    assert.equal(normalized.useWorkerProxy, false);
     assert.equal(normalized.reasoningMode, "off");
     assert.equal(normalized.reasoningEffort, "medium");
     assert.equal(normalized.smartSkipSoundEffects, true);
@@ -292,11 +324,12 @@ test("migrates V1 settings without losing credentials", () => {
     };
     const migrated = loadTranslationSettings(storage);
     assert.deepEqual(migrated, {
-        version: 5,
+        version: 6,
         apiProtocol: "chat-completions",
         baseUrl: "https://legacy.example/v1",
         model: "legacy-model",
         apiKey: "legacy-key",
+        useWorkerProxy: false,
         autoTranslate: false,
         pretranslateRange: 2,
         translationConcurrency: 1,
@@ -333,7 +366,7 @@ test("migrates V2 settings and preserves intentionally empty prompts", () => {
         removeItem: (key: string) => values.delete(key),
     };
     const migrated = loadTranslationSettings(storage);
-    assert.equal(migrated.version, 5);
+    assert.equal(migrated.version, 6);
     assert.equal(migrated.apiProtocol, "chat-completions");
     assert.equal(migrated.translationConcurrency, 4);
     assert.equal(
@@ -376,7 +409,7 @@ test("migrates V3 settings with smart skipping enabled by default", () => {
         removeItem: (key: string) => values.delete(key),
     };
     const migrated = loadTranslationSettings(storage);
-    assert.equal(migrated.version, 5);
+    assert.equal(migrated.version, 6);
     assert.equal(migrated.apiProtocol, "chat-completions");
     assert.equal(migrated.apiKey, "v3-key");
     assert.equal(migrated.smartSkipSoundEffects, true);
@@ -387,7 +420,7 @@ test("migrates V3 settings with smart skipping enabled by default", () => {
 test("migrates V4 settings to Chat Completions", () => {
     const values = new Map<string, string>([
         [
-            PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
+            V4_TRANSLATION_SETTINGS_STORAGE_KEY,
             JSON.stringify({
                 ...settings,
                 version: 4,
@@ -402,9 +435,34 @@ test("migrates V4 settings to Chat Completions", () => {
         removeItem: (key: string) => values.delete(key),
     };
     const migrated = loadTranslationSettings(storage);
-    assert.equal(migrated.version, 5);
+    assert.equal(migrated.version, 6);
     assert.equal(migrated.apiProtocol, "chat-completions");
     assert.equal(migrated.apiKey, "v4-key");
+    saveTranslationSettings(storage, migrated);
+    assert.equal(values.has(V4_TRANSLATION_SETTINGS_STORAGE_KEY), false);
+});
+
+test("migrates V5 settings with the Worker proxy disabled", () => {
+    const values = new Map<string, string>([
+        [
+            PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY,
+            JSON.stringify({
+                ...settings,
+                version: 5,
+                apiProtocol: "responses",
+                useWorkerProxy: undefined,
+            }),
+        ],
+    ]);
+    const storage = {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+    };
+    const migrated = loadTranslationSettings(storage);
+    assert.equal(migrated.version, 6);
+    assert.equal(migrated.apiProtocol, "responses");
+    assert.equal(migrated.useWorkerProxy, false);
     saveTranslationSettings(storage, migrated);
     assert.equal(values.has(PREVIOUS_TRANSLATION_SETTINGS_STORAGE_KEY), false);
 });
@@ -607,6 +665,14 @@ test("request identity includes credentials but ignores scheduler settings", () 
             ...settings,
             smartSkipSoundEffects: false,
         }),
+    );
+    assert.notEqual(
+        requestKey,
+        getTranslationRequestKey({ ...settings, useWorkerProxy: true }),
+    );
+    assert.equal(
+        getProviderKey(settings),
+        getProviderKey({ ...settings, useWorkerProxy: true }),
     );
     assert.equal(
         requestKey,
@@ -928,6 +994,64 @@ test("sends only OCR text and geometry to the OpenAI-compatible endpoint", async
     assert.ok(
         systemPrompt.lastIndexOf("Output protocol") >
             systemPrompt.indexOf("成人向漫画"),
+    );
+});
+
+test("routes LLM requests through the Worker proxy when enabled", async () => {
+    let requestUrl = "";
+    let requestInit: RequestInit | undefined;
+    const fetchImpl: typeof fetch = async (input, init) => {
+        requestUrl = String(input);
+        requestInit = init;
+        return new Response(
+            JSON.stringify({
+                choices: [
+                    {
+                        message: {
+                            content:
+                                '{"pageStatus":"needs_translation","translations":[{"id":"r1","action":"translate","translation":"你好"}]}',
+                        },
+                    },
+                ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+    };
+
+    const output = await translateOcrRegions({
+        settings: { ...settings, useWorkerProxy: true },
+        regions: ocr.regions,
+        fetchImpl,
+        workerBaseUrl: "https://worker.example.test/base/",
+    });
+
+    const headers = requestInit?.headers as Record<string, string>;
+    assert.equal(requestUrl, "https://worker.example.test/llm-proxy");
+    assert.equal(
+        headers[LLM_PROXY_TARGET_HEADER],
+        "https://llm.example.test/v1/chat/completions",
+    );
+    assert.equal(headers.Authorization, "Bearer secret-key");
+    assert.match(String(requestInit?.body), /こんにちは/);
+    assert.deepEqual(output.decisions.get("r1"), {
+        action: "translate",
+        translation: "你好",
+    });
+});
+
+test("reports a missing Worker URL before starting a proxied request", async () => {
+    await assert.rejects(
+        translateOcrRegions({
+            settings: { ...settings, useWorkerProxy: true },
+            regions: ocr.regions,
+            fetchImpl: async () => {
+                throw new Error("request should not start");
+            },
+            workerBaseUrl: "",
+        }),
+        (error: unknown) =>
+            error instanceof Error &&
+            error.message === "Worker 代理不可用，请检查 VITE_BACKEND_URL",
     );
 });
 

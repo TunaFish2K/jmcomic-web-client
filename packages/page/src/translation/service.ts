@@ -18,7 +18,7 @@ import {
     TRANSLATION_PROMPT_VERSION,
     type OcrPageResult,
     type PageTranslationRecord,
-    type TranslationSettingsV5,
+    type TranslationSettingsV6,
     type TranslationStage,
 } from "./types";
 
@@ -72,7 +72,7 @@ export async function getCachedPageTranslation({
 }: {
     chapterId: string;
     imageName: string;
-    settings: TranslationSettingsV5;
+    settings: TranslationSettingsV6;
 }) {
     const pageKey = buildPageKey(chapterId, imageName);
     const ocrKey = getOcrKey(pageKey);
@@ -98,7 +98,7 @@ export async function translatePage({
     imageName: string;
     imageUrl?: string;
     loadImageBlob?: LoadTranslationImageBlob;
-    settings: TranslationSettingsV5;
+    settings: TranslationSettingsV6;
     forceTranslation?: boolean;
     onStage?: (stage: TranslationStage) => void;
     fetchImpl?: typeof fetch;

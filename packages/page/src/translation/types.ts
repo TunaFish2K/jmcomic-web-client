@@ -1,4 +1,4 @@
-export const TRANSLATION_SETTINGS_VERSION = 5 as const;
+export const TRANSLATION_SETTINGS_VERSION = 6 as const;
 export const OCR_MODEL_VERSION = "ppocr-v5-mobile-ja@1";
 export const OCR_PREPROCESS_VERSION = "max-1600@1";
 export const TRANSLATION_PROMPT_VERSION = "ja-zh-cn@4";
@@ -33,12 +33,13 @@ export type ReasoningEffort =
     | "xhigh"
     | "max";
 
-export type TranslationSettingsV5 = {
+export type TranslationSettingsV6 = {
     version: typeof TRANSLATION_SETTINGS_VERSION;
     apiProtocol: TranslationApiProtocol;
     baseUrl: string;
     model: string;
     apiKey: string;
+    useWorkerProxy: boolean;
     autoTranslate: boolean;
     pretranslateRange: number;
     translationConcurrency: number;

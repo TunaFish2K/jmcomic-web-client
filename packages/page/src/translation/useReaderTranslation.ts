@@ -36,7 +36,7 @@ import {
     TRANSLATION_PROMPT_VERSION,
     type OcrInitializationProgress,
     type PageTranslationRecord,
-    type TranslationSettingsV5,
+    type TranslationSettingsV6,
     type TranslationStage,
 } from "./types";
 
@@ -54,7 +54,7 @@ type TranslationJob = {
     imageName: string;
     imageUrl?: string;
     loadImageBlob?: LoadTranslationImageBlob;
-    settings: TranslationSettingsV5;
+    settings: TranslationSettingsV6;
     forceTranslation: boolean;
     source: "manual" | "auto";
     windowKey: string;
@@ -75,7 +75,7 @@ export type TranslationNotice = {
 function getCompletionKey(
     chapterId: string,
     imageName: string,
-    settings: TranslationSettingsV5,
+    settings: TranslationSettingsV6,
 ) {
     return `${buildPageKey(chapterId, imageName)}:${getProviderKey(settings)}:${getPromptKey(settings)}:${TRANSLATION_PROMPT_VERSION}`;
 }
@@ -87,7 +87,7 @@ function getWindowKey({
 }: {
     chapterId: string;
     currentPage: number;
-    settings: TranslationSettingsV5;
+    settings: TranslationSettingsV6;
 }) {
     return stableHash(
         JSON.stringify({
@@ -108,7 +108,7 @@ function buildTranslationJobContext({
     chapterId?: string;
     pages: ReaderTranslationPage[];
     currentPage: number;
-    settings: TranslationSettingsV5;
+    settings: TranslationSettingsV6;
 }) {
     const configured = isTranslationConfigured(settings);
     const currentImageName = pages[currentPage]?.imageName;
@@ -580,7 +580,7 @@ export function useReaderTranslation({
         syncAutoQueue();
     }, [chapterId, currentPage, pages, settings, syncAutoQueue]);
 
-    const commitSettings = useCallback((next: TranslationSettingsV5) => {
+    const commitSettings = useCallback((next: TranslationSettingsV6) => {
         const saved = saveTranslationSettings(window.localStorage, next);
         pausedWindowRef.current = null;
         suppressedAutoCompletionsRef.current.clear();

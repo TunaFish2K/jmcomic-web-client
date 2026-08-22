@@ -7,6 +7,16 @@ import worker from '../src/index';
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 describe('worker routes', () => {
+	it('allows the LLM proxy headers in CORS preflight requests', async () => {
+		const response = await SELF.fetch('https://example.com/llm-proxy', {
+			method: 'OPTIONS',
+		});
+		expect(response.status).toBe(200);
+		expect(response.headers.get('Access-Control-Allow-Headers')).toBe(
+			'Authorization, Content-Type, X-LLM-Target-URL',
+		);
+	});
+
 	it('returns 400 when /search misses query', async () => {
 		const request = new IncomingRequest('http://example.com/search');
 		const ctx = createExecutionContext();

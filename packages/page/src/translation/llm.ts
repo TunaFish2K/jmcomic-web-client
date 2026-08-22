@@ -1,10 +1,37 @@
 import type {
     OcrRegion,
     TranslationPageStatus,
-    TranslationSettingsV5,
+    TranslationSettingsV6,
 } from "./types";
 import { getReasoningEffortForRequest, getTranslationApiUrl } from "./settings";
 import { detectOcrPageStatus } from "./language";
+import { getBackendUrl } from "../backend-url";
+
+export const LLM_PROXY_TARGET_HEADER = "X-LLM-Target-URL";
+
+function getTranslationTransport(
+    settings: TranslationSettingsV6,
+    workerBaseUrl?: string,
+) {
+    const upstreamUrl = getTranslationApiUrl(settings);
+    if (!settings.useWorkerProxy) {
+        return { requestUrl: upstreamUrl, upstreamUrl: null };
+    }
+
+    const backendUrl = workerBaseUrl ?? getBackendUrl();
+    try {
+        if (!backendUrl) throw new Error("missing backend URL");
+        return {
+            requestUrl: new URL("/llm-proxy", backendUrl).toString(),
+            upstreamUrl,
+        };
+    } catch {
+        throw new TranslationRequestError(
+            "network",
+            "Worker 代理不可用，请检查 VITE_BACKEND_URL",
+        );
+    }
+}
 
 export type TranslationErrorCode =
     | "cancelled"
@@ -62,7 +89,7 @@ export type TranslationResponse = {
     decisions: Map<string, TranslationDecision>;
 };
 
-export function buildTranslationSystemPrompt(settings: TranslationSettingsV5) {
+export function buildTranslationSystemPrompt(settings: TranslationSettingsV6) {
     return [
         BASE_SYSTEM_PROMPT,
         settings.translationStylePrompt
@@ -221,7 +248,7 @@ async function getHttpErrorMessage(response: Response) {
 
 function getResponseContent(
     body: unknown,
-    apiProtocol: TranslationSettingsV5["apiProtocol"],
+    apiProtocol: TranslationSettingsV6["apiProtocol"],
 ) {
     if (apiProtocol === "chat-completions") {
         const content = (
@@ -269,11 +296,13 @@ export async function translateOcrRegions({
     regions,
     fetchImpl = fetch,
     signal,
+    workerBaseUrl,
 }: {
-    settings: TranslationSettingsV5;
+    settings: TranslationSettingsV6;
     regions: OcrRegion[];
     fetchImpl?: typeof fetch;
     signal?: AbortSignal;
+    workerBaseUrl?: string;
 }) {
     if (regions.length === 0) {
         return {
@@ -295,6 +324,7 @@ export async function translateOcrRegions({
             ),
         } satisfies TranslationResponse;
     }
+    const transport = getTranslationTransport(settings, workerBaseUrl);
     const requestSignal = createRequestSignal(signal);
     const reasoningEffort = getReasoningEffortForRequest(settings);
     const systemPrompt = buildTranslationSystemPrompt(settings);
@@ -330,11 +360,14 @@ export async function translateOcrRegions({
               };
     let response: Response;
     try {
-        response = await fetchImpl(getTranslationApiUrl(settings), {
+        response = await fetchImpl(transport.requestUrl, {
             method: "POST",
             headers: {
                 Authorization: `Bearer ${settings.apiKey}`,
                 "Content-Type": "application/json",
+                ...(transport.upstreamUrl
+                    ? { [LLM_PROXY_TARGET_HEADER]: transport.upstreamUrl }
+                    : {}),
             },
             body: JSON.stringify(requestBody),
             signal: requestSignal.signal,

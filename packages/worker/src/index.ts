@@ -2,6 +2,7 @@ import { getClientDataAndCreateClient, getDomainsFromDomainServer } from '@tiny-
 import { DOMAIN_SERVER_URL, SEARCH_PAGE_SIZE } from '@tiny-client/shared/constants';
 import { assertDistinctSearchResult, selectFirstDistinctSearchResult } from './search';
 import { SearchResultCache, SEARCH_RESULT_CACHE_TTL_MS } from './search-cache';
+import { handleLlmProxyRequest, LLM_PROXY_TARGET_HEADER } from './llm-proxy';
 
 const BATCH_PHOTO_MAX_IDS = 20;
 const BATCH_ALBUM_MAX_IDS = 15;
@@ -87,7 +88,8 @@ type ClientContext = {
 const corsHeaders = {
 	'Access-Control-Allow-Origin': '*',
 	'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
-	'Access-Control-Allow-Headers': '*',
+	'Access-Control-Allow-Headers': `Authorization, Content-Type, ${LLM_PROXY_TARGET_HEADER}`,
+	'Access-Control-Max-Age': '86400',
 };
 
 // Add a short browser-side Cache-Control TTL to responses whose payload is
@@ -267,6 +269,10 @@ export default {
 
 		try {
 			// API Routes
+			if (url.pathname === '/llm-proxy') {
+				return handleLlmProxyRequest(request, corsHeaders);
+			}
+
 			if (url.pathname === '/search') {
 				const query = url.searchParams.get('query');
 				if (!query) return new Response("Missing query 'query'", { status: 400, headers: corsHeaders });
