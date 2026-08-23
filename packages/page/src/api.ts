@@ -79,6 +79,7 @@ export async function search(
         mainTag?: 0 | 2 | 1 | 3 | 4;
         previousIds?: string[];
     },
+    signal?: AbortSignal,
 ) {
     options = options ?? {};
     if (!options.page) options.page = 1;
@@ -96,7 +97,7 @@ export async function search(
     if (options.page > 1 && options.previousIds?.length) {
         url.searchParams.set("previousIds", options.previousIds.join(","));
     }
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) {
         const errorMessage = await res.text();
         throw new Error(
@@ -106,9 +107,9 @@ export async function search(
     return normalizeSearchResult((await res.json()) as SearchResult);
 }
 
-export async function getAlbum(id: string) {
+export async function getAlbum(id: string, signal?: AbortSignal) {
     const url = new URL(`/album/${id}`, BACKEND_URL);
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) {
         if (res.status === 404) return null;
         const errorMessage = await res.text();
@@ -139,11 +140,11 @@ export type BatchAlbumItem =
     | { albumId: string; album: Album; photo: PhotoWithScrambleId | null; error?: never }
     | { albumId: string; album: null; photo: null; error: BatchError };
 
-export async function getBatchAlbum(ids: string[]): Promise<BatchAlbumItem[]> {
+export async function getBatchAlbum(ids: string[], signal?: AbortSignal): Promise<BatchAlbumItem[]> {
     if (ids.length === 0) return [];
     const url = new URL('/batch-album', BACKEND_URL);
     url.searchParams.set('ids', ids.join(','));
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) {
         const errorMessage = await res.text();
         throw new Error(

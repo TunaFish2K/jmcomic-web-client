@@ -37,7 +37,7 @@ export function useSearchState(onNavigate: () => void) {
     const searchSessionKey = `${urlQuery}\u0000${urlCategory}\u0000${urlOrderBy}\u0000${urlTime}`;
     const searchQuery = useQuery<SearchResult>({
         queryKey: ["search", urlQuery, urlPage, urlCategory, urlOrderBy, urlTime],
-        queryFn: () => {
+        queryFn: ({ signal }) => {
             const previousSearch = lastSettledSearchRef.current;
             const previousIds = previousSearch?.sessionKey === searchSessionKey && previousSearch.page !== urlPage
                 ? previousSearch.ids
@@ -48,7 +48,7 @@ export function useSearchState(onNavigate: () => void) {
                 orderBy: urlOrderBy,
                 time: urlTime,
                 previousIds,
-            });
+            }, signal);
         },
         enabled: !!urlQuery,
         staleTime: 5 * 60 * 1000,   // don't refetch the same query within 5 min

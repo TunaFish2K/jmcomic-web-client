@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getSliceCount, reverseImageBySlice } from "@tiny-client/shared";
+import { getSliceCount, reverseImageBySlice, shouldRetryImageStatus } from "@tiny-client/shared";
 import { generateCoverCacheKey, getCachedImageEntry, setCachedImage } from "@tiny-client/shared/cache";
 import pLimit from "p-limit";
 
@@ -18,6 +18,7 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
     useEffect(() => {
         let cancelled = false;
         let created: string | null = null;
+        const controller = new AbortController();
         setObjectUrl(null);
         setFailed(false);
         const cacheKey = generateCoverCacheKey(albumId, coverUrl);
@@ -28,6 +29,9 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
             if (!cancelled) {
                 setObjectUrl(created);
                 setFailed(false);
+            } else {
+                URL.revokeObjectURL(created);
+                created = null;
             }
         };
 
@@ -42,10 +46,16 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
             const RETRY_DELAYS = [400, 1000, 2000];
             for (let attempt = 0; attempt <= RETRY_DELAYS.length && !cancelled; attempt++) {
                 try {
-                    const res = await fetch(coverUrl);
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    const res = await fetch(coverUrl, { signal: controller.signal });
+                    if (!res.ok) {
+                        if (!shouldRetryImageStatus(res.status)) {
+                            setFailed(true);
+                            return;
+                        }
+                        throw new Error(`HTTP ${res.status}`);
+                    }
                     const buffer = await res.arrayBuffer();
-                    const filename = coverUrl.split('/').pop() ?? '';
+                    const filename = coverUrl.slice(coverUrl.lastIndexOf('/') + 1);
                     const slices = getSliceCount(scrambleId, parseInt(albumId), filename);
                     const { data } = slices > 0
                         ? await reverseImageBySlice(buffer, slices)
@@ -59,12 +69,19 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
                         setFailed(true);
                         return;
                     }
-                    await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+                    await new Promise<void>((resolve) => {
+                        const timer = window.setTimeout(resolve, RETRY_DELAYS[attempt]);
+                        controller.signal.addEventListener('abort', () => {
+                            window.clearTimeout(timer);
+                            resolve();
+                        }, { once: true });
+                    });
                 }
             }
         });
         return () => {
             cancelled = true;
+            controller.abort();
             if (created) URL.revokeObjectURL(created);
         };
     }, [coverUrl, scrambleId, albumId]);

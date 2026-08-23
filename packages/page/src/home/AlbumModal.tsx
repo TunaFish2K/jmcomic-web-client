@@ -20,13 +20,13 @@ export function AlbumModal({ albumId, cachedData, onClose }: {
     const navigate = useNavigate();
     const detailQuery = useQuery<BatchAlbumItem>({
         queryKey: ['album-detail', albumId],
-        queryFn: async () => {
+        queryFn: async ({ signal }) => {
             const persisted = await getCachedAlbum(albumId);
             if (persisted) {
                 return { albumId, album: persisted.album, photo: persisted.photo };
             }
 
-            const detail = (await getBatchAlbum([albumId])).find((item) => item.albumId === albumId);
+            const detail = (await getBatchAlbum([albumId], signal)).find((item) => item.albumId === albumId);
             if (!detail) throw new Error('详情接口未返回该本子');
             if (!detail.error) {
                 await setCachedAlbum(detail.albumId, detail.album, detail.photo);

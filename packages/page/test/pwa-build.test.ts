@@ -1,9 +1,10 @@
+// @vitest-environment node
 import assert from 'node:assert/strict';
 import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import { gunzipSync } from 'node:zlib';
 import {
   ORT_MJS_ASSET_PATH,

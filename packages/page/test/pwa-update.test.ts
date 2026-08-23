@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import {
   PWA_UPDATE_MIN_GAP_MS,
   startPwaUpdateChecks,

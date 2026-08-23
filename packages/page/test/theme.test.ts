@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import {
   DEFAULT_THEME_PREFERENCES,
   getAccentColor,
@@ -153,6 +153,15 @@ describe('theme preferences', () => {
     assert.ok(getContrastRatio(darkMark, '#000000') >= 4.5);
   });
 
+  it('normalizes invalid favicon colors and adjusts colors across every hue sector', () => {
+    const accents = ['#FF0000', '#FFFF00', '#00FF00', '#00FFFF', '#0000FF', '#FF00FF', '#777777'];
+    for (const accent of accents) {
+      const mark = ensureFaviconContrast(accent, '#FFFFFF', 7);
+      assert.ok(getContrastRatio(mark, '#FFFFFF') >= 7, `${accent} should be adjusted`);
+    }
+    assert.equal(ensureFaviconContrast('invalid', 'invalid'), ensureFaviconContrast('#00DD99', '#FFFFFF'));
+  });
+
   it('creates a data URL with the fixed geometric mark', () => {
     const svg = createFaviconSvg('#E85D75', 'dark');
     assert.match(svg, new RegExp(APP_ICON_PATH));
@@ -173,5 +182,7 @@ describe('theme preferences', () => {
     updateFavicon(documentNode, '#00DD99', 'light');
     assert.match(decodeURIComponent(href), /fill="#FFFFFF"/);
     assert.match(decodeURIComponent(href), /fill="#00(?:[0-9A-F]{4})"/);
+
+    updateFavicon({ getElementById: () => null } as unknown as Document, '#00DD99', 'light');
   });
 });

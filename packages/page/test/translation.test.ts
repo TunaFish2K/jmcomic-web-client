@@ -1,5 +1,7 @@
+// @vitest-environment node
+
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "vitest";
 import { gzipSync } from "node:zlib";
 import { resolveBackendUrl } from "../src/backend-url";
 import {
@@ -10,6 +12,7 @@ import {
     getTranslationRequestKey,
 } from "../src/translation/cache";
 import {
+    clampUnit,
     getContainedImageRect,
     getNormalizedPolygon,
     getPolygonBounds,
@@ -597,6 +600,14 @@ test("runs OCR tasks serially even when pages are scheduled concurrently", async
 });
 
 test("normalizes OCR geometry and object-contain placement", () => {
+    assert.equal(clampUnit(Number.NaN), 0);
+    assert.deepEqual(getNormalizedPolygon([{ x: 1, y: 1 }], 0, 100), []);
+    assert.deepEqual(getPolygonBounds([]), {
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+    });
     const polygon = getNormalizedPolygon(
         [
             { x: -10, y: 50 },
@@ -623,6 +634,15 @@ test("normalizes OCR geometry and object-contain placement", () => {
             naturalHeight: 2000,
         }),
         { left: 250, top: 0, width: 500, height: 1000 },
+    );
+    assert.deepEqual(
+        getContainedImageRect({
+            elementWidth: 0,
+            elementHeight: 1000,
+            naturalWidth: 1000,
+            naturalHeight: 2000,
+        }),
+        { left: 0, top: 0, width: 0, height: 0 },
     );
 });
 

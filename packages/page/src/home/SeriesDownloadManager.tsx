@@ -18,13 +18,11 @@ export function SeriesDownloadManager({ albumName, items }: {
     const [rangeStart, setRangeStart] = useState('1');
     const [rangeEnd, setRangeEnd] = useState(String(items.length));
     const [batchMode, setBatchMode] = useState<BatchMode>('individual');
-    const [rangeError, setRangeError] = useState<string | null>(null);
     const orderedItems = [...items].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 
     const quickSelectRange = useCallback((start: number, end: number) => {
         setRangeStart(String(start));
         setRangeEnd(String(end));
-        setRangeError(null);
     }, []);
 
     const selectedItems = (() => {
@@ -39,17 +37,6 @@ export function SeriesDownloadManager({ albumName, items }: {
         const start = parseInt(rangeStart, 10);
         const end = parseInt(rangeEnd, 10);
 
-        if (!Number.isInteger(start) || !Number.isInteger(end)) {
-            setRangeError('请输入有效的数字范围');
-            return;
-        }
-        if (start < 1 || end < 1 || start > end || end > orderedItems.length) {
-            setRangeError(`范围需在 1-${orderedItems.length} 之间，且起始不能大于结束`);
-            return;
-        }
-
-        setRangeError(null);
-
         if (batchMode === 'individual') {
             const queuedItems = selectedItems.filter((item) => !tasks.find((t) =>
                 t.albumId === item.id && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
@@ -57,11 +44,6 @@ export function SeriesDownloadManager({ albumName, items }: {
             if (queuedItems.length === 0) return;
 
             for (const item of queuedItems) {
-                const existingTask = tasks.find((t) =>
-                    t.albumId === item.id && t.format === format && t.stage !== 'completed' && t.stage !== 'error'
-                );
-                if (existingTask) continue;
-
                 const { id: taskId, signal } = addTask({
                     albumId: item.id,
                     name: item.name,
@@ -195,9 +177,6 @@ export function SeriesDownloadManager({ albumName, items }: {
             <div className="text-xs text-gray-500 dark:text-gray-400">
                 共 {orderedItems.length} 话，当前选择 {selectedItems.length} 话
             </div>
-            {rangeError && (
-                <div className="text-xs text-red-500">{rangeError}</div>
-            )}
             <div className="flex gap-2">
                 <Button size="sm" variant="secondary" className="text-xs flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('pdf'); }}>
                     <FileText size={14} className="mr-1" />PDF

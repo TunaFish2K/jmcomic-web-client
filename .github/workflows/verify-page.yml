@@ -25,10 +25,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @tiny-client/page exec playwright install --with-deps chromium firefox
+      - run: pnpm --filter @tiny-client/page exec playwright install --with-deps chromium firefox webkit
       - run: pnpm --filter @tiny-client/page run lint
       - run: pnpm run page:build
-      - run: pnpm --filter @tiny-client/page test
+      - run: pnpm --filter @tiny-client/page run test:coverage
       - run: pnpm --filter @tiny-client/page run test:browser
       - if: failure()
         uses: actions/upload-artifact@v4

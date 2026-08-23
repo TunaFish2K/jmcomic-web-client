@@ -4,8 +4,51 @@ import type { ReadingDirection, BarSide } from './reader-store';
 import { getCacheStats, clearAllCache } from '@tiny-client/shared';
 import { ThemePanel } from '../theme/ThemeControls';
 import { getTranslationControlAction } from '../translation/scheduler';
+import { getSeekPageFromKey } from './input';
 
 type ChapterInfo = { id: string; name: string; order: number };
+
+const FOCUSABLE_SELECTOR = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
+
+function trapDialogFocus(event: React.KeyboardEvent<HTMLElement>) {
+  if (event.key !== 'Tab') return;
+  const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function SettingSwitch({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      className="flex min-h-11 w-full items-center justify-between gap-3 rounded-md px-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+    >
+      <span className="text-xs text-gray-300">{label}</span>
+      <span className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? 'bg-brand-500' : 'bg-gray-600'}`}>
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
+      </span>
+    </button>
+  );
+}
 
 function ChapterDrawer({
   chapters,
@@ -21,19 +64,25 @@ function ChapterDrawer({
   onClose: () => void;
 }) {
   const activeRef = useRef<HTMLButtonElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
+    (activeRef.current ?? closeRef.current)?.focus();
   }, []);
 
   return (
-    <div className="absolute inset-0 z-50 bg-black/60 flex justify-end" onClick={onClose}>
+    <div className="absolute inset-0 z-50 flex justify-end bg-black/60" onClick={onClose} data-reader-control>
       <div
         className="w-72 max-w-[85vw] h-full bg-gray-900 overflow-y-auto shadow-xl flex flex-col"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reader-chapter-drawer-title"
+        onKeyDown={trapDialogFocus}
       >
         <div className="p-4 border-b border-gray-700 flex items-center justify-between sticky top-0 bg-gray-900 z-10">
-          <span className="text-white font-semibold text-sm">章节列表 ({chapters.length})</span>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <span id="reader-chapter-drawer-title" className="text-white font-semibold text-sm">章节列表 ({chapters.length})</span>
+          <button ref={closeRef} type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center text-gray-400 hover:text-white" aria-label="关闭章节列表">
             <X size={18} />
           </button>
         </div>
@@ -151,48 +200,47 @@ function SettingsPanel({
   onClearCache: () => void;
 }) {
   const isVertical = direction === 'top-down';
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
 
   return (
-    <div className="absolute top-0 right-0 z-50 max-h-[100dvh] w-64 overflow-y-auto rounded-bl-xl border-b border-l border-gray-700/50 bg-gray-900/95 shadow-xl backdrop-blur">
+    <div
+      className="absolute right-0 top-0 z-50 max-h-[100dvh] w-72 max-w-[calc(100vw-24px)] overflow-y-auto rounded-bl-md border-b border-l border-gray-700/50 bg-gray-900/95 shadow-xl backdrop-blur"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="reader-settings-title"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={trapDialogFocus}
+      style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+    >
       <div className="p-3 border-b border-gray-700 flex items-center justify-between">
-        <span className="text-white text-sm font-medium flex items-center gap-2">
+        <span id="reader-settings-title" className="text-white text-sm font-medium flex items-center gap-2">
           <Settings size={15} />阅读设置
         </span>
-        <button onClick={onClose} className="text-gray-400 hover:text-white">
+        <button ref={closeRef} type="button" onClick={onClose} className="flex h-10 w-10 items-center justify-center text-gray-400 hover:text-white" aria-label="关闭阅读设置">
           <X size={16} />
         </button>
       </div>
 
       <div className="p-3 space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex min-h-11 items-center justify-between gap-3">
           <span className="text-gray-300 text-xs">阅读方向</span>
           <button
+            type="button"
             onClick={onToggleDirection}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white text-xs transition-colors"
+            className="flex min-h-10 items-center gap-1.5 rounded-md bg-gray-800 px-3 py-1.5 text-xs text-white transition-colors hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+            aria-label={`切换阅读方向，当前为${isVertical ? '上下滚动' : '左右滚动'}`}
           >
             {isVertical ? <><ArrowDownUp size={14} /> 上下滚动</> : <><ArrowLeftRight size={14} /> 左右滚动</>}
           </button>
         </div>
 
-        <div className="flex items-center justify-between">
-          <span className="text-gray-300 text-xs">自动吸附</span>
-          <button
-            onClick={onToggleAutoSnap}
-            className={`relative w-9 h-5 rounded-full transition-colors ${autoSnap ? 'bg-brand-500' : 'bg-gray-600'}`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${autoSnap ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
+        <SettingSwitch label="自动吸附" checked={autoSnap} onChange={onToggleAutoSnap} />
 
-        <div className="flex items-center justify-between">
-          <span className="text-gray-300 text-xs">无缝模式</span>
-          <button
-            onClick={onToggleSeamlessMode}
-            className={`relative w-9 h-5 rounded-full transition-colors ${seamlessMode ? 'bg-brand-500' : 'bg-gray-600'}`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${seamlessMode ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
+        <SettingSwitch label="无缝模式" checked={seamlessMode} onChange={onToggleSeamlessMode} />
 
         <div>
           <div className="flex items-center justify-between gap-3">
@@ -200,6 +248,7 @@ function SettingsPanel({
             <span className="text-gray-400 text-xs">前后各 {lazyRenderRange} 页</span>
           </div>
           <input
+            id="reader-prefetch-range"
             type="range"
             min={1}
             max={12}
@@ -207,26 +256,18 @@ function SettingsPanel({
             value={lazyRenderRange}
             onChange={(e) => onChangeLazyRenderRange(Number.parseInt(e.target.value, 10))}
             className="mt-2 h-1.5 w-full cursor-pointer accent-brand-500"
+            aria-label="预取页数"
           />
         </div>
 
-        <div className="flex items-center justify-between">
-          <span className="text-gray-300 text-xs">信息栏在下方</span>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <span className="text-gray-300 text-xs">信息栏可见</span>
-          <button onClick={onToggleBarVisible} className={`relative w-9 h-5 rounded-full transition-colors ${barVisible ? 'bg-brand-500' : 'bg-gray-600'}`}>
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${barVisible ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
+        <SettingSwitch label="显示信息栏" checked={barVisible} onChange={onToggleBarVisible} />
 
         <div className="border-t border-gray-700/50 pt-3">
           <div className="flex items-center justify-between gap-3">
             <span className="text-gray-300 text-xs">
               漫画翻译 <span className="text-[9px] font-medium uppercase text-brand-400">Beta</span>
             </span>
-            <button onClick={onOpenTranslationSettings} className="flex items-center gap-1.5 rounded-md bg-gray-800 px-2.5 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700">
+            <button type="button" onClick={onOpenTranslationSettings} className="flex min-h-10 items-center gap-1.5 rounded-md bg-gray-800 px-2.5 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700">
               <Languages size={14} />
               {translationConfigured ? '翻译配置' : '配置 LLM'}
             </button>
@@ -242,8 +283,9 @@ function SettingsPanel({
           <div className="flex items-center justify-between">
             <span className="text-gray-300 text-xs">图片缓存</span>
             <button
+              type="button"
               onClick={onClearCache}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-gray-800 hover:bg-red-900/50 text-gray-400 hover:text-red-400 text-xs transition-colors"
+              className="flex min-h-10 items-center gap-1 rounded bg-gray-800 px-3 py-1 text-xs text-gray-400 transition-colors hover:bg-red-900/50 hover:text-red-400"
             >
               <Trash2 size={12} />清除
             </button>
@@ -353,6 +395,17 @@ export function ReaderOverlay({
   const [showChapterDrawer, setShowChapterDrawer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [cacheStats, setCacheStats] = useState<{ count: number; totalSize: number } | null>(null);
+  const chapterTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeChapterDrawer = useCallback(() => {
+    setShowChapterDrawer(false);
+    window.requestAnimationFrame(() => chapterTriggerRef.current?.focus());
+  }, []);
+  const closeSettings = useCallback(() => {
+    setShowSettings(false);
+    window.requestAnimationFrame(() => settingsTriggerRef.current?.focus());
+  }, []);
 
   useEffect(() => {
     getCacheStats().then(setCacheStats);
@@ -398,6 +451,7 @@ export function ReaderOverlay({
   // ─── Seek drag ─────────────────────────────────────────────────
   const progressRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
   const dragPageRef = useRef(-1);
   const [displayPage, setDisplayPage] = useState<number | null>(null);
 
@@ -429,58 +483,83 @@ export function ReaderOverlay({
     }, 800);
   }, []);
 
-  const onDragMove = useCallback((clientX: number, clientY: number) => {
+  const updateDragPreview = useCallback((clientX: number, clientY: number) => {
     const page = pageFromEvent(clientX, clientY);
     if (page === dragPageRef.current) return;
     dragPageRef.current = page;
     setDisplayPage(page);
-    onSeekPage?.(page);
-  }, [pageFromEvent, onSeekPage]);
+  }, [pageFromEvent]);
 
-  const onDragEnd = useCallback(() => {
+  const finishDrag = useCallback(() => {
     const page = dragPageRef.current;
     if (page >= 0) onSeekPage?.(page);
+    draggingRef.current = false;
     showTooltipTemporarily();
   }, [onSeekPage, showTooltipTemporarily]);
 
-  const onDragStart = useCallback((clientX: number, clientY: number) => {
+  const onProgressPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || totalPages < 2) return;
+    event.preventDefault();
+    event.stopPropagation();
     if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
+    draggingRef.current = true;
     setDragging(true);
-    const page = pageFromEvent(clientX, clientY);
+    const page = pageFromEvent(event.clientX, event.clientY);
     dragPageRef.current = page;
     setDisplayPage(page);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [pageFromEvent, totalPages]);
 
-    // Attach listeners synchronously — don't wait for useEffect
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      const pos = 'touches' in e
-        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
-        : { x: e.clientX, y: e.clientY };
-      onDragMove(pos.x, pos.y);
-    };
-    const onEnd = () => {
-      onDragEnd();
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onEnd);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onEnd);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onEnd);
-    window.addEventListener('touchmove', onMove, { passive: true });
-    window.addEventListener('touchend', onEnd);
-  }, [pageFromEvent, onDragMove, onDragEnd]);
+  const onProgressPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current || !event.isPrimary) return;
+    event.preventDefault();
+    updateDragPreview(event.clientX, event.clientY);
+  }, [updateDragPreview]);
+
+  const onProgressPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current || !event.isPrimary) return;
+    updateDragPreview(event.clientX, event.clientY);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    finishDrag();
+  }, [finishDrag, updateDragPreview]);
+
+  const onProgressPointerCancel = useCallback(() => {
+    draggingRef.current = false;
+    dragPageRef.current = -1;
+    setDragging(false);
+    setDisplayPage(null);
+  }, []);
+
+  const onProgressKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    const page = getSeekPageFromKey({
+      key: event.key,
+      currentPage,
+      totalPages,
+    });
+    if (page === null) return;
+    event.preventDefault();
+    dragPageRef.current = page;
+    setDisplayPage(page);
+    setDragging(true);
+    onSeekPage?.(page);
+    showTooltipTemporarily();
+  }, [currentPage, onSeekPage, showTooltipTemporarily, totalPages]);
 
   useEffect(() => {
     return () => {
       if (tooltipTimerRef.current !== null) clearTimeout(tooltipTimerRef.current);
+      draggingRef.current = false;
     };
   }, []);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.defaultPrevented) return;
     if (externalDialogOpen) return;
     if (e.key === 'Escape') {
-      if (showSettings) { setShowSettings(false); return; }
-      if (showChapterDrawer) { setShowChapterDrawer(false); return; }
+      if (showSettings) { closeSettings(); return; }
+      if (showChapterDrawer) { closeChapterDrawer(); return; }
       onClose();
       return;
     }
@@ -488,7 +567,7 @@ export function ReaderOverlay({
     if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); onScrollByInputStep(-1); }
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); onScrollByInputStep(1); }
     if (e.key === 'f' || e.key === 'F') onToggleVisibility();
-  }, [externalDialogOpen, showChapterDrawer, showSettings, onClose, onScrollByInputStep, onToggleVisibility]);
+  }, [closeChapterDrawer, closeSettings, externalDialogOpen, showChapterDrawer, showSettings, onClose, onScrollByInputStep, onToggleVisibility]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -505,37 +584,41 @@ export function ReaderOverlay({
           currentChapterId={currentChapterId}
           chapterProgress={chapterProgress}
           onGoTo={onGoToChapter}
-          onClose={() => setShowChapterDrawer(false)}
+          onClose={closeChapterDrawer}
         />
       )}
 
-      {(hint || boundaryToast) && (
-        <BoundaryHint hint={hint} boundaryToast={boundaryToast} direction={direction} />
-      )}
+      <BoundaryHint hint={hint} boundaryToast={boundaryToast} direction={direction} />
 
       {visible && showSettings && (
-        <SettingsPanel
-          direction={direction} autoSnap={autoSnap} seamlessMode={seamlessMode} lazyRenderRange={lazyRenderRange}
-          barVisible={barVisible}
-          onToggleDirection={onToggleDirection} onToggleAutoSnap={onToggleAutoSnap}
-          onToggleSeamlessMode={onToggleSeamlessMode}
-          onChangeLazyRenderRange={onChangeLazyRenderRange}
-          onToggleBarVisible={onToggleBarVisible}
-          translationConfigured={translationConfigured}
-          onOpenTranslationSettings={() => {
-            setShowSettings(false);
-            onOpenTranslationSettings();
-          }}
-          onClose={() => setShowSettings(false)}
-          cacheStats={cacheStats} onClearCache={handleClearCache}
-        />
+        <div
+          className="absolute inset-0 z-50 bg-black/45"
+          onClick={closeSettings}
+          data-reader-control
+        >
+          <SettingsPanel
+            direction={direction} autoSnap={autoSnap} seamlessMode={seamlessMode} lazyRenderRange={lazyRenderRange}
+            barVisible={barVisible}
+            onToggleDirection={onToggleDirection} onToggleAutoSnap={onToggleAutoSnap}
+            onToggleSeamlessMode={onToggleSeamlessMode}
+            onChangeLazyRenderRange={onChangeLazyRenderRange}
+            onToggleBarVisible={onToggleBarVisible}
+            translationConfigured={translationConfigured}
+            onOpenTranslationSettings={() => {
+              setShowSettings(false);
+              onOpenTranslationSettings();
+            }}
+            onClose={closeSettings}
+            cacheStats={cacheStats} onClearCache={handleClearCache}
+          />
+        </div>
       )}
 
       {/* Top bar */}
       <div className={`absolute top-0 left-0 right-0 z-40 bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${visible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
-        <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center justify-between px-3 pb-2" style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))' }}>
           <div className="flex items-center gap-3 min-w-0">
-            <button onClick={onClose} className="text-white/90 hover:text-white shrink-0"><X size={22} /></button>
+            <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center text-white/90 hover:text-white" aria-label="关闭阅读器"><X size={22} /></button>
             <div className="min-w-0">
               <div className="text-white text-sm font-medium truncate">{title}</div>
               {chapterName && <div className="text-gray-400 text-xs truncate mt-0.5">{chapterName}</div>}
@@ -544,8 +627,9 @@ export function ReaderOverlay({
           <div className="flex items-center gap-2 shrink-0 ml-2">
             {isZoomed && (
               <button
+                type="button"
                 onClick={onResetZoom}
-                className="p-1 text-brand-400 transition-colors hover:text-brand-300"
+                className="flex h-10 w-10 items-center justify-center text-brand-400 transition-colors hover:text-brand-300"
                 title="重置缩放"
                 aria-label="重置缩放"
               >
@@ -553,9 +637,10 @@ export function ReaderOverlay({
               </button>
             )}
             <button
+              type="button"
               onClick={handleTranslationControl}
               disabled={translationControlDisabled}
-              className={`p-1 transition-colors disabled:cursor-default disabled:opacity-45 ${translationControlActive ? 'text-brand-400' : 'text-white/80 hover:text-white'}`}
+              className={`flex h-10 w-10 items-center justify-center transition-colors disabled:cursor-default disabled:opacity-45 ${translationControlActive ? 'text-brand-400' : 'text-white/80 hover:text-white'}`}
               title={translationControlTitle}
               aria-label={translationControlTitle}
               aria-pressed={translationAutoMode ? translationAutoActive : undefined}
@@ -563,9 +648,9 @@ export function ReaderOverlay({
               {translationBusy && (!translationAutoMode || translationAutoActive) ? <LoaderCircle size={18} className="animate-spin" /> : <Languages size={18} />}
             </button>
             {chapters.length >= 1 && (
-              <button onClick={() => setShowChapterDrawer(true)} className="text-white/80 hover:text-white p-1" title="章节列表"><Bookmark size={18} /></button>
+              <button ref={chapterTriggerRef} type="button" onClick={() => setShowChapterDrawer(true)} className="flex h-10 w-10 items-center justify-center text-white/80 hover:text-white" title="章节列表" aria-label="打开章节列表"><Bookmark size={18} /></button>
             )}
-            <button onClick={() => setShowSettings(v => !v)} className={`p-1 transition-colors ${showSettings ? 'text-brand-400' : 'text-white/80 hover:text-white'}`} title="阅读设置"><Settings size={18} /></button>
+            <button ref={settingsTriggerRef} type="button" onClick={() => setShowSettings(v => !v)} className={`flex h-10 w-10 items-center justify-center transition-colors ${showSettings ? 'text-brand-400' : 'text-white/80 hover:text-white'}`} title="阅读设置" aria-label="打开阅读设置"><Settings size={18} /></button>
           </div>
         </div>
       </div>
@@ -580,21 +665,31 @@ export function ReaderOverlay({
       {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
         <div className="absolute bottom-0 left-0 right-0 z-20">
-          <div className="bg-black/90 pb-6">
-            <div className="flex items-center gap-3 px-4 py-0.5">
+          <div className="bg-black/90" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))' }}>
+            <div className="flex min-h-10 items-center gap-2 px-3">
               <div className="flex items-center gap-1 shrink-0">
-                <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="上一章"><ChevronLeft size={16} /></button>
+                <button type="button" onClick={onPrevChapter} disabled={!hasPrevChapter} className="flex h-9 w-9 items-center justify-center text-white/70 hover:text-white disabled:cursor-default disabled:opacity-30" title="上一章" aria-label="上一章"><ChevronLeft size={16} /></button>
                 <span className="text-white/60 text-xs tabular-nums min-w-[5ch] text-center">{activePage + 1}/{totalPages}</span>
-                <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default p-0.5" title="下一章"><ChevronRight size={16} /></button>
+                <button type="button" onClick={onNextChapter} disabled={!hasNextChapter} className="flex h-9 w-9 items-center justify-center text-white/70 hover:text-white disabled:cursor-default disabled:opacity-30" title="下一章" aria-label="下一章"><ChevronRight size={16} /></button>
               </div>
               <div
                 ref={progressRef}
-                className="flex-1 h-5 cursor-pointer relative group -my-1.5"
-                onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
-                onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+                className="group relative h-8 flex-1 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+                onPointerDown={onProgressPointerDown}
+                onPointerMove={onProgressPointerMove}
+                onPointerUp={onProgressPointerUp}
+                onPointerCancel={onProgressPointerCancel}
+                onKeyDown={onProgressKeyDown}
                 style={{ touchAction: 'none' }}
+                role="slider"
+                tabIndex={0}
+                aria-label="阅读进度"
+                aria-valuemin={1}
+                aria-valuemax={Math.max(totalPages, 1)}
+                aria-valuenow={activePage + 1}
+                aria-valuetext={`第 ${activePage + 1} 页，共 ${totalPages} 页`}
               >
-                <div className="h-2 mt-1.5 bg-gray-700/50 rounded-full overflow-hidden">
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-700/50">
                     <div
                       className="h-full bg-brand-500 rounded-full"
                       style={{
@@ -620,16 +715,27 @@ export function ReaderOverlay({
         >
           <div className="flex flex-col items-center gap-2 py-4 h-full" style={{ paddingTop: '3.5rem' }}>
             <div className="flex flex-col-reverse items-center gap-0.5">
-              <button onClick={onNextChapter} disabled={!hasNextChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="下一章"><ChevronDown size={14} /></button>
+              <button type="button" onClick={onNextChapter} disabled={!hasNextChapter} className="flex h-9 w-9 items-center justify-center text-white/70 hover:text-white disabled:cursor-default disabled:opacity-30" title="下一章" aria-label="下一章"><ChevronDown size={14} /></button>
               <span className="text-white/60 text-[10px] tabular-nums" style={{ writingMode: 'vertical-rl' }}>{activePage + 1}/{totalPages}</span>
-              <button onClick={onPrevChapter} disabled={!hasPrevChapter} className="text-white/70 hover:text-white disabled:opacity-30 disabled:cursor-default" title="上一章"><ChevronUp size={14} /></button>
+              <button type="button" onClick={onPrevChapter} disabled={!hasPrevChapter} className="flex h-9 w-9 items-center justify-center text-white/70 hover:text-white disabled:cursor-default disabled:opacity-30" title="上一章" aria-label="上一章"><ChevronUp size={14} /></button>
             </div>
             <div
               ref={progressRef}
               className="w-5 flex-1 cursor-pointer relative group -mx-1.5"
-              onMouseDown={(e) => onDragStart(e.clientX, e.clientY)}
-              onTouchStart={(e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY)}
+              onPointerDown={onProgressPointerDown}
+              onPointerMove={onProgressPointerMove}
+              onPointerUp={onProgressPointerUp}
+              onPointerCancel={onProgressPointerCancel}
+              onKeyDown={onProgressKeyDown}
               style={{ touchAction: 'none' }}
+              role="slider"
+              tabIndex={0}
+              aria-label="阅读进度"
+              aria-orientation="vertical"
+              aria-valuemin={1}
+              aria-valuemax={Math.max(totalPages, 1)}
+              aria-valuenow={activePage + 1}
+              aria-valuetext={`第 ${activePage + 1} 页，共 ${totalPages} 页`}
             >
               <div className="w-2 mx-1.5 h-full bg-gray-700/50 rounded-full overflow-hidden">
                 <div

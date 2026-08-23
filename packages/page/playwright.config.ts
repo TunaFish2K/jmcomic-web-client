@@ -10,8 +10,14 @@ export default defineConfig({
     },
     reporter: process.env.CI ? "github" : "list",
     use: {
+        baseURL: "http://127.0.0.1:43917",
         serviceWorkers: "allow",
         trace: "retain-on-failure",
+    },
+    webServer: {
+        command: "pnpm exec vite preview --host 127.0.0.1 --port 43917",
+        url: "http://127.0.0.1:43917",
+        reuseExistingServer: false,
     },
     projects: [
         {
@@ -26,6 +32,10 @@ export default defineConfig({
                     ? { executablePath: firefoxExecutablePath }
                     : undefined,
             },
+        },
+        {
+            name: "webkit",
+            use: { ...devices["Desktop Safari"] },
         },
         {
             name: "mobile-chromium",

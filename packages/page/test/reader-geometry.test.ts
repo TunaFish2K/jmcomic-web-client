@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import {
   PageOffsetCache,
   computeVisiblePageIndexes,
@@ -44,6 +44,11 @@ describe('page geometry helpers', () => {
     assert.equal(result, 2);
   });
 
+  it('returns no center page when the collection is empty', () => {
+    assert.equal(findCenterPage(0, 50, () => ({ start: 0, size: 100 })), null);
+    assert.equal(findPageAtCenter(0, 50, () => ({ start: 0, size: 100 })), null);
+  });
+
   it('finds the page overlapping a position', () => {
     const pages = [fakePage(0, 100), fakePage(100, 100), fakePage(200, 100)];
     const result = findPageAtCenter(3, 150, (i) => measurePageOffset(pages[i] as HTMLElement, false));
@@ -76,5 +81,16 @@ describe('PageOffsetCache', () => {
     cache.invalidate();
     page.offsetLeft = 77;
     assert.deepEqual(cache.get(0, page as HTMLElement, true), { start: 77, size: 50 });
+  });
+
+  it('reports its entry count and invalidation generation', () => {
+    const cache = new PageOffsetCache();
+    assert.equal(cache.count, 0);
+    assert.equal(cache.getGeneration(), 0);
+    cache.get(0, fakePage(10, 50) as HTMLElement, false);
+    assert.equal(cache.count, 1);
+    cache.invalidate();
+    assert.equal(cache.count, 0);
+    assert.equal(cache.getGeneration(), 1);
   });
 });

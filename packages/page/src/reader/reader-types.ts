@@ -68,7 +68,6 @@ export type BoundaryTouchTracking = {
   lockedOutward: boolean;
 };
 
-export const IMAGE_LOAD_PARALLEL = 2;
 export const BOUNDARY_RESET_DELAY_MS = 2000;
 export const CHAPTER_SWITCH_UNLOCK_DELAY_MS = 5000;
 export const LANDING_ANCHOR_DELAY_MS = 5000;

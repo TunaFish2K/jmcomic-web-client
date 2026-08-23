@@ -1,7 +1,8 @@
+// @vitest-environment node
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import sharp from 'sharp';
 
 const iconDirectory = fileURLToPath(new URL('../public/icons/', import.meta.url));

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'vitest';
 import {
   clampZoomScale,
   clampZoomTransform,
@@ -106,6 +106,20 @@ describe('reader zoom geometry', () => {
       { left: 0, top: -200, width: 400, height: 600 },
       { left: 0, top: 400, width: 400, height: 500 },
     ]), { left: 0, top: -200, width: 400, height: 1100 });
+    assert.equal(getUnionRect([]), null);
+  });
+
+  it('keeps the initial transform when a pinch starts without distance', () => {
+    const initialTransform = { scale: 2, x: -100, y: -200 };
+    assert.equal(getPinchZoomTransform({
+      initialTransform,
+      imageRect: fullWidthImage,
+      viewportRect: viewport,
+      startMidpoint: { x: 100, y: 200 },
+      currentMidpoint: { x: 100, y: 200 },
+      startDistance: 0,
+      currentDistance: 100,
+    }), initialTransform);
   });
 
   it('keeps adjacent grouped targets joined after a shared transform', () => {

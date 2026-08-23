@@ -88,6 +88,7 @@ export function useAlbumBatch(data: SearchResult | undefined) {
         if (!data || !('content' in data)) return;
 
         let cancelled = false;
+        const controller = new AbortController();
         const CHUNK = 15;    // Leave headroom: 2 fixed + 3 per ID, avoid sitting on the 50-request ceiling
         const CONCURRENCY = 2; // max simultaneous chunk requests
         const RETRY_DELAY = 1500; // ms before re-queuing failed IDs
@@ -95,7 +96,7 @@ export function useAlbumBatch(data: SearchResult | undefined) {
         // Send one chunk; returns IDs that came back with an error field
         const fetchChunk = async (ids: string[]): Promise<string[]> => {
             try {
-                const results = await getBatchAlbum(ids);
+                const results = await getBatchAlbum(ids, controller.signal);
                 if (cancelled) return [];
                 setAlbumCache(prev => {
                     const next = new Map(prev);
@@ -109,6 +110,7 @@ export function useAlbumBatch(data: SearchResult | undefined) {
                 // IDs whose worker-side fetch failed get re-queued
                 return results.filter(r => r.error).map(r => r.albumId);
             } catch {
+                if (controller.signal.aborted) return [];
                 // Network / CF 520 — treat whole chunk as failed
                 return ids;
             }
@@ -188,7 +190,10 @@ export function useAlbumBatch(data: SearchResult | undefined) {
         };
 
         run();
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [resultIdsKey]);
 

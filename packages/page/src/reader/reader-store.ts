@@ -77,18 +77,7 @@ export function getAlbumMeta(albumId: string): Album | null {
   cleanupAlbumCache();
   const raw = localStorage.getItem(`${ALBUM_CACHE_PREFIX}${albumId}`);
   if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<CachedAlbum>;
-    if (!parsed.album || typeof parsed.updatedAt !== 'number') {
-      localStorage.removeItem(`${ALBUM_CACHE_PREFIX}${albumId}`);
-      return null;
-    }
-    return parsed.album;
-  } catch {
-    localStorage.removeItem(`${ALBUM_CACHE_PREFIX}${albumId}`);
-    return null;
-  }
+  return (JSON.parse(raw) as CachedAlbum).album;
 }
 
 export function saveReadingProgress(progress: ChapterProgress) {

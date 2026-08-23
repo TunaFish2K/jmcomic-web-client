@@ -7,7 +7,10 @@ const LEGACY_WORKER_CACHE_NAMES = ['cover-images'];
 const PRELOAD_RECOVERY_KEY = `jm:preload-recovery:${__APP_RELEASE_ID__}`;
 let reloadStarted = false;
 
-function reloadPageOnce(recoveryKey?: string) {
+export function reloadPageOnce(
+  recoveryKey?: string,
+  reload = window.location.reload.bind(window.location),
+) {
   if (reloadStarted) return;
 
   if (recoveryKey) {
@@ -20,7 +23,7 @@ function reloadPageOnce(recoveryKey?: string) {
   }
 
   reloadStarted = true;
-  window.location.reload();
+  reload();
 }
 
 async function deleteLegacyWorkerCaches() {

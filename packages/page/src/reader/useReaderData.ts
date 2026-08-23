@@ -1,11 +1,17 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getAlbum, getPhoto } from '../api';
 import { getCachedAlbum, setCachedAlbum } from '../album-cache';
 import type { Album, PhotoWithScrambleId } from '@tiny-client/shared';
 import { getAlbumMeta, saveAlbumMeta } from './reader-store';
 import type { ChapterInfo } from './reader-types';
 import { parseSeriesOrder } from './reader-types';
+import {
+  canPrefetchAdjacentChapter,
+  getBrowserReaderNetworkCapabilities,
+} from './network';
+
+export const PHOTO_QUERY_STALE_TIME_MS = 30 * 60 * 1000;
 
 export type ReaderNavState = {
   album?: Album | null;
@@ -22,6 +28,7 @@ export type ReaderData = {
   currentChapterIndex: number;
   photo: PhotoWithScrambleId | undefined;
   images: PhotoWithScrambleId['images'];
+  prefetchNextChapter: (signal?: AbortSignal) => Promise<PhotoWithScrambleId | undefined>;
 };
 
 export function useReaderData(options: {
@@ -31,6 +38,7 @@ export function useReaderData(options: {
   mountAlbumId: string | undefined;
 }): ReaderData {
   const { albumId, locationState, currentChapterId, mountAlbumId } = options;
+  const queryClient = useQueryClient();
   const navState = locationState as ReaderNavState | null;
 
   const initialAlbumRef = useRef(navState?.album ?? (albumId ? getAlbumMeta(albumId) : null));
@@ -41,13 +49,13 @@ export function useReaderData(options: {
 
   const { data: album } = useQuery({
     queryKey: ['album', albumId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const cached = await getCachedAlbum(albumId!);
       if (cached?.album) {
         saveAlbumMeta(albumId!, cached.album);
         return cached.album;
       }
-      const fetched = await getAlbum(albumId!);
+      const fetched = await getAlbum(albumId!, signal);
       if (fetched) saveAlbumMeta(albumId!, fetched);
       return fetched;
     },
@@ -80,24 +88,49 @@ export function useReaderData(options: {
 
   const currentChapterIndex = sortedChapters.findIndex((c) => c.id === currentChapterId);
 
+  const loadChapterPhoto = useCallback(async (chapterId: string, signal?: AbortSignal) => {
+    const cached = await getCachedAlbum(chapterId);
+    if (cached?.photo) return cached.photo;
+    const fetched = await getPhoto(chapterId, signal);
+    if (fetched && album) void setCachedAlbum(chapterId, album, fetched);
+    return fetched ?? undefined;
+  }, [album]);
+
   const { data: photo } = useQuery({
     queryKey: ['photo', currentChapterId],
     queryFn: async ({ signal }) => {
-      const cached = await getCachedAlbum(currentChapterId);
-      if (cached?.photo) return cached.photo;
-      const fetched = await getPhoto(currentChapterId, signal);
-      if (fetched && album) {
-        // Persist photo in IndexedDB under the chapter id so re-entry is instant.
-        setCachedAlbum(currentChapterId, album, fetched);
-      }
-      return fetched;
+      return loadChapterPhoto(currentChapterId, signal);
     },
     enabled: !!currentChapterId,
     // eslint-disable-next-line react-hooks/refs -- 首次渲染读缓存图片元数据作为 query initialData
     initialData: currentChapterId === mountAlbumId ? initialPhotoRef.current : undefined,
+    staleTime: PHOTO_QUERY_STALE_TIME_MS,
   });
+
+  useEffect(() => {
+    if (album && photo) void setCachedAlbum(currentChapterId, album, photo);
+  }, [album, currentChapterId, photo]);
 
   const images: PhotoWithScrambleId['images'] = useMemo(() => photo?.images ?? [], [photo]);
 
-  return { album, isSeries, seriesItems, sortedChapters, currentChapterIndex, photo, images };
+  const nextChapterId = sortedChapters[currentChapterIndex + 1]?.id;
+  const prefetchNextChapter = useCallback(async (signal?: AbortSignal) => {
+    if (!nextChapterId || !canPrefetchAdjacentChapter(getBrowserReaderNetworkCapabilities())) return undefined;
+    const queryKey = ['photo', nextChapterId] as const;
+    const prefetched = await queryClient.fetchQuery({
+      queryKey,
+      queryFn: ({ signal: querySignal }) => loadChapterPhoto(nextChapterId, querySignal),
+      staleTime: PHOTO_QUERY_STALE_TIME_MS,
+    });
+    return signal?.aborted ? undefined : prefetched;
+  }, [loadChapterPhoto, nextChapterId, queryClient]);
+
+  useEffect(() => {
+    if (!photo || !nextChapterId) return;
+    const controller = new AbortController();
+    void prefetchNextChapter(controller.signal).catch(() => {});
+    return () => controller.abort();
+  }, [nextChapterId, photo, prefetchNextChapter]);
+
+  return { album: album ?? undefined, isSeries, seriesItems, sortedChapters, currentChapterIndex, photo: photo ?? undefined, images, prefetchNextChapter };
 }

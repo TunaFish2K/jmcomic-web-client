@@ -61,7 +61,6 @@ import { PageOffsetCache, computeVisiblePageIndexes, findCenterPage, findPageAtC
 import {
   BOUNDARY_RESET_DELAY_MS,
   CHAPTER_SWITCH_UNLOCK_DELAY_MS,
-  IMAGE_LOAD_PARALLEL,
   LANDING_ANCHOR_DELAY_MS,
   PROGRAMMATIC_PAGE_TARGET_TIMEOUT_MS,
   restoreZoomElementStyle,
@@ -80,6 +79,16 @@ import { useReaderData } from './useReaderData';
 import { ReaderLoadingView } from './ReaderLoadingView';
 import { ReaderPageCanvas } from './ReaderPageCanvas';
 import { ChapterTransitionOverlay } from './ChapterTransitionOverlay';
+import {
+  canTrackpadSwitchAtBoundary,
+  getAnimatedScrollBehavior,
+  getReaderWheelMode,
+} from './input';
+import {
+  getBrowserReaderNetworkCapabilities,
+  getReaderImageConcurrency,
+  subscribeToReaderNetworkChanges,
+} from './network';
 
 function formatModelBytes(bytes: number) {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -122,6 +131,7 @@ export default function ReaderPage() {
     currentChapterIndex,
     photo,
     images,
+    prefetchNextChapter,
   } = useReaderData({
     albumId,
     locationState: location.state,
@@ -175,7 +185,9 @@ export default function ReaderPage() {
   const visiblePagesRef = useRef(new Set<number>([0]));
   const inflightRef = useRef(new Map<number, AbortController>());
   const imageLoadLimitRef = useRef<ReturnType<typeof pLimit> | null>(null);
-  if (!imageLoadLimitRef.current) imageLoadLimitRef.current = pLimit(IMAGE_LOAD_PARALLEL);
+  if (!imageLoadLimitRef.current) {
+    imageLoadLimitRef.current = pLimit(getReaderImageConcurrency(getBrowserReaderNetworkCapabilities()));
+  }
   const wheelPagingLockRef = useRef(false);
   const wheelPagingTimerRef = useRef<number | null>(null);
   const programmaticPageTargetRef = useRef<number | null>(null);
@@ -183,6 +195,7 @@ export default function ReaderPage() {
   const trackpadGestureLockRef = useRef(false);
   const trackpadDeltaAccumRef = useRef(0);
   const trackpadGestureTimerRef = useRef<number | null>(null);
+  const trackpadStartedBoundaryRef = useRef<ChapterDirection | null>(null);
   const horizontalSnapTimerRef = useRef<number | null>(null);
   const zoomRef = useRef<ActiveImageZoom | null>(null);
   const zoomedRef = useRef(false);
@@ -198,6 +211,13 @@ export default function ReaderPage() {
   const suppressReaderClickUntilRef = useRef(0);
   const snapshotUrlRef = useRef<string | null>(null);
   const deferredSnapshotUrlsRef = useRef(new Set<string>());
+  const adjacentPrefetchedChapterRef = useRef<string | null>(null);
+
+  useEffect(() => subscribeToReaderNetworkChanges((capabilities) => {
+    if (imageLoadLimitRef.current) {
+      imageLoadLimitRef.current.concurrency = getReaderImageConcurrency(capabilities);
+    }
+  }), []);
 
   const currentPageRef = useRef(currentPage);
   currentPageRef.current = currentPage;
@@ -275,7 +295,7 @@ export default function ReaderPage() {
       imageUrl: blobMap.get(index),
       loadImageBlob: photo
         ? async (signal: AbortSignal) => {
-            const processed = await getProcessedPhotoImage(photo, image, signal);
+            const processed = await getProcessedPhotoImage(photo, image, signal, { cacheWriteMode: 'background' });
             return new Blob([processed.data], { type: 'image/jpeg' });
           }
         : undefined,
@@ -306,6 +326,10 @@ export default function ReaderPage() {
       el.scrollTo({ top: child.offsetTop, behavior });
     }
   }, []);
+
+  const getSmoothScrollBehavior = useCallback(() => getAnimatedScrollBehavior(
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  ), []);
 
   const getScrollMetrics = useCallback(() => {
     const el = containerRef.current;
@@ -675,7 +699,7 @@ export default function ReaderPage() {
     const pointFromTouch = (touch: Touch): ZoomPoint => ({ x: touch.clientX, y: touch.clientY });
     const isZoomControlTarget = (target: EventTarget | null) => (
       target instanceof Element
-      && !!target.closest('button, input, select, textarea, a, [role="button"], [role="dialog"]')
+      && !!target.closest('button, input, select, textarea, a, [role="button"], [role="dialog"], [data-reader-control]')
     );
     const startPinch = (touches: TouchList) => {
       const first = pointFromTouch(touches[0]);
@@ -933,7 +957,7 @@ export default function ReaderPage() {
       }
       setProgrammaticPageTarget(nextPage);
       setReaderPage(nextPage);
-      scrollToPage(nextPage, 'smooth');
+      scrollToPage(nextPage, getSmoothScrollBehavior());
       return;
     }
 
@@ -951,14 +975,14 @@ export default function ReaderPage() {
       if (target !== currentPageRef.current) {
         setProgrammaticPageTarget(target);
         setReaderPage(target);
-        scrollToPage(target, 'smooth');
+        scrollToPage(target, getSmoothScrollBehavior());
       }
       return;
     }
 
     const distance = Math.max(el.clientHeight * 0.9, 1) * step;
-    el.scrollBy({ top: distance, behavior: 'smooth' });
-  }, [cancelBoundaryHint, clearProgrammaticPageTarget, getScrollMetrics, releaseLandingAnchor, resetZoom, scrollToPage, setProgrammaticPageTarget, setReaderPage, showBoundaryToast, switchAdjacentChapter]);
+    el.scrollBy({ top: distance, behavior: getSmoothScrollBehavior() });
+  }, [cancelBoundaryHint, clearProgrammaticPageTarget, getScrollMetrics, getSmoothScrollBehavior, releaseLandingAnchor, resetZoom, scrollToPage, setProgrammaticPageTarget, setReaderPage, showBoundaryToast, switchAdjacentChapter]);
 
   const goNextPage = useCallback(() => scrollByInputStep(1), [scrollByInputStep]);
   const goPrevPage = useCallback(() => scrollByInputStep(-1), [scrollByInputStep]);
@@ -985,6 +1009,7 @@ export default function ReaderPage() {
     if (wheelPagingTimerRef.current !== null) window.clearTimeout(wheelPagingTimerRef.current);
     trackpadGestureLockRef.current = false;
     trackpadDeltaAccumRef.current = 0;
+    trackpadStartedBoundaryRef.current = null;
     wheelPagingLockRef.current = false;
     resetZoom();
     clearResidentImages();
@@ -1066,7 +1091,7 @@ export default function ReaderPage() {
       void imageLoadLimitRef.current!(async () => {
         try {
           if (controller.signal.aborted) return;
-          const processed = await getProcessedPhotoImage(photo, image, controller.signal);
+          const processed = await getProcessedPhotoImage(photo, image, controller.signal, { cacheWriteMode: 'background' });
           if (
             controller.signal.aborted
             || generation !== loadGenerationRef.current
@@ -1118,6 +1143,31 @@ export default function ReaderPage() {
       });
     }
   }, [commitBlobMap, currentChapterId, currentPage, failedPages, images, lazyRenderRange, photo, recordPageDimensions, residencyRevision, revokeBlobUrl]);
+
+  useEffect(() => {
+    if (!photo || images.length === 0 || currentPage < Math.max(0, images.length - 3)) return;
+    const nextChapterId = sortedChapters[currentChapterIndex + 1]?.id;
+    if (!nextChapterId || adjacentPrefetchedChapterRef.current === nextChapterId) return;
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void imageLoadLimitRef.current!(async () => {
+        if (controller.signal.aborted) return;
+        const nextPhoto = await prefetchNextChapter(controller.signal);
+        const firstImage = nextPhoto?.images[0];
+        if (!nextPhoto || !firstImage || controller.signal.aborted) return;
+        await getProcessedPhotoImage(nextPhoto, firstImage, controller.signal, { cacheWriteMode: 'background' });
+        if (!controller.signal.aborted) adjacentPrefetchedChapterRef.current = nextChapterId;
+      }).catch((error) => {
+        if (!controller.signal.aborted) console.warn('预取下一章首页失败:', error);
+      });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [currentChapterIndex, currentPage, images.length, photo, prefetchNextChapter, sortedChapters]);
 
   // ── photo-ready: resolve the chapter-scoped target, then scroll and unlock ──
   useEffect(() => {
@@ -1255,7 +1305,7 @@ export default function ReaderPage() {
       const child = el.children[page] as HTMLElement | undefined;
       if (!child) return;
       const delta = Math.abs(el.scrollLeft - child.offsetLeft);
-      if (delta > 1) scrollToPage(page, 'smooth');
+      if (delta > 1) scrollToPage(page, getSmoothScrollBehavior());
     };
 
     const onScroll = () => {
@@ -1309,7 +1359,7 @@ export default function ReaderPage() {
       el.removeEventListener('scroll', onScroll);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length, autoSnap, seamlessMode, updateVisiblePages]);
+  }, [photo, direction, albumId, currentChapterId, currentChapterIndex, images.length, autoSnap, seamlessMode, getSmoothScrollBehavior, updateVisiblePages]);
 
   useEffect(() => {
     if (!currentChapterId || images.length === 0) return;
@@ -1334,6 +1384,7 @@ export default function ReaderPage() {
     const resetTrackpadGesture = () => {
       trackpadGestureLockRef.current = false;
       trackpadDeltaAccumRef.current = 0;
+      trackpadStartedBoundaryRef.current = null;
       if (trackpadGestureTimerRef.current !== null) {
         window.clearTimeout(trackpadGestureTimerRef.current);
         trackpadGestureTimerRef.current = null;
@@ -1349,8 +1400,14 @@ export default function ReaderPage() {
       const inputDelta = isRTLRef.current ? dominantDelta : e.deltaY;
       if (Math.abs(inputDelta) < 4) return;
       const isTrackpad = isLikelyTrackpadWheel(e.deltaMode, e.deltaX, e.deltaY);
+      const step = inputDelta > 0 ? 1 : -1;
+      const metrics = getScrollMetrics();
+      const boundary = metrics ? getBoundaryDirection({ ...metrics, step }) : null;
 
       if (isTrackpad) {
+        if (trackpadGestureTimerRef.current === null) {
+          trackpadStartedBoundaryRef.current = boundary;
+        }
         if (trackpadGestureTimerRef.current !== null) window.clearTimeout(trackpadGestureTimerRef.current);
         trackpadGestureTimerRef.current = window.setTimeout(resetTrackpadGesture, TRACKPAD_GESTURE_END_DELAY_MS);
       }
@@ -1364,11 +1421,12 @@ export default function ReaderPage() {
         return;
       }
 
-      const step = inputDelta > 0 ? 1 : -1;
-      const metrics = getScrollMetrics();
-      const boundary = metrics ? getBoundaryDirection({ ...metrics, step }) : null;
       if (boundary) {
         e.preventDefault();
+        if (isTrackpad && !canTrackpadSwitchAtBoundary(trackpadStartedBoundaryRef.current, boundary)) {
+          cancelBoundaryHint();
+          return;
+        }
         releaseLandingAnchor();
         const dir = boundary;
         const hasChapter = dir === 'next' ? hasNextChapterRef.current : hasPrevChapterRef.current;
@@ -1414,10 +1472,21 @@ export default function ReaderPage() {
       if (boundaryDirectionRef.current !== null) cancelBoundaryHint();
       releaseLandingAnchor();
 
+      const wheelMode = getReaderWheelMode({
+        horizontal: isRTLRef.current,
+        autoSnap: autoSnapRef.current,
+        trackpad: isTrackpad,
+      });
+
       // Vertical reading keeps native scrolling until it reaches a real boundary.
-      if (!isRTLRef.current) return;
+      if (wheelMode === 'native') return;
 
       e.preventDefault();
+
+      if (wheelMode === 'continuous') {
+        el.scrollBy({ left: inputDelta, behavior: 'auto' });
+        return;
+      }
 
       if (isTrackpad) {
         trackpadDeltaAccumRef.current += inputDelta;
@@ -1578,7 +1647,6 @@ export default function ReaderPage() {
       if (!showUI) setShowUI(true);
       return;
     }
-    if (showUI) return;
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
@@ -1586,12 +1654,12 @@ export default function ReaderPage() {
       const relX = (e.clientX - rect.left) / rect.width;
       if (relX < 0.33) goPrevPage();
       else if (relX > 0.67) goNextPage();
-      else setShowUI(true);
+      else setShowUI((visible) => !visible);
     } else {
       const relY = (e.clientY - rect.top) / rect.height;
       if (relY < 0.33) scrollByInputStep(-1);
       else if (relY > 0.67) scrollByInputStep(1);
-      else setShowUI(true);
+      else setShowUI((visible) => !visible);
     }
   }, [showUI, isRTL, goPrevPage, goNextPage, scrollByInputStep]);
 
@@ -1606,7 +1674,7 @@ export default function ReaderPage() {
   }
 
   const barPad = barVisible ? {
-    paddingBottom: barSide === 'bottom' ? 40 : 0,
+    paddingBottom: barSide === 'bottom' ? 'calc(48px + env(safe-area-inset-bottom, 0px))' : 0,
     paddingLeft: barSide === 'left' ? 40 : 0,
     paddingRight: barSide === 'right' ? 40 : 0,
   } : {};
@@ -1646,10 +1714,19 @@ export default function ReaderPage() {
   return (
     <div
       ref={readerRootRef}
+      data-reader-root=""
       className="fixed inset-0 bg-black select-none overflow-hidden"
       style={{ touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y') }}
     >
-      <style>{`::-webkit-scrollbar { display: none; }`}</style>
+      <style>{`
+        ::-webkit-scrollbar { display: none; }
+        @media (pointer: coarse) {
+          [data-reader-root] button {
+            min-width: 44px;
+            min-height: 44px;
+          }
+        }
+      `}</style>
       <ReaderPageCanvas
         containerRef={containerRef}
         images={images}
@@ -1668,6 +1745,15 @@ export default function ReaderPage() {
         translationVisible={translation.visible}
         onClick={handleFlipClick}
         onImageLoad={handleImageLoad}
+        onRetryPage={(pageIndex) => {
+          setFailedPages((current) => {
+            if (!current.has(pageIndex)) return current;
+            const next = new Set(current);
+            next.delete(pageIndex);
+            return next;
+          });
+          setResidencyRevision((value) => value + 1);
+        }}
       />
 
       {/* chapter-switch transition overlay — keeps the last page visible until the new chapter is ready */}
