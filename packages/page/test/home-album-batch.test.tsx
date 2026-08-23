@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, test, vi } from 'vitest';
 
-const apiMocks = vi.hoisted(() => ({ getBatchAlbum: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ getBatchAlbumWithMeta: vi.fn() }));
 const cacheMocks = vi.hoisted(() => ({ getCachedAlbums: vi.fn(), setCachedAlbums: vi.fn() }));
 vi.mock('../src/api', () => apiMocks);
 vi.mock('../src/album-cache', () => cacheMocks);
@@ -13,6 +13,7 @@ type ObserverRecord = {
   callback: IntersectionObserverCallback;
   observe: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
+  options?: IntersectionObserverInit;
 };
 
 const observers: ObserverRecord[] = [];
@@ -43,13 +44,13 @@ describe('useAlbumBatch', () => {
       observe = vi.fn();
       disconnect = vi.fn();
 
-      constructor(callback: IntersectionObserverCallback) {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
         this.callback = callback;
-        observers.push(this);
+        observers.push({ ...this, options });
       }
     }
     vi.stubGlobal('IntersectionObserver', TestIntersectionObserver);
-    apiMocks.getBatchAlbum.mockReset();
+    apiMocks.getBatchAlbumWithMeta.mockReset();
     cacheMocks.getCachedAlbums.mockReset();
     cacheMocks.setCachedAlbums.mockReset();
     cacheMocks.getCachedAlbums.mockResolvedValue(new Map());
@@ -71,7 +72,7 @@ describe('useAlbumBatch', () => {
     rerender({ data: result([]) });
     await vi.advanceTimersByTimeAsync(100);
     assert.equal(observers.length, 0);
-    assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 0);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 0);
   });
 
   test('loads L2 cache first, prioritizes visible cards, and chunks remaining IDs', async () => {
@@ -79,7 +80,7 @@ describe('useAlbumBatch', () => {
     cacheMocks.getCachedAlbums.mockResolvedValue(new Map([
       ['2', { album: { id: '2', name: 'cached' }, photo: undefined }],
     ]));
-    apiMocks.getBatchAlbum.mockImplementation(async (batch: string[]) => batch.map(success));
+    apiMocks.getBatchAlbumWithMeta.mockImplementation(async (batch: string[]) => ({ data: batch.map(success), cacheMeta: {} }));
     cacheMocks.setCachedAlbums.mockRejectedValue(new Error('quota'));
     const { result: hook, unmount } = renderHook(() => useAlbumBatch(result(ids, '99')));
 
@@ -95,6 +96,7 @@ describe('useAlbumBatch', () => {
     });
     await vi.advanceTimersByTimeAsync(0);
     assert.equal(observers.length, 1);
+    assert.equal(observers[0].options?.rootMargin, '1000px 0px');
     observers[0].callback([
       { target: noIdCard, isIntersecting: true },
       { target: visibleCard, isIntersecting: true },
@@ -104,12 +106,12 @@ describe('useAlbumBatch', () => {
     await waitFor(() => assert.equal(hook.current.albumCache.size, 32));
 
     assert.deepEqual(cacheMocks.getCachedAlbums.mock.calls[0][0], [...ids, '99']);
-    assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 3);
-    assert.equal(apiMocks.getBatchAlbum.mock.calls[0][0][0], '31');
-    assert.equal(apiMocks.getBatchAlbum.mock.calls[0][0].length, 15);
-    assert.equal(apiMocks.getBatchAlbum.mock.calls[1][0].length, 15);
-    assert.equal(apiMocks.getBatchAlbum.mock.calls[2][0].length, 1);
-    assert.ok(apiMocks.getBatchAlbum.mock.calls[0][1] instanceof AbortSignal);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 3);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls[0][0][0], '31');
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls[0][0].length, 15);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls[1][0].length, 15);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls[2][0].length, 1);
+    assert.ok(apiMocks.getBatchAlbumWithMeta.mock.calls[0][1].signal instanceof AbortSignal);
     assert.equal(hook.current.albumCache.get('2')?.album?.name, 'cached');
     assert.ok(cacheMocks.setCachedAlbums.mock.calls.length > 0);
 
@@ -118,33 +120,33 @@ describe('useAlbumBatch', () => {
   });
 
   test('requeues item-level errors and recovers on the next attempt', async () => {
-    apiMocks.getBatchAlbum
-      .mockResolvedValueOnce([{
+    apiMocks.getBatchAlbumWithMeta
+      .mockResolvedValueOnce({ data: [{
         albumId: '1',
         album: null,
         photo: null,
         error: { message: 'busy', stage: 'get_album', domain: null, reference: null, retryable: true },
-      }])
-      .mockResolvedValueOnce([success('1')]);
+      }], cacheMeta: {} })
+      .mockResolvedValueOnce({ data: [success('1')], cacheMeta: {} });
     const { result: hook } = renderHook(() => useAlbumBatch(result(['1'])));
 
     await vi.advanceTimersByTimeAsync(50);
-    await waitFor(() => assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 1));
+    await waitFor(() => assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 1));
     assert.ok(hook.current.albumCache.get('1')?.error);
     await vi.advanceTimersByTimeAsync(1500);
-    await waitFor(() => assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 2));
+    await waitFor(() => assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 2));
     await waitFor(() => assert.equal(hook.current.albumCache.get('1')?.album?.id, '1'));
   });
 
   test('refetches an errored in-memory item when the result key changes', async () => {
-    apiMocks.getBatchAlbum
-      .mockResolvedValueOnce([{
+    apiMocks.getBatchAlbumWithMeta
+      .mockResolvedValueOnce({ data: [{
         albumId: '1',
         album: null,
         photo: null,
         error: { message: 'busy', stage: 'get_album', domain: null, reference: null, retryable: true },
-      }])
-      .mockResolvedValueOnce([success('1'), success('2')]);
+      }], cacheMeta: {} })
+      .mockResolvedValueOnce({ data: [success('1'), success('2')], cacheMeta: {} });
     const { result: hook, rerender } = renderHook(({ data }) => useAlbumBatch(data), {
       initialProps: { data: result(['1']) },
     });
@@ -157,13 +159,13 @@ describe('useAlbumBatch', () => {
   });
 
   test('retries a whole chunk after a network failure', async () => {
-    apiMocks.getBatchAlbum
+    apiMocks.getBatchAlbumWithMeta
       .mockRejectedValueOnce(new Error('gateway'))
-      .mockResolvedValueOnce([success('7')]);
+      .mockResolvedValueOnce({ data: [success('7')], cacheMeta: {} });
     const { result: hook } = renderHook(() => useAlbumBatch(result(['7'])));
 
     await vi.advanceTimersByTimeAsync(50);
-    await waitFor(() => assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 1));
+    await waitFor(() => assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 1));
     await vi.advanceTimersByTimeAsync(1500);
     await waitFor(() => assert.equal(hook.current.albumCache.get('7')?.album?.id, '7'));
   });
@@ -175,25 +177,74 @@ describe('useAlbumBatch', () => {
     const { result: hook } = renderHook(() => useAlbumBatch(result(['8'])));
     await vi.advanceTimersByTimeAsync(50);
     await waitFor(() => assert.equal(hook.current.albumCache.get('8')?.album?.id, '8'));
-    assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 0);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 0);
+  });
+
+  test('renders stale IndexedDB data immediately and forces a metadata-preserving refresh', async () => {
+    cacheMocks.getCachedAlbums.mockResolvedValue(new Map([
+      ['8', {
+        album: { id: '8', name: 'stale' },
+        photo: { id: '8', name: 'cached-photo', scrambleId: 0, images: [] },
+        albumFreshness: 'stale',
+        photoFreshness: 'fresh',
+        albumFetchedAt: 100,
+        photoFetchedAt: 101,
+      }],
+    ]));
+    apiMocks.getBatchAlbumWithMeta.mockResolvedValue({
+      data: [success('8')],
+      cacheMeta: {
+        'album:8': { fetchedAt: 200, freshness: 'fresh', source: 'upstream' },
+        'photo:8': { fetchedAt: 201, freshness: 'fresh', source: 'upstream' },
+      },
+    });
+    const { result: hook } = renderHook(() => useAlbumBatch(result(['8'])));
+    await vi.advanceTimersByTimeAsync(50);
+    await waitFor(() => assert.equal(hook.current.albumCache.get('8')?.album?.name, 'album-8'));
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls[0][1].refresh, true);
+    await waitFor(() => assert.ok(cacheMocks.setCachedAlbums.mock.calls.length > 0));
+    assert.equal(cacheMocks.setCachedAlbums.mock.calls[0][0][0].albumFetchedAt, 200);
+    assert.equal(cacheMocks.setCachedAlbums.mock.calls[0][0][0].photoFetchedAt, 201);
+  });
+
+  test('does not retry terminal item errors', async () => {
+    apiMocks.getBatchAlbumWithMeta.mockResolvedValue({
+      data: [{
+        albumId: 'terminal',
+        album: null,
+        photo: null,
+        error: { message: 'missing', stage: 'get_album', domain: null, reference: null, retryable: false },
+      }],
+      cacheMeta: {},
+    });
+    renderHook(() => useAlbumBatch(result(['terminal'])));
+    await vi.advanceTimersByTimeAsync(60_000);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 1);
+  });
+
+  test('caps repeated retryable failures at four retries', async () => {
+    apiMocks.getBatchAlbumWithMeta.mockRejectedValue(new Error('offline'));
+    renderHook(() => useAlbumBatch(result(['retry-cap'])));
+    for (let index = 0; index < 6; index++) await vi.advanceTimersByTimeAsync(15_000);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 5);
   });
 
   test('uses a complete in-memory hit when a duplicate result changes the key', async () => {
-    apiMocks.getBatchAlbum.mockResolvedValue([success('8')]);
+    apiMocks.getBatchAlbumWithMeta.mockResolvedValue({ data: [success('8')], cacheMeta: {} });
     const { result: hook, rerender } = renderHook(({ data }) => useAlbumBatch(data), {
       initialProps: { data: result(['8']) },
     });
     await vi.advanceTimersByTimeAsync(50);
     await waitFor(() => assert.equal(hook.current.albumCache.get('8')?.album?.id, '8'));
-    assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 1);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 1);
 
     rerender({ data: result(['8', '8']) });
     await vi.advanceTimersByTimeAsync(50);
-    assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 1);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 1);
   });
 
   test('evicts albums outside the new result set', async () => {
-    apiMocks.getBatchAlbum.mockImplementation(async (batch: string[]) => batch.map(success));
+    apiMocks.getBatchAlbumWithMeta.mockImplementation(async (batch: string[]) => ({ data: batch.map(success), cacheMeta: {} }));
     const { result: hook, rerender } = renderHook(({ data }) => useAlbumBatch(data), {
       initialProps: { data: result(['1', '2']) },
     });
@@ -207,10 +258,10 @@ describe('useAlbumBatch', () => {
 
   test('aborts an in-flight chunk on unmount', async () => {
     let capturedSignal: AbortSignal | undefined;
-    apiMocks.getBatchAlbum.mockImplementation((_ids: string[], signal: AbortSignal) => {
-      capturedSignal = signal;
+    apiMocks.getBatchAlbumWithMeta.mockImplementation((_ids: string[], options: { signal: AbortSignal }) => {
+      capturedSignal = options.signal;
       return new Promise((_resolve, reject) => {
-        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+        options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
       });
     });
     const { unmount } = renderHook(() => useAlbumBatch(result(['9'])));
@@ -223,10 +274,12 @@ describe('useAlbumBatch', () => {
 
   test('ignores a successful batch that arrives after unmount', async () => {
     let resolveBatch!: (items: never[]) => void;
-    apiMocks.getBatchAlbum.mockReturnValue(new Promise((resolve) => { resolveBatch = resolve; }));
+    apiMocks.getBatchAlbumWithMeta.mockReturnValue(new Promise((resolve) => {
+      resolveBatch = (items) => resolve({ data: items, cacheMeta: {} });
+    }));
     const { unmount } = renderHook(() => useAlbumBatch(result(['11'])));
     await vi.advanceTimersByTimeAsync(50);
-    await waitFor(() => assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 1));
+    await waitFor(() => assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 1));
     unmount();
     resolveBatch([success('11')]);
     await vi.runAllTimersAsync();
@@ -238,6 +291,56 @@ describe('useAlbumBatch', () => {
     unmount();
     await vi.advanceTimersByTimeAsync(100);
     assert.equal(cacheMocks.getCachedAlbums.mock.calls.length, 0);
-    assert.equal(apiMocks.getBatchAlbum.mock.calls.length, 0);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 0);
+  });
+
+  test('uses requestIdleCallback for offscreen prefetching', async () => {
+    const idle = vi.fn((callback: IdleRequestCallback) => {
+      callback({ didTimeout: false, timeRemaining: () => 20 });
+      return 1;
+    });
+    vi.stubGlobal('requestIdleCallback', idle);
+    apiMocks.getBatchAlbumWithMeta.mockResolvedValue({ data: [success('idle')], cacheMeta: {} });
+    const { result: hook } = renderHook(() => useAlbumBatch(result(['idle'])));
+    await vi.advanceTimersByTimeAsync(50);
+    await waitFor(() => assert.equal(hook.current.albumCache.get('idle')?.album?.id, 'idle'));
+    assert.equal(idle.mock.calls.length, 1);
+  });
+
+  test('waits on constrained networks until an album approaches the viewport', async () => {
+    Object.defineProperty(navigator, 'connection', {
+      configurable: true,
+      value: { saveData: true, effectiveType: '2g' },
+    });
+    apiMocks.getBatchAlbumWithMeta.mockResolvedValue({ data: [success('near')], cacheMeta: {} });
+    const { result: hook } = renderHook(() => useAlbumBatch(result(['near'])));
+    const card = document.createElement('div');
+    card.dataset.albumId = 'near';
+    act(() => hook.current.getCardRef('near')(card));
+    await vi.advanceTimersByTimeAsync(50);
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 0);
+    observers[0].callback([
+      { target: card, isIntersecting: true },
+    ] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver);
+    observers[0].callback([
+      { target: card, isIntersecting: true },
+    ] as unknown as IntersectionObserverEntry[], {} as IntersectionObserver);
+    await waitFor(() => assert.equal(hook.current.albumCache.get('near')?.album?.id, 'near'));
+    Reflect.deleteProperty(navigator, 'connection');
+  });
+
+  test('does not start an idle batch after unmount', async () => {
+    let idleCallback: IdleRequestCallback | undefined;
+    vi.stubGlobal('requestIdleCallback', vi.fn((callback: IdleRequestCallback) => {
+      idleCallback = callback;
+      return 1;
+    }));
+    const { unmount } = renderHook(() => useAlbumBatch(result(['cancel-idle'])));
+    await vi.advanceTimersByTimeAsync(50);
+    assert.ok(idleCallback);
+    unmount();
+    idleCallback?.({ didTimeout: false, timeRemaining: () => 20 });
+    await vi.runAllTimersAsync();
+    assert.equal(apiMocks.getBatchAlbumWithMeta.mock.calls.length, 0);
   });
 });

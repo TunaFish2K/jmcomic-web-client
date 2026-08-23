@@ -39,6 +39,24 @@ export default defineConfig({
           functions: 98,
           lines: 98,
         },
+        'src/album-cache.ts': {
+          statements: 98,
+          branches: 95,
+          functions: 98,
+          lines: 98,
+        },
+        'src/reader/useReaderData.ts': {
+          statements: 98,
+          branches: 95,
+          functions: 100,
+          lines: 98,
+        },
+        'src/home/useAlbumBatch.ts': {
+          statements: 98,
+          branches: 95,
+          functions: 100,
+          lines: 98,
+        },
         'src/home/{CoverImage,useAlbumBatch,useSearchState}.{ts,tsx}': {
           statements: 98,
           branches: 95,

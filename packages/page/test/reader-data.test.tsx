@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, test, vi } from 'vitest';
 
-const apiMocks = vi.hoisted(() => ({ getAlbum: vi.fn(), getPhoto: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({ getAlbumWithMeta: vi.fn(), getPhotoWithMeta: vi.fn() }));
 const cacheMocks = vi.hoisted(() => ({ getCachedAlbum: vi.fn(), setCachedAlbum: vi.fn() }));
 const storeMocks = vi.hoisted(() => ({ getAlbumMeta: vi.fn(), saveAlbumMeta: vi.fn() }));
 const networkMocks = vi.hoisted(() => ({
@@ -40,8 +40,8 @@ function createWrapper() {
 
 describe('useReaderData', () => {
   beforeEach(() => {
-    apiMocks.getAlbum.mockReset().mockResolvedValue(null);
-    apiMocks.getPhoto.mockReset().mockResolvedValue(null);
+    apiMocks.getAlbumWithMeta.mockReset().mockResolvedValue({ data: null, cacheMeta: {} });
+    apiMocks.getPhotoWithMeta.mockReset().mockResolvedValue({ data: null, cacheMeta: {} });
     cacheMocks.getCachedAlbum.mockReset().mockResolvedValue(null);
     cacheMocks.setCachedAlbum.mockReset().mockResolvedValue(undefined);
     storeMocks.getAlbumMeta.mockReset().mockReturnValue(null);
@@ -99,14 +99,14 @@ describe('useReaderData', () => {
     assert.deepEqual(result.current.sortedChapters.map((chapter) => chapter.id), ['1', '2', '3']);
     assert.equal(result.current.sortedChapters[1].name, '第2章');
     assert.equal(result.current.sortedChapters[2].order, Number.MAX_SAFE_INTEGER);
-    assert.equal(apiMocks.getAlbum.mock.calls.length, 0);
-    assert.equal(apiMocks.getPhoto.mock.calls.length, 0);
+    assert.equal(apiMocks.getAlbumWithMeta.mock.calls.length, 0);
+    assert.equal(apiMocks.getPhotoWithMeta.mock.calls.length, 0);
     assert.ok(storeMocks.saveAlbumMeta.mock.calls.length > 0);
   });
 
   test('falls back to network and persists fetched album and photo data', async () => {
-    apiMocks.getAlbum.mockResolvedValue(album);
-    apiMocks.getPhoto.mockResolvedValue(photo1);
+    apiMocks.getAlbumWithMeta.mockResolvedValue({ data: album, cacheMeta: {} });
+    apiMocks.getPhotoWithMeta.mockResolvedValue({ data: photo1, cacheMeta: {} });
     const { result } = renderHook(() => useReaderData({
       albumId: 'root',
       locationState: null,
@@ -116,10 +116,154 @@ describe('useReaderData', () => {
 
     await waitFor(() => assert.equal(result.current.photo, photo1));
     assert.equal(result.current.album, album);
-    assert.ok(apiMocks.getAlbum.mock.calls[0][1] instanceof AbortSignal);
-    assert.ok(apiMocks.getPhoto.mock.calls[0][1] instanceof AbortSignal);
-    await waitFor(() => assert.equal(cacheMocks.setCachedAlbum.mock.calls.length, 1));
-    assert.deepEqual(cacheMocks.setCachedAlbum.mock.calls[0].slice(0, 3), ['1', album, photo1]);
+    assert.ok(apiMocks.getAlbumWithMeta.mock.calls[0][1].signal instanceof AbortSignal);
+    assert.ok(apiMocks.getPhotoWithMeta.mock.calls[0][1].signal instanceof AbortSignal);
+    await waitFor(() => assert.ok(cacheMocks.setCachedAlbum.mock.calls.length >= 1));
+    assert.ok(cacheMocks.setCachedAlbum.mock.calls.some((call) => call[0] === '1' && call[1] === album && call[2] === photo1));
+  });
+
+  test('renders stale reader data and replaces it after forced background refreshes', async () => {
+    const refreshedAlbum = { ...album, name: 'Refreshed series' } as never;
+    const refreshedPhoto = { ...photo1, name: 'Refreshed chapter' } as never;
+    cacheMocks.getCachedAlbum.mockImplementation(async (id: string) => (
+      id === 'root'
+        ? {
+            album,
+            photo: null,
+            albumFreshness: 'stale',
+            photoFreshness: 'expired',
+            albumFetchedAt: 100,
+            photoFetchedAt: null,
+          }
+        : {
+            album,
+            photo: photo1,
+            albumFreshness: 'fresh',
+            photoFreshness: 'stale',
+            albumFetchedAt: 100,
+            photoFetchedAt: 101,
+          }
+    ));
+    apiMocks.getAlbumWithMeta.mockResolvedValue({
+      data: refreshedAlbum,
+      cacheMeta: {},
+    });
+    apiMocks.getPhotoWithMeta.mockResolvedValue({
+      data: refreshedPhoto,
+      cacheMeta: { 'photo:1': { fetchedAt: 201, freshness: 'fresh', source: 'upstream' } },
+    });
+
+    const { result } = renderHook(() => useReaderData({
+      albumId: 'root',
+      locationState: null,
+      currentChapterId: '1',
+      mountAlbumId: 'root',
+    }), { wrapper: createWrapper() });
+
+    await waitFor(() => assert.equal(result.current.album?.name, 'Refreshed series'));
+    await waitFor(() => assert.equal(result.current.photo?.name, 'Refreshed chapter'));
+    assert.equal(apiMocks.getAlbumWithMeta.mock.calls[0][1].refresh, true);
+    assert.equal(apiMocks.getPhotoWithMeta.mock.calls[0][1].refresh, true);
+    assert.ok(cacheMocks.setCachedAlbum.mock.calls.some((call) => call[0] === 'root' && call[3].albumFetchedAt > 0));
+    assert.ok(cacheMocks.setCachedAlbum.mock.calls.some((call) => call[0] === '1' && call[3].photoFetchedAt === 201));
+  });
+
+  test('keeps stale reader data when forced refresh fails', async () => {
+    cacheMocks.getCachedAlbum.mockImplementation(async (id: string) => ({
+      album,
+      photo: id === '1' ? photo1 : null,
+      albumFreshness: id === 'root' ? 'stale' : 'fresh',
+      photoFreshness: id === '1' ? 'stale' : 'expired',
+      albumFetchedAt: 100,
+      photoFetchedAt: id === '1' ? 101 : null,
+    }));
+    apiMocks.getAlbumWithMeta.mockRejectedValue(new Error('album refresh failed'));
+    apiMocks.getPhotoWithMeta.mockRejectedValue(new Error('photo refresh failed'));
+    const { result } = renderHook(() => useReaderData({
+      albumId: 'root',
+      locationState: null,
+      currentChapterId: '1',
+      mountAlbumId: 'root',
+    }), { wrapper: createWrapper() });
+    await waitFor(() => assert.equal(result.current.photo, photo1));
+    await waitFor(() => assert.ok(apiMocks.getAlbumWithMeta.mock.calls.length > 0));
+    await waitFor(() => assert.ok(apiMocks.getPhotoWithMeta.mock.calls.length > 0));
+    assert.equal(result.current.album, album);
+  });
+
+  test('refreshes a stale photo without album context and tolerates missing cache metadata', async () => {
+    cacheMocks.getCachedAlbum.mockResolvedValue({
+      album,
+      photo: photo1,
+      albumFreshness: 'fresh',
+      photoFreshness: 'stale',
+      albumFetchedAt: 100,
+      photoFetchedAt: null,
+    });
+    apiMocks.getPhotoWithMeta.mockResolvedValue({ data: photo2, cacheMeta: {} });
+    const { result } = renderHook(() => useReaderData({
+      albumId: undefined,
+      locationState: null,
+      currentChapterId: '1',
+      mountAlbumId: undefined,
+    }), { wrapper: createWrapper() });
+    await waitFor(() => assert.equal(result.current.photo?.name, photo2.name));
+    assert.equal(cacheMocks.setCachedAlbum.mock.calls.length, 0);
+  });
+
+  test('loads an uncached photo without album context', async () => {
+    cacheMocks.getCachedAlbum.mockResolvedValue(null);
+    apiMocks.getPhotoWithMeta.mockResolvedValue({ data: photo1, cacheMeta: {} });
+    const { result } = renderHook(() => useReaderData({
+      albumId: undefined,
+      locationState: null,
+      currentChapterId: '1',
+      mountAlbumId: undefined,
+    }), { wrapper: createWrapper() });
+    await waitFor(() => assert.equal(result.current.photo, photo1));
+    assert.equal(cacheMocks.setCachedAlbum.mock.calls.length, 0);
+  });
+
+  test('stores a refreshed photo with navigation album data before an album timestamp exists', async () => {
+    cacheMocks.getCachedAlbum.mockResolvedValue({
+      album,
+      photo: photo1,
+      albumFreshness: 'fresh',
+      photoFreshness: 'stale',
+      albumFetchedAt: 100,
+      photoFetchedAt: 101,
+    });
+    apiMocks.getPhotoWithMeta.mockResolvedValue({ data: photo2, cacheMeta: {} });
+    const { result } = renderHook(() => useReaderData({
+      albumId: undefined,
+      locationState: { album },
+      currentChapterId: '1',
+      mountAlbumId: undefined,
+    }), { wrapper: createWrapper() });
+    await waitFor(() => assert.equal(result.current.photo?.name, photo2.name));
+    assert.ok(cacheMocks.setCachedAlbum.mock.calls.some((call) => (
+      call[0] === '1' && call[3].albumFetchedAt > 0
+    )));
+  });
+
+  test('returns stale values when background refresh finds no replacement', async () => {
+    cacheMocks.getCachedAlbum.mockImplementation(async (id: string) => ({
+      album,
+      photo: id === '1' ? photo1 : null,
+      albumFreshness: id === 'root' ? 'stale' : 'fresh',
+      photoFreshness: id === '1' ? 'stale' : 'expired',
+      albumFetchedAt: 100,
+      photoFetchedAt: id === '1' ? 101 : null,
+    }));
+    const { result } = renderHook(() => useReaderData({
+      albumId: 'root',
+      locationState: null,
+      currentChapterId: '1',
+      mountAlbumId: 'root',
+    }), { wrapper: createWrapper() });
+    await waitFor(() => assert.equal(result.current.photo, photo1));
+    await waitFor(() => assert.ok(apiMocks.getAlbumWithMeta.mock.calls.length > 0));
+    await waitFor(() => assert.ok(apiMocks.getPhotoWithMeta.mock.calls.length > 0));
   });
 
   test('returns a single fallback chapter for a standalone album', async () => {
@@ -147,8 +291,8 @@ describe('useReaderData', () => {
     assert.equal(result.current.album, undefined);
     assert.equal(result.current.photo, undefined);
     assert.deepEqual(result.current.images, []);
-    assert.equal(apiMocks.getAlbum.mock.calls.length, 0);
-    assert.equal(apiMocks.getPhoto.mock.calls.length, 0);
+    assert.equal(apiMocks.getAlbumWithMeta.mock.calls.length, 0);
+    assert.equal(apiMocks.getPhotoWithMeta.mock.calls.length, 0);
   });
 
   test('blocks prefetch without a next chapter or on a constrained connection', async () => {
@@ -174,7 +318,7 @@ describe('useReaderData', () => {
       mountAlbumId: '1',
     }), { wrapper: createWrapper() });
     assert.equal(await constrained.result.current.prefetchNextChapter(), undefined);
-    assert.equal(apiMocks.getPhoto.mock.calls.length, 0);
+    assert.equal(apiMocks.getPhotoWithMeta.mock.calls.length, 0);
   });
 
   test('prefetches the next photo once and respects caller cancellation', async () => {
@@ -184,7 +328,10 @@ describe('useReaderData', () => {
       if (id === '1') return { album, photo: photo1 };
       return null;
     });
-    apiMocks.getPhoto.mockImplementation(async (id: string) => id === '2' ? photo2 : photo1);
+    apiMocks.getPhotoWithMeta.mockImplementation(async (id: string) => ({
+      data: id === '2' ? photo2 : photo1,
+      cacheMeta: {},
+    }));
     const { result, unmount } = renderHook(() => useReaderData({
       albumId: 'root',
       locationState: {
@@ -197,7 +344,7 @@ describe('useReaderData', () => {
       mountAlbumId: '1',
     }), { wrapper: createWrapper() });
 
-    await waitFor(() => assert.ok(apiMocks.getPhoto.mock.calls.some((call) => call[0] === '2')));
+    await waitFor(() => assert.ok(apiMocks.getPhotoWithMeta.mock.calls.some((call) => call[0] === '2')));
     assert.equal(await result.current.prefetchNextChapter(), photo2);
     const controller = new AbortController();
     controller.abort();
@@ -211,7 +358,7 @@ describe('useReaderData', () => {
     cacheMocks.getCachedAlbum.mockImplementation(async (id: string) => (
       id === '2' ? null : { album, photo: photo1 }
     ));
-    apiMocks.getPhoto.mockRejectedValue(new Error('prefetch failed'));
+    apiMocks.getPhotoWithMeta.mockRejectedValue(new Error('prefetch failed'));
     const { unmount } = renderHook(() => useReaderData({
       albumId: 'root',
       locationState: {
@@ -223,7 +370,7 @@ describe('useReaderData', () => {
       currentChapterId: '1',
       mountAlbumId: '1',
     }), { wrapper: createWrapper() });
-    await waitFor(() => assert.ok(apiMocks.getPhoto.mock.calls.length > 0));
+    await waitFor(() => assert.ok(apiMocks.getPhotoWithMeta.mock.calls.length > 0));
     await act(async () => { await Promise.resolve(); });
     unmount();
   });

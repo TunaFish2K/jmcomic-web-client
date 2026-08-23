@@ -14,6 +14,22 @@ export type BatchError = {
     retryable: boolean;
 };
 
+export type CacheMetaEntry = {
+    fetchedAt: number;
+    freshness: 'fresh' | 'stale';
+    source: 'l1' | 'edge' | 'kv' | 'upstream';
+};
+
+export type CacheAware<T> = {
+    data: T;
+    cacheMeta: Record<string, CacheMetaEntry>;
+};
+
+type CacheRequestOptions = {
+    signal?: AbortSignal;
+    refresh?: boolean;
+};
+
 const BACKEND_URL = getBackendUrl();
 
 const PHOTO_RETRY_DELAYS_MS = [500, 1500, 3000];
@@ -36,11 +52,22 @@ function sleep(ms: number, signal?: AbortSignal) {
     });
 }
 
+function parseCacheMeta(response: Response): Record<string, CacheMetaEntry> {
+    const encoded = response.headers.get('X-Cache-Meta');
+    if (!encoded) return {};
+    try {
+        const parsed = JSON.parse(decodeURIComponent(encoded)) as Record<string, CacheMetaEntry>;
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
 async function fetchPhotoJsonWithRetry<T>(
     url: URL,
     allowNotFound = false,
     signal?: AbortSignal,
-): Promise<T | null> {
+): Promise<CacheAware<T | null>> {
     for (let attempt = 0; ; attempt++) {
         let res: Response;
         try {
@@ -53,7 +80,9 @@ async function fetchPhotoJsonWithRetry<T>(
         }
 
         if (!res.ok) {
-            if (allowNotFound && res.status === 404) return null;
+            if (allowNotFound && res.status === 404) {
+                return { data: null, cacheMeta: parseCacheMeta(res) };
+            }
 
             const errorMessage = await res.text();
             if (attempt < PHOTO_RETRY_DELAYS_MS.length && shouldRetryPhotoRequest(res.status)) {
@@ -66,7 +95,7 @@ async function fetchPhotoJsonWithRetry<T>(
             );
         }
 
-        return (await res.json()) as T;
+        return { data: (await res.json()) as T, cacheMeta: parseCacheMeta(res) };
     }
 }
 
@@ -107,22 +136,38 @@ export async function search(
     return normalizeSearchResult((await res.json()) as SearchResult);
 }
 
-export async function getAlbum(id: string, signal?: AbortSignal) {
+export async function getAlbumWithMeta(
+    id: string,
+    options: CacheRequestOptions = {},
+): Promise<CacheAware<Album | null>> {
     const url = new URL(`/album/${id}`, BACKEND_URL);
-    const res = await fetch(url, { signal });
+    if (options.refresh) url.searchParams.set('refresh', '1');
+    const res = await fetch(url, { signal: options.signal });
     if (!res.ok) {
-        if (res.status === 404) return null;
+        if (res.status === 404) return { data: null, cacheMeta: parseCacheMeta(res) };
         const errorMessage = await res.text();
         throw new Error(
             `${res.status} ${res.statusText}, message: ${errorMessage}`,
         );
     }
-    return (await res.json()) as Album;
+    return { data: (await res.json()) as Album, cacheMeta: parseCacheMeta(res) };
+}
+
+export async function getAlbum(id: string, signal?: AbortSignal) {
+    return (await getAlbumWithMeta(id, { signal })).data;
+}
+
+export async function getPhotoWithMeta(
+    id: string,
+    options: CacheRequestOptions = {},
+): Promise<CacheAware<PhotoWithScrambleId | null>> {
+    const url = new URL(`/photo/${id}`, BACKEND_URL);
+    if (options.refresh) url.searchParams.set('refresh', '1');
+    return await fetchPhotoJsonWithRetry<PhotoWithScrambleId>(url, true, options.signal);
 }
 
 export async function getPhoto(id: string, signal?: AbortSignal) {
-    const url = new URL(`/photo/${id}`, BACKEND_URL);
-    return await fetchPhotoJsonWithRetry<PhotoWithScrambleId>(url, true, signal);
+    return (await getPhotoWithMeta(id, { signal })).data;
 }
 
 export type BatchPhotoItem =
@@ -133,23 +178,34 @@ export async function getBatchPhoto(ids: string[], signal?: AbortSignal): Promis
     if (ids.length === 0) return [];
     const url = new URL('/batch-photo', BACKEND_URL);
     url.searchParams.set('ids', ids.join(','));
-    return (await fetchPhotoJsonWithRetry<BatchPhotoItem[]>(url, false, signal)) ?? [];
+    return (await fetchPhotoJsonWithRetry<BatchPhotoItem[]>(url, false, signal)).data ?? [];
 }
 
 export type BatchAlbumItem =
     | { albumId: string; album: Album; photo: PhotoWithScrambleId | null; error?: never }
     | { albumId: string; album: null; photo: null; error: BatchError };
 
-export async function getBatchAlbum(ids: string[], signal?: AbortSignal): Promise<BatchAlbumItem[]> {
-    if (ids.length === 0) return [];
+export async function getBatchAlbumWithMeta(
+    ids: string[],
+    options: CacheRequestOptions = {},
+): Promise<CacheAware<BatchAlbumItem[]>> {
+    if (ids.length === 0) return { data: [], cacheMeta: {} };
     const url = new URL('/batch-album', BACKEND_URL);
     url.searchParams.set('ids', ids.join(','));
-    const res = await fetch(url, { signal });
+    if (options.refresh) url.searchParams.set('refresh', '1');
+    const res = await fetch(url, { signal: options.signal });
     if (!res.ok) {
         const errorMessage = await res.text();
         throw new Error(
             `${res.status} ${res.statusText}, message: ${errorMessage}`,
         );
     }
-    return (await res.json()) as BatchAlbumItem[];
+    return {
+        data: (await res.json()) as BatchAlbumItem[],
+        cacheMeta: parseCacheMeta(res),
+    };
+}
+
+export async function getBatchAlbum(ids: string[], signal?: AbortSignal): Promise<BatchAlbumItem[]> {
+    return (await getBatchAlbumWithMeta(ids, { signal })).data;
 }

@@ -3,7 +3,16 @@ import { afterEach, beforeEach, describe, test, vi } from 'vitest';
 
 vi.mock('../src/backend-url', () => ({ getBackendUrl: () => 'https://backend.test' }));
 
-import { getAlbum, getBatchAlbum, getBatchPhoto, getPhoto, search } from '../src/api';
+import {
+  getAlbum,
+  getAlbumWithMeta,
+  getBatchAlbum,
+  getBatchAlbumWithMeta,
+  getBatchPhoto,
+  getPhoto,
+  getPhotoWithMeta,
+  search,
+} from '../src/api';
 
 const searchResult = {
   search_query: 'cats',
@@ -67,6 +76,36 @@ describe('frontend backend API', () => {
     assert.deepEqual(await getAlbum('1'), album);
     assert.equal(await getAlbum('missing'), null);
     await assert.rejects(getAlbum('broken'), /503 Unavailable, message: offline/);
+  });
+
+  test('parses cache metadata and requests a forced refresh without changing JSON data', async () => {
+    const album = { id: '1', name: 'Album' };
+    const photo = { id: '1', name: 'Chapter', scrambleId: 0, images: [] };
+    const metadata = encodeURIComponent(JSON.stringify({
+      'album:1': { fetchedAt: 123, freshness: 'fresh', source: 'edge' },
+    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json(album, { headers: { 'X-Cache-Meta': metadata } }))
+      .mockResolvedValueOnce(Response.json(photo, { headers: { 'X-Cache-Meta': '%broken' } }))
+      .mockResolvedValueOnce(Response.json([{ albumId: '1', album, photo }], {
+        headers: { 'X-Cache-Meta': metadata },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const albumResponse = await getAlbumWithMeta('1', { refresh: true });
+    assert.deepEqual(albumResponse.data, album);
+    assert.equal(albumResponse.cacheMeta['album:1'].fetchedAt, 123);
+    assert.equal((fetchMock.mock.calls[0][0] as URL).searchParams.get('refresh'), '1');
+
+    const photoResponse = await getPhotoWithMeta('1', { refresh: true });
+    assert.deepEqual(photoResponse.data, photo);
+    assert.deepEqual(photoResponse.cacheMeta, {});
+
+    const batchResponse = await getBatchAlbumWithMeta(['1'], { refresh: true });
+    assert.equal(batchResponse.data[0].albumId, '1');
+    assert.equal(batchResponse.cacheMeta['album:1'].source, 'edge');
+    assert.equal((fetchMock.mock.calls[2][0] as URL).searchParams.get('refresh'), '1');
+    assert.deepEqual(await getBatchAlbumWithMeta([]), { data: [], cacheMeta: {} });
   });
 
   test('loads photos, returns null for 404, and retries retryable status codes', async () => {

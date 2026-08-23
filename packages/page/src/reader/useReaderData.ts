@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getAlbum, getPhoto } from '../api';
+import { getAlbumWithMeta, getPhotoWithMeta } from '../api';
 import { getCachedAlbum, setCachedAlbum } from '../album-cache';
 import type { Album, PhotoWithScrambleId } from '@tiny-client/shared';
 import { getAlbumMeta, saveAlbumMeta } from './reader-store';
@@ -43,24 +43,46 @@ export function useReaderData(options: {
 
   const initialAlbumRef = useRef(navState?.album ?? (albumId ? getAlbumMeta(albumId) : null));
   const initialPhotoRef = useRef(navState?.photo ?? null);
+  const albumFetchedAtRef = useRef<number | null>(null);
+  const photoFetchedAtRef = useRef<number | null>(null);
 
   const isSeries = navState?.isSeries === true;
   const seriesItems = useMemo(() => navState?.seriesItems ?? [], [navState?.seriesItems]);
+
+  const refreshAlbum = useCallback(async (id: string, signal?: AbortSignal) => {
+    const response = await getAlbumWithMeta(id, { signal, refresh: true });
+    if (!response.data) return null;
+    const fetchedAt = response.cacheMeta[`album:${id}`]?.fetchedAt ?? Date.now();
+    albumFetchedAtRef.current = fetchedAt;
+    saveAlbumMeta(id, response.data);
+    await setCachedAlbum(id, response.data, undefined, { albumFetchedAt: fetchedAt });
+    queryClient.setQueryData(['album', id], response.data);
+    return response.data;
+  }, [queryClient]);
 
   const { data: album } = useQuery({
     queryKey: ['album', albumId],
     queryFn: async ({ signal }) => {
       const cached = await getCachedAlbum(albumId!);
-      if (cached?.album) {
+      if (cached && cached.albumFreshness !== 'expired') {
+        albumFetchedAtRef.current = cached.albumFetchedAt;
         saveAlbumMeta(albumId!, cached.album);
+        if (cached.albumFreshness === 'stale') {
+          setTimeout(() => void refreshAlbum(albumId!).catch(() => {}), 0);
+        }
         return cached.album;
       }
-      const fetched = await getAlbum(albumId!, signal);
-      if (fetched) saveAlbumMeta(albumId!, fetched);
-      return fetched;
+      const response = await getAlbumWithMeta(albumId!, { signal });
+      if (response.data) {
+        const fetchedAt = response.cacheMeta[`album:${albumId}`]?.fetchedAt ?? Date.now();
+        albumFetchedAtRef.current = fetchedAt;
+        saveAlbumMeta(albumId!, response.data);
+        await setCachedAlbum(albumId!, response.data, undefined, { albumFetchedAt: fetchedAt });
+      }
+      return response.data;
     },
     enabled: !!albumId,
-    // eslint-disable-next-line react-hooks/refs -- 首次渲染读缓存元数据作为 query initialData
+    // eslint-disable-next-line react-hooks/refs -- initial navigation data is captured once per route mount
     initialData: initialAlbumRef.current,
   });
 
@@ -88,13 +110,42 @@ export function useReaderData(options: {
 
   const currentChapterIndex = sortedChapters.findIndex((c) => c.id === currentChapterId);
 
+  const refreshChapterPhoto = useCallback(async (chapterId: string, signal?: AbortSignal) => {
+    const response = await getPhotoWithMeta(chapterId, { signal, refresh: true });
+    if (!response.data) return undefined;
+    const fetchedAt = response.cacheMeta[`photo:${chapterId}`]?.fetchedAt ?? Date.now();
+    photoFetchedAtRef.current = fetchedAt;
+    if (album) {
+      await setCachedAlbum(chapterId, album, response.data, {
+        albumFetchedAt: albumFetchedAtRef.current ?? Date.now(),
+        photoFetchedAt: fetchedAt,
+      });
+    }
+    queryClient.setQueryData(['photo', chapterId], response.data);
+    return response.data;
+  }, [album, queryClient]);
+
   const loadChapterPhoto = useCallback(async (chapterId: string, signal?: AbortSignal) => {
     const cached = await getCachedAlbum(chapterId);
-    if (cached?.photo) return cached.photo;
-    const fetched = await getPhoto(chapterId, signal);
-    if (fetched && album) void setCachedAlbum(chapterId, album, fetched);
-    return fetched ?? undefined;
-  }, [album]);
+    if (cached?.photo && cached.photoFreshness !== 'expired') {
+      photoFetchedAtRef.current = cached.photoFetchedAt ?? Date.now();
+      if (cached.photoFreshness === 'stale') {
+        setTimeout(() => void refreshChapterPhoto(chapterId).catch(() => {}), 0);
+      }
+      return cached.photo;
+    }
+    const response = await getPhotoWithMeta(chapterId, { signal });
+    if (!response.data) return undefined;
+    const fetchedAt = response.cacheMeta[`photo:${chapterId}`]?.fetchedAt ?? Date.now();
+    photoFetchedAtRef.current = fetchedAt;
+    if (album) {
+      void setCachedAlbum(chapterId, album, response.data, {
+        albumFetchedAt: albumFetchedAtRef.current ?? Date.now(),
+        photoFetchedAt: fetchedAt,
+      });
+    }
+    return response.data;
+  }, [album, refreshChapterPhoto]);
 
   const { data: photo } = useQuery({
     queryKey: ['photo', currentChapterId],
@@ -102,13 +153,18 @@ export function useReaderData(options: {
       return loadChapterPhoto(currentChapterId, signal);
     },
     enabled: !!currentChapterId,
-    // eslint-disable-next-line react-hooks/refs -- 首次渲染读缓存图片元数据作为 query initialData
+    // eslint-disable-next-line react-hooks/refs -- initial navigation data is captured once per route mount
     initialData: currentChapterId === mountAlbumId ? initialPhotoRef.current : undefined,
     staleTime: PHOTO_QUERY_STALE_TIME_MS,
   });
 
   useEffect(() => {
-    if (album && photo) void setCachedAlbum(currentChapterId, album, photo);
+    if (album && photo) {
+      void setCachedAlbum(currentChapterId, album, photo, {
+        albumFetchedAt: albumFetchedAtRef.current ?? Date.now(),
+        photoFetchedAt: photoFetchedAtRef.current ?? Date.now(),
+      });
+    }
   }, [album, currentChapterId, photo]);
 
   const images: PhotoWithScrambleId['images'] = useMemo(() => photo?.images ?? [], [photo]);

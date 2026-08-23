@@ -41,4 +41,23 @@ describe('SearchResultCache', () => {
 
 		expect(cache.get('key')).toEqual({ ids: [2] });
 	});
+
+	it('preserves the original timestamp when promoting another cache layer', () => {
+		const cache = new SearchResultCache();
+		cache.set('key', { ids: [1] }, 0);
+
+		vi.advanceTimersByTime(SEARCH_RESULT_CACHE_TTL_MS + 1);
+		expect(cache.get('key')).toBeUndefined();
+	});
+
+	it('bounds entries and retains a recently read key', () => {
+		const cache = new SearchResultCache(SEARCH_RESULT_CACHE_TTL_MS, 2);
+		cache.set('first', 1);
+		cache.set('second', 2);
+		expect(cache.get('first')).toBe(1);
+		cache.set('third', 3);
+		expect(cache.get('second')).toBeUndefined();
+		expect(cache.get('first')).toBe(1);
+		expect(cache.get('third')).toBe(3);
+	});
 });

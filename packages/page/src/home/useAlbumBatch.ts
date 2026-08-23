@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getBatchAlbum } from "../api";
+import { getBatchAlbumWithMeta } from "../api";
 import type { BatchAlbumItem } from "../api";
 import type { SearchResult } from "@tiny-client/shared";
 import { getCachedAlbums, setCachedAlbums } from "../album-cache";
@@ -18,6 +18,7 @@ export function useAlbumBatch(data: SearchResult | undefined) {
 
     // Track which album IDs are currently visible in the viewport
     const visibleIdsRef = useRef<Set<string>>(new Set());
+    const wakeQueueRef = useRef<(() => void) | null>(null);
     // Ref to the card elements for IntersectionObserver
     const cardRefsMap = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -40,8 +41,9 @@ export function useAlbumBatch(data: SearchResult | undefined) {
                     if (entry.isIntersecting) visibleIds.add(id);
                     else visibleIds.delete(id);
                 }
+                wakeQueueRef.current?.();
             },
-            { threshold: 0.1 },
+            { threshold: 0, rootMargin: "1000px 0px" },
         );
 
         // Observe all current cards (give DOM a tick to render)
@@ -82,7 +84,7 @@ export function useAlbumBatch(data: SearchResult | undefined) {
     }, [resultIdsKey]);
 
     // Fetch batch album data — visible cards first, then the rest.
-    // Keeps retrying any IDs that returned an error until all succeed or cancelled.
+    // Retries transient failures with a capped exponential backoff.
     useEffect(() => {
         if (!resultIdsKey) return;
         if (!data || !('content' in data)) return;
@@ -91,12 +93,49 @@ export function useAlbumBatch(data: SearchResult | undefined) {
         const controller = new AbortController();
         const CHUNK = 15;    // Leave headroom: 2 fixed + 3 per ID, avoid sitting on the 50-request ceiling
         const CONCURRENCY = 2; // max simultaneous chunk requests
-        const RETRY_DELAY = 1500; // ms before re-queuing failed IDs
+        const RETRY_DELAYS = [1500, 3000, 6000, 12000];
+        const retryCounts = new Map<string, number>();
+        const forceRefreshIds = new Set<string>();
+
+        const waitForIdle = () => new Promise<void>((resolve) => {
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(() => resolve(), { timeout: 1000 });
+            } else {
+                setTimeout(resolve, 0);
+            }
+        });
+
+        const waitForWakeOrDelay = (delay: number) => new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                wakeQueueRef.current = null;
+                clearTimeout(timer);
+                resolve();
+            };
+            const timer = setTimeout(finish, delay);
+            wakeQueueRef.current = finish;
+        });
+
+        const canIdlePrefetch = () => {
+            const connection = (navigator as Navigator & {
+                connection?: { saveData?: boolean; effectiveType?: string };
+            }).connection;
+            return connection?.saveData !== true
+                && connection?.effectiveType !== 'slow-2g'
+                && connection?.effectiveType !== '2g';
+        };
 
         // Send one chunk; returns IDs that came back with an error field
         const fetchChunk = async (ids: string[]): Promise<string[]> => {
             try {
-                const results = await getBatchAlbum(ids, controller.signal);
+                const forceRefresh = ids.some(id => forceRefreshIds.has(id));
+                const response = await getBatchAlbumWithMeta(ids, {
+                    signal: controller.signal,
+                    refresh: forceRefresh,
+                });
+                const results = response.data;
                 if (cancelled) return [];
                 setAlbumCache(prev => {
                     const next = new Map(prev);
@@ -105,10 +144,18 @@ export function useAlbumBatch(data: SearchResult | undefined) {
                 });
                 const cachedItems = results.filter(
                     (result): result is SuccessfulBatchAlbumItem => result.album !== null,
-                );
+                ).map((result) => ({
+                    ...result,
+                    albumFetchedAt: response.cacheMeta[`album:${result.albumId}`]?.fetchedAt,
+                    photoFetchedAt: response.cacheMeta[`photo:${result.albumId}`]?.fetchedAt,
+                }));
                 if (cachedItems.length > 0) setCachedAlbums(cachedItems).catch(() => {});
-                // IDs whose worker-side fetch failed get re-queued
-                return results.filter(r => r.error).map(r => r.albumId);
+                return results.filter((result) => {
+                    if (result.error) return result.error.retryable;
+                    const albumMeta = response.cacheMeta[`album:${result.albumId}`];
+                    const photoMeta = response.cacheMeta[`photo:${result.albumId}`];
+                    return forceRefresh && (albumMeta?.freshness === 'stale' || photoMeta?.freshness === 'stale');
+                }).map(result => result.albumId);
             } catch {
                 if (controller.signal.aborted) return [];
                 // Network / CF 520 — treat whole chunk as failed
@@ -142,12 +189,24 @@ export function useAlbumBatch(data: SearchResult | undefined) {
             if (cachedMap.size > 0) {
                 setAlbumCache(prev => {
                     const next = new Map(prev);
-                    for (const [id, { album, photo }] of cachedMap) {
-                        next.set(id, { albumId: id, album, photo: photo ?? null });
+                    for (const [id, entry] of cachedMap) {
+                        if (entry.albumFreshness !== 'expired') {
+                            next.set(id, { albumId: id, album: entry.album, photo: entry.photo ?? null });
+                        }
                     }
                     return next;
                 });
-                for (const id of cachedMap.keys()) pending.delete(id);
+                for (const [id, entry] of cachedMap) {
+                    const albumNeedsRefresh = entry.albumFreshness !== undefined && entry.albumFreshness !== 'fresh';
+                    const photoNeedsRefresh = entry.photo !== null
+                        && entry.photoFreshness !== undefined
+                        && entry.photoFreshness !== 'fresh';
+                    if (albumNeedsRefresh || photoNeedsRefresh) {
+                        forceRefreshIds.add(id);
+                    } else {
+                        pending.delete(id);
+                    }
+                }
             }
             if (pending.size === 0) return;
 
@@ -159,7 +218,21 @@ export function useAlbumBatch(data: SearchResult | undefined) {
                     if (visibleIdsRef.current.has(id)) visible.push(id);
                     else rest.push(id);
                 }
-                const ordered = [...visible, ...rest];
+                let ordered: string[];
+                let concurrency: number;
+                if (visible.length > 0) {
+                    ordered = [...visible, ...rest].slice(0, CHUNK * CONCURRENCY);
+                    concurrency = CONCURRENCY;
+                } else {
+                    if (!canIdlePrefetch()) {
+                        await waitForWakeOrDelay(1000);
+                        continue;
+                    }
+                    await waitForIdle();
+                    if (cancelled) break;
+                    ordered = rest.slice(0, CHUNK);
+                    concurrency = 1;
+                }
 
                 // Split into chunks and dispatch up to CONCURRENCY at a time
                 const chunks: string[][] = [];
@@ -169,9 +242,9 @@ export function useAlbumBatch(data: SearchResult | undefined) {
 
                 // Process chunks with limited concurrency
                 const failed: string[] = [];
-                for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+                for (let i = 0; i < chunks.length; i += concurrency) {
                     if (cancelled) break;
-                    const batch = chunks.slice(i, i + CONCURRENCY);
+                    const batch = chunks.slice(i, i + concurrency);
                     const results = await Promise.all(batch.map(fetchChunk));
                     for (const ids of results) failed.push(...ids);
                 }
@@ -180,11 +253,19 @@ export function useAlbumBatch(data: SearchResult | undefined) {
 
                 // Update pending: remove successes, keep failures
                 for (const id of ordered) pending.delete(id);
-                for (const id of failed) pending.add(id);
+                let nextRetryDelay = 0;
+                for (const id of failed) {
+                    const retryCount = (retryCounts.get(id) ?? 0) + 1;
+                    retryCounts.set(id, retryCount);
+                    if (retryCount <= RETRY_DELAYS.length) {
+                        pending.add(id);
+                        const base = RETRY_DELAYS[retryCount - 1];
+                        nextRetryDelay = Math.max(nextRetryDelay, Math.round(base * (0.8 + Math.random() * 0.4)));
+                    }
+                }
 
-                if (pending.size > 0) {
-                    // Wait before retrying to avoid hammering CF on 520s
-                    await new Promise(r => setTimeout(r, RETRY_DELAY));
+                if (nextRetryDelay > 0) {
+                    await waitForWakeOrDelay(nextRetryDelay);
                 }
             }
         };
@@ -193,6 +274,8 @@ export function useAlbumBatch(data: SearchResult | undefined) {
         return () => {
             cancelled = true;
             controller.abort();
+            wakeQueueRef.current?.();
+            wakeQueueRef.current = null;
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [resultIdsKey]);

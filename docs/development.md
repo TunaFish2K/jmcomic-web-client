@@ -44,7 +44,9 @@ Vite 在启动和构建时读取 `VITE_BACKEND_URL`。修改该值后，必须�
 
 ### Worker KV 缓存
 
-Worker 会先读取进程内缓存。如果配置了 `ALBUM_CACHE_KV`，Worker 还会读取 Cloudflare KV。没有该绑定时，接口仍可运行。
+作品和章节接口按以下顺序读取缓存：Worker 进程内缓存、Cloudflare Cache API、Cloudflare KV、实时上游。批量接口使用 KV bulk-get，缓存写入通过 `waitUntil` 完成。没有 `ALBUM_CACHE_KV` binding 时，进程内缓存和 Cache API 仍可运行。
+
+多章节作品在 1 分钟内视为 fresh，并可在 15 分钟内作为 stale 数据立即返回。单章节作品和章节数据的 fresh 时间为 1 小时，stale 上限为 24 小时。stale 响应会触发后台刷新；请求加上 `refresh=1` 时，Worker 会等待刷新完成，并在上游失败时退回仍在 stale 时限内的数据。
 
 如需启用 KV，请先在 Cloudflare 中创建命名空间。然后在 `packages/worker/wrangler.jsonc` 中按以下形式配置 `compatibility_flags` 和 KV binding，并替换命名空间 ID：
 
@@ -111,28 +113,30 @@ Worker 拒绝本机、私网/IP 字面量、自身地址、带凭据或查询参
 | `mainTag` | `0` 全部、`1` 作品名称、`2` 作者、`3` 标签、`4` 角色 | `0` |
 | `orderBy` | `mr` 最新发布、`mv` 最多浏览、`mp` 最多图片、`tf` 最多喜欢 | `mr` |
 | `time` | `a` 全部、`t` 今天、`w` 本周、`m` 本月 | `a` |
-| `warmup` | 设置为 `1` 时预取当前搜索结果的作品信息 | 不启用 |
+| `warmup` | 设置为 `1` 时预取 redirect 和首屏最多 15 个作品 | 不启用 |
 | `previousIds` | 上一页作品 ID，使用逗号分隔，最多 80 个 | 不启用 |
 
 成功时返回 `SearchResult`。`page` 大于 1 且提供 `previousIds` 时，Worker 会拒绝与上一页完全相同的候选结果，并改用其他上游域名。所有候选域名都失败或返回重复页时，接口返回 `502`。
 
 ### `GET /album/:id`
 
-返回指定作品的 `Album`。作品不存在时返回 `404`。
+返回指定作品的 `Album`。作品不存在时返回 `404`。可使用 `refresh=1` 等待 stale 缓存刷新。
 
 ### `GET /photo/:id`
 
-返回指定章节的 `PhotoWithScrambleId`。章节不存在时返回 `404`。
+返回指定章节的 `PhotoWithScrambleId`。章节不存在时返回 `404`。可使用 `refresh=1` 等待 stale 缓存刷新。
 
 ### `GET /batch-photo`
 
-通过逗号分隔的 `ids` 参数批量获取章节。一次请求最多接收 20 个 ID。
+通过逗号分隔的 `ids` 参数批量获取章节。一次请求最多接收 20 个 ID。`refresh=1` 对 stale 条目执行等待刷新。
 
-接口为每个 ID 返回章节数据或结构化错误。单个章节失败不会中断其他章节。
+接口为每个 ID 返回章节数据或结构化错误。单个章节失败不会中断其他章节；包含错误的响应使用 `no-store`，因此前端重试不会命中浏览器中的旧错误。
 
 ### `GET /batch-album`
 
-通过逗号分隔的 `ids` 参数批量获取作品和图片数据。一次请求最多接收 15 个 ID。
+通过逗号分隔的 `ids` 参数批量获取作品和图片数据。一次请求最多接收 15 个 ID。`refresh=1` 对 stale 条目执行等待刷新。
+
+以上缓存接口通过 `X-Cache` 返回整体命中状态，通过 URL 编码的 `X-Cache-Meta` 返回各资源的 `fetchedAt`、新鲜度和来源，并通过 `Server-Timing` 返回 Worker 耗时。浏览器可以读取这些响应头。
 
 接口会先读取 Worker 缓存。它为每个 ID 返回作品数据或结构化错误。
 

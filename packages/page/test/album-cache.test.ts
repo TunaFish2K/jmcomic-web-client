@@ -44,7 +44,7 @@ describe('album cache schema', () => {
 
     assert.equal(await cache.getCachedAlbum('missing'), null);
     assert.deepEqual(await inspectDatabase(), {
-      version: 2,
+      version: 3,
       stores: ['albums'],
       indexes: ['updatedAt'],
     });
@@ -56,14 +56,27 @@ describe('album cache schema', () => {
     const photo = { id: '1', name: 'Photo one', scrambleId: 0, images: [] } as never;
     await cache.setCachedAlbum('1', album, photo);
     await cache.setCachedAlbum('2', { id: '2', name: 'Album two' } as never);
-    assert.deepEqual(await cache.getCachedAlbum('1'), { album, photo });
+    const cached = await cache.getCachedAlbum('1');
+    assert.deepEqual(cached?.album, album);
+    assert.deepEqual(cached?.photo, photo);
+    assert.equal(cached?.albumFreshness, 'fresh');
+    assert.equal(cached?.photoFreshness, 'fresh');
     assert.equal((await cache.getCachedAlbum('2'))?.photo, null);
+
+    const originalPhotoFetchedAt = cached?.photoFetchedAt;
+    await cache.setCachedAlbum('1', { ...album, name: 'Updated album' } as never, undefined, {
+      albumFetchedAt: Date.now(),
+    });
+    const metadataOnlyUpdate = await cache.getCachedAlbum('1');
+    assert.deepEqual(metadataOnlyUpdate?.photo, photo);
+    assert.equal(metadataOnlyUpdate?.photoFetchedAt, originalPhotoFetchedAt);
+
     assert.equal(await cache.getCachedAlbum('missing'), null);
     const batch = await cache.getCachedAlbums(['1', 'missing', '2']);
     assert.deepEqual([...batch.keys()], ['1', '2']);
 
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('jm-album-cache', 2);
+      const request = indexedDB.open('jm-album-cache', 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -86,7 +99,7 @@ describe('album cache schema', () => {
     assert.equal((await cache.getCachedAlbum('batch-a'))?.album.name, 'A');
 
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('jm-album-cache', 2);
+      const request = indexedDB.open('jm-album-cache', 3);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -109,5 +122,34 @@ describe('album cache schema', () => {
     assert.equal(await cache.getCachedAlbum('seed-0'), null);
     assert.equal((await cache.getCachedAlbum('newest'))?.album.name, 'Newest');
     database.close();
+  });
+
+  it('uses short freshness for series albums and stable freshness for photos', async () => {
+    const cache = await import('../src/album-cache');
+    const now = Date.now();
+    const series = { id: 'ttl-series', name: 'Series', series: [{ id: 'chapter' }] } as never;
+    const photo = { id: 'ttl-series', name: 'Photo', scrambleId: 0, images: [] } as never;
+    await cache.setCachedAlbum('ttl-series', series, photo, {
+      albumFetchedAt: now - 2 * 60_000,
+      photoFetchedAt: now - 2 * 60_000,
+    });
+    const cachedSeries = await cache.getCachedAlbum('ttl-series');
+    assert.equal(cachedSeries?.albumFreshness, 'stale');
+    assert.equal(cachedSeries?.photoFreshness, 'fresh');
+
+    const standalone = { id: 'ttl-standalone', name: 'Standalone', series: [] } as never;
+    await cache.setCachedAlbum('ttl-standalone', standalone, photo, {
+      albumFetchedAt: now - 2 * 60_000,
+      photoFetchedAt: now - 2 * 60_000,
+    });
+    assert.equal((await cache.getCachedAlbum('ttl-standalone'))?.albumFreshness, 'fresh');
+
+    await cache.setCachedAlbum('ttl-expired-album', series, photo, {
+      albumFetchedAt: now - 16 * 60_000,
+      photoFetchedAt: now - 2 * 60_000,
+    });
+    const partiallyExpired = await cache.getCachedAlbum('ttl-expired-album');
+    assert.equal(partiallyExpired?.albumFreshness, 'expired');
+    assert.equal(partiallyExpired?.photoFreshness, 'fresh');
   });
 });

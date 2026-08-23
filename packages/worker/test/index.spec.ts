@@ -73,17 +73,28 @@ describe('worker routes', () => {
 
 	it('serves /batch-album from the KV L2 cache when the entry exists', async () => {
 		const albumId = 'l2-cached-album';
-		const cachedItem = {
-			albumId,
-			album: { id: albumId, name: 'cached-album' },
-			photo: null,
-		};
-
-		await env.ALBUM_CACHE_KV.put(`album:${albumId}`, JSON.stringify(cachedItem));
+		const fetchedAt = Date.now();
+		await Promise.all([
+			env.ALBUM_CACHE_KV.put(`resource:v2:album:${albumId}`, JSON.stringify({
+				version: 2,
+				kind: 'album',
+				id: albumId,
+				value: { id: albumId, name: 'cached-album', series: [] },
+				fetchedAt,
+			})),
+			env.ALBUM_CACHE_KV.put(`resource:v2:photo:${albumId}`, JSON.stringify({
+				version: 2,
+				kind: 'photo',
+				id: albumId,
+				value: null,
+				fetchedAt,
+			})),
+		]);
 
 		const response = await SELF.fetch(`https://example.com/batch-album?ids=${albumId}`);
 		expect(response.status).toBe(200);
 		expect(response.headers.get('cache-control')).toBe('public, max-age=60');
+		expect(response.headers.get('x-cache')).toBe('kv');
 
 		const body = (await response.json()) as Array<{ albumId: string; album: { name: string } | null }>;
 		expect(body).toHaveLength(1);
