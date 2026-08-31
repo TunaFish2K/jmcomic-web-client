@@ -31,7 +31,7 @@ import {
 
 function callbacks() {
   return {
-    onToggleVisibility: vi.fn(),
+    onVisibilityChange: vi.fn(),
     onClose: vi.fn(),
     onPrevChapter: vi.fn(),
     onNextChapter: vi.fn(),
@@ -48,6 +48,31 @@ function callbacks() {
     onOpenTranslationSettings: vi.fn(),
     onScrollByInputStep: vi.fn(),
     onSeekPage: vi.fn(),
+  };
+}
+
+function mockDesktopPointer(initialMatches: boolean) {
+  let matches = initialMatches;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const media = {
+    get matches() { return matches; },
+    media: '(hover: hover) and (pointer: fine)',
+    onchange: null,
+    addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener)),
+    removeEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener)),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  } as unknown as MediaQueryList;
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: vi.fn(() => media),
+  });
+  return {
+    setMatches(nextMatches: boolean) {
+      matches = nextMatches;
+      for (const listener of listeners) listener({ matches } as MediaQueryListEvent);
+    },
   };
 }
 
@@ -93,6 +118,7 @@ function overlayProps(overrides: Partial<OverlayProps> = {}): OverlayProps {
 describe('reader overlay controls', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mockDesktopPointer(false);
     cacheMocks.getCacheStats.mockReset().mockResolvedValue({ count: 3, totalSize: 2 * 1024 * 1024 });
     cacheMocks.clearAllCache.mockReset().mockResolvedValue(undefined);
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
@@ -136,7 +162,7 @@ describe('reader overlay controls', () => {
     fireEvent.keyDown(window, { key: 'F' });
     fireEvent.keyDown(window, { key: 'Escape' });
     assert.deepEqual(props.onScrollByInputStep.mock.calls.map((call) => call[0]), [-1, 1]);
-    assert.equal(props.onToggleVisibility.mock.calls.length, 2);
+    assert.deepEqual(props.onVisibilityChange.mock.calls, [[false], [false]]);
     assert.equal(props.onPrevChapter.mock.calls.length, 1);
     assert.equal(props.onNextChapter.mock.calls.length, 1);
     assert.equal(props.onResetZoom.mock.calls.length, 1);
@@ -312,6 +338,63 @@ describe('reader overlay controls', () => {
     assert.ok(screen.getByText('没有上一章了'));
     view.rerender(<ReaderOverlay {...overlayProps({ boundaryToast: 'next' })} />);
     assert.ok(screen.getByText('没有下一章了'));
+  });
+
+  test('auto-hides persistent desktop controls and restores them on mouse movement', () => {
+    const desktopPointer = mockDesktopPointer(true);
+    const props = overlayProps();
+    const view = render(<ReaderOverlay {...props} />);
+    const topBar = view.container.querySelector('[data-reader-ui="top"]')!;
+    const infoBar = view.container.querySelector('[data-reader-ui="info"]')!;
+    assert.match(topBar.className, /opacity-100/);
+    assert.match(infoBar.className, /opacity-100/);
+
+    act(() => vi.advanceTimersByTime(2999));
+    assert.equal(props.onVisibilityChange.mock.calls.length, 0);
+    act(() => vi.advanceTimersByTime(1));
+    assert.deepEqual(props.onVisibilityChange.mock.calls, [[false]]);
+
+    view.rerender(<ReaderOverlay {...props} visible={false} />);
+    assert.match(topBar.className, /opacity-0/);
+    assert.match(topBar.className, /pointer-events-none/);
+    assert.match(infoBar.className, /opacity-0/);
+    assert.match(infoBar.className, /pointer-events-none/);
+
+    fireEvent.mouseMove(window);
+    assert.deepEqual(props.onVisibilityChange.mock.calls, [[false], [true]]);
+    act(() => vi.advanceTimersByTime(3000));
+    assert.deepEqual(props.onVisibilityChange.mock.calls, [[false], [true], [false]]);
+    act(() => desktopPointer.setMatches(false));
+    assert.deepEqual(props.onVisibilityChange.mock.calls, [[false], [true], [false], [true]]);
+  });
+
+  test('pauses desktop auto-hide for reader panels, progress dragging, and external dialogs', () => {
+    mockDesktopPointer(true);
+    const props = overlayProps();
+    const view = render(<ReaderOverlay {...props} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开阅读设置' }));
+    act(() => vi.advanceTimersByTime(6000));
+    assert.equal(props.onVisibilityChange.mock.calls.length, 0);
+    fireEvent.click(screen.getByRole('button', { name: '关闭阅读设置' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '打开章节列表' }));
+    act(() => vi.advanceTimersByTime(6000));
+    assert.equal(props.onVisibilityChange.mock.calls.length, 0);
+    fireEvent.click(screen.getByRole('button', { name: '关闭章节列表' }));
+
+    const slider = screen.getByRole('slider', { name: '阅读进度' });
+    fireEvent.pointerDown(slider, { isPrimary: true, pointerId: 9, clientX: 20, clientY: 20 });
+    act(() => vi.advanceTimersByTime(6000));
+    assert.equal(props.onVisibilityChange.mock.calls.length, 0);
+    fireEvent.pointerCancel(slider, { pointerId: 9 });
+
+    view.rerender(<ReaderOverlay {...props} externalDialogOpen />);
+    act(() => vi.advanceTimersByTime(6000));
+    assert.equal(props.onVisibilityChange.mock.calls.length, 0);
+    view.rerender(<ReaderOverlay {...props} externalDialogOpen={false} />);
+    act(() => vi.advanceTimersByTime(3000));
+    assert.deepEqual(props.onVisibilityChange.mock.calls, [[false]]);
   });
 
   test('previews and commits horizontal pointer and keyboard seek gestures', async () => {

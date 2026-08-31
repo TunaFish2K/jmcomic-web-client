@@ -219,6 +219,40 @@ test("keeps the reader UI inside the viewport with comfortable touch targets", a
     });
 });
 
+test("auto-hides idle desktop controls without affecting touch readers", async ({
+    page,
+}, testInfo) => {
+    test.skip(
+        !["chromium", "mobile-chromium"].includes(testInfo.project.name),
+        "Idle pointer behavior runs once per input form factor",
+    );
+    await prepareReader(page);
+
+    const root = page.locator("[data-reader-root]");
+    const topBar = page.locator('[data-reader-ui="top"]');
+    await expect(topBar).toHaveCSS("opacity", "1");
+
+    if (testInfo.project.name === "mobile-chromium") {
+        await page.waitForTimeout(3300);
+        await expect(topBar).toHaveCSS("opacity", "1");
+        return;
+    }
+
+    await page.mouse.move(12, 12);
+    await page.waitForTimeout(3300);
+    await expect(topBar).toHaveCSS("opacity", "0");
+    await expect(root).toHaveCSS("cursor", "none");
+
+    await page.mouse.move(40, 40);
+    await expect(topBar).toHaveCSS("opacity", "1");
+    await expect(root).not.toHaveCSS("cursor", "none");
+
+    await page.getByRole("button", { name: "打开阅读设置" }).click();
+    await page.waitForTimeout(3300);
+    await expect(page.getByRole("dialog", { name: "阅读设置" })).toBeVisible();
+    await expect(topBar).toHaveCSS("opacity", "1");
+});
+
 test("scrolls horizontally with a real touch swipe", async ({ page, context }, testInfo) => {
     test.skip(
         testInfo.project.name !== "mobile-chromium",

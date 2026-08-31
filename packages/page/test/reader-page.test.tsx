@@ -336,9 +336,11 @@ describe('ReaderPage integration', () => {
     const overlay = state.overlayProps as Record<string, (...args: never[]) => unknown>;
     container.scrollLeft = 620;
     fireEvent.scroll(container);
-    act(() => overlay.onToggleVisibility());
+    act(() => overlay.onVisibilityChange(false as never));
     assert.equal(screen.getByTestId('reader-overlay').dataset.visible, 'false');
-    act(() => overlay.onToggleVisibility());
+    assert.equal(root.style.cursor, 'none');
+    act(() => overlay.onVisibilityChange(true as never));
+    assert.equal(root.style.cursor, '');
     act(() => overlay.onToggleDirection());
     assert.deepEqual(state.saveReadingDirection.mock.calls[0], ['top-down']);
     act(() => overlay.onToggleDirection());
@@ -788,7 +790,7 @@ describe('ReaderPage integration', () => {
     const root = container.parentElement!;
     const image = container.querySelector('img')!;
     image.getBoundingClientRect = () => ({ left: 1000, top: 1000, right: 1100, bottom: 1100, width: 100, height: 100, x: 1000, y: 1000, toJSON() {} });
-    act(() => (state.overlayProps as Record<string, () => void>).onToggleVisibility());
+    act(() => (state.overlayProps as Record<string, (visible: boolean) => void>).onVisibilityChange(false));
 
     root.dispatchEvent(touchEvent('touchstart', [
       { clientX: 100, clientY: 100 },

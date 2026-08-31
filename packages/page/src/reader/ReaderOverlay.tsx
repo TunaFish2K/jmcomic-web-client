@@ -5,6 +5,11 @@ import { getCacheStats, clearAllCache } from '@tiny-client/shared';
 import { ThemePanel } from '../theme/ThemeControls';
 import { getTranslationControlAction } from '../translation/scheduler';
 import { getSeekPageFromKey } from './input';
+import {
+  createReaderUiIdleController,
+  READER_DESKTOP_POINTER_QUERY,
+  type ReaderUiIdleController,
+} from './idle-ui';
 
 type ChapterInfo = { id: string; name: string; order: number };
 
@@ -329,7 +334,7 @@ export function ReaderOverlay({
   translationProcessed,
   translationHasResult,
   translationVisible,
-  onToggleVisibility,
+  onVisibilityChange,
   onClose,
   onPrevChapter,
   onNextChapter,
@@ -374,7 +379,7 @@ export function ReaderOverlay({
   translationProcessed: boolean;
   translationHasResult: boolean;
   translationVisible: boolean;
-  onToggleVisibility: () => void;
+  onVisibilityChange: (visible: boolean) => void;
   onClose: () => void;
   onPrevChapter: () => void;
   onNextChapter: () => void;
@@ -454,9 +459,50 @@ export function ReaderOverlay({
   const draggingRef = useRef(false);
   const dragPageRef = useRef(-1);
   const [displayPage, setDisplayPage] = useState<number | null>(null);
+  const idleControllerRef = useRef<ReaderUiIdleController | null>(null);
+  const visibilityChangeRef = useRef(onVisibilityChange);
 
   const activePage = dragging && displayPage !== null ? displayPage : currentPage;
   const activePct = totalPages > 1 ? (activePage / (totalPages - 1)) * 100 : 0;
+  const interactionActive = showChapterDrawer || showSettings || dragging || externalDialogOpen;
+
+  useEffect(() => {
+    visibilityChangeRef.current = onVisibilityChange;
+  }, [onVisibilityChange]);
+
+  useEffect(() => {
+    const controller = createReaderUiIdleController({
+      onVisibilityChange: (nextVisible) => visibilityChangeRef.current(nextVisible),
+    });
+    idleControllerRef.current = controller;
+
+    const media = window.matchMedia(READER_DESKTOP_POINTER_QUERY);
+    controller.setEnabled(media.matches);
+
+    const handleMediaChange = (event: MediaQueryListEvent) => controller.setEnabled(event.matches);
+    const handleMouseMove = () => controller.activity();
+    media.addEventListener('change', handleMediaChange);
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+
+    return () => {
+      media.removeEventListener('change', handleMediaChange);
+      window.removeEventListener('mousemove', handleMouseMove);
+      controller.dispose();
+      idleControllerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    idleControllerRef.current?.setVisible(visible);
+  }, [visible]);
+
+  useEffect(() => {
+    idleControllerRef.current?.setPaused(interactionActive);
+  }, [interactionActive]);
+
+  const handleReaderControlActivity = useCallback(() => {
+    idleControllerRef.current?.activity();
+  }, []);
 
   const pageFromEvent = useCallback((clientX: number, clientY: number) => {
     const el = progressRef.current;
@@ -566,8 +612,8 @@ export function ReaderOverlay({
     if (showChapterDrawer || showSettings) return;
     if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); onScrollByInputStep(-1); }
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); onScrollByInputStep(1); }
-    if (e.key === 'f' || e.key === 'F') onToggleVisibility();
-  }, [closeChapterDrawer, closeSettings, externalDialogOpen, showChapterDrawer, showSettings, onClose, onScrollByInputStep, onToggleVisibility]);
+    if (e.key === 'f' || e.key === 'F') onVisibilityChange(!visible);
+  }, [closeChapterDrawer, closeSettings, externalDialogOpen, showChapterDrawer, showSettings, onClose, onScrollByInputStep, onVisibilityChange, visible]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -615,7 +661,11 @@ export function ReaderOverlay({
       )}
 
       {/* Top bar */}
-      <div className={`absolute top-0 left-0 right-0 z-40 bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${visible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+      <div
+        data-reader-ui="top"
+        className={`absolute top-0 left-0 right-0 z-40 bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${visible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onPointerDownCapture={handleReaderControlActivity}
+      >
         <div className="flex items-center justify-between px-3 pb-2" style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))' }}>
           <div className="flex items-center gap-3 min-w-0">
             <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center text-white/90 hover:text-white" aria-label="关闭阅读器"><X size={22} /></button>
@@ -664,7 +714,11 @@ export function ReaderOverlay({
 
       {/* Info bar — bottom */}
       {barVisible && isHorizontalBar && (
-        <div className="absolute bottom-0 left-0 right-0 z-20">
+        <div
+          data-reader-ui="info"
+          className={`absolute bottom-0 left-0 right-0 z-20 transition-opacity duration-300 ${visible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+          onPointerDownCapture={handleReaderControlActivity}
+        >
           <div className="bg-black/90" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))' }}>
             <div className="flex min-h-10 items-center gap-2 px-3">
               <div className="flex items-center gap-1 shrink-0">
@@ -710,7 +764,9 @@ export function ReaderOverlay({
       {/* Info bar — left/right */}
       {barVisible && !isHorizontalBar && (
         <div
-          className={`absolute top-0 bottom-0 z-20 ${barSide === 'right' ? 'right-0' : 'left-0'}`}
+          data-reader-ui="info"
+          className={`absolute top-0 bottom-0 z-20 transition-opacity duration-300 ${barSide === 'right' ? 'right-0' : 'left-0'} ${visible ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+          onPointerDownCapture={handleReaderControlActivity}
           style={{ width: 40, paddingRight: barSide === 'right' ? 'env(safe-area-inset-right, 0px)' : undefined, paddingLeft: barSide === 'left' ? 'env(safe-area-inset-left, 0px)' : undefined }}
         >
           <div className="flex flex-col items-center gap-2 py-4 h-full" style={{ paddingTop: '3.5rem' }}>

@@ -1716,7 +1716,10 @@ export default function ReaderPage() {
       ref={readerRootRef}
       data-reader-root=""
       className="fixed inset-0 bg-black select-none overflow-hidden"
-      style={{ touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y') }}
+      style={{
+        cursor: showUI ? undefined : 'none',
+        touchAction: isZoomed ? 'none' : (isRTL ? 'pan-x' : 'pan-y'),
+      }}
     >
       <style>{`
         ::-webkit-scrollbar { display: none; }
@@ -1787,7 +1790,7 @@ export default function ReaderPage() {
         translationProcessed={translation.currentRecord !== null}
         translationHasResult={(translation.currentRecord?.regions.length ?? 0) > 0}
         translationVisible={translation.visible}
-        onToggleVisibility={() => setShowUI((v) => !v)}
+        onVisibilityChange={setShowUI}
         onClose={() => navigate(-1)}
         onPrevChapter={goPrevChapter}
         onNextChapter={goNextChapter}
