@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import type { ReactNode } from 'react';
 import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { beforeEach, describe, test, vi } from 'vitest';
-import { DEFAULT_THEME_PREFERENCES, THEME_STORAGE_KEY } from '../src/theme/theme';
+import { DEFAULT_THEME_PREFERENCES, THEME_STORAGE_KEY, type ThemeMode } from '../src/theme/theme';
 
 vi.mock('@heroui/react', () => {
   const ColorSwatchPicker = ({ children, onChange }: { children: ReactNode; onChange: (color: { toString: () => string }) => void }) => (
@@ -30,7 +30,7 @@ vi.mock('@heroui/react', () => {
 import { ThemePanel, ThemePopover } from '../src/theme/ThemeControls';
 import { ThemeProvider } from '../src/theme/ThemeProvider';
 import { ThemeContext, useTheme, type ThemeContextValue } from '../src/theme/theme-context';
-import { initializeTheme } from '../src/theme/theme-dom';
+import { applyThemeToRoot, initializeTheme } from '../src/theme/theme-dom';
 
 function ThemeProbe() {
   const theme = useTheme();
@@ -51,6 +51,9 @@ describe('ThemeProvider', () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    document.documentElement.className = '';
+    document.documentElement.removeAttribute('style');
+    document.head.innerHTML = '<meta name="theme-color" content="#0c0a09">';
     listeners = new Set();
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
@@ -68,6 +71,7 @@ describe('ThemeProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: 'dark' }));
     assert.match(screen.getByTestId('mode').textContent!, /^dark:dark:/);
     assert.equal(document.documentElement.dataset.themeMode, 'dark');
+    assert.equal(document.querySelector('meta[name="theme-color"]')?.getAttribute('content'), '#0c0a09');
     fireEvent.click(screen.getByRole('button', { name: 'coral' }));
     assert.match(screen.getByTestId('mode').textContent!, /#E85D75$/);
     fireEvent.click(screen.getByRole('button', { name: 'invalid' }));
@@ -76,8 +80,10 @@ describe('ThemeProvider', () => {
     assert.match(screen.getByTestId('mode').textContent!, /#123456$/);
     fireEvent.click(screen.getByRole('button', { name: 'reset' }));
     assert.equal(screen.getByTestId('mode').textContent, 'system:light:#00DD99');
+    assert.equal(document.querySelector('meta[name="theme-color"]')?.getAttribute('content'), '#f5f5f4');
     act(() => { for (const listener of listeners) listener({ matches: true } as MediaQueryListEvent); });
     assert.equal(screen.getByTestId('mode').textContent, 'system:dark:#00DD99');
+    assert.equal(document.querySelector('meta[name="theme-color"]')?.getAttribute('content'), '#0c0a09');
     view.unmount();
     assert.equal(listeners.size, 0);
   });
@@ -91,8 +97,10 @@ describe('ThemeProvider', () => {
       newValue: JSON.stringify({ version: 1, mode: 'light', accent: { kind: 'preset', id: 'coral' } }),
     }));
     assert.equal(screen.getByTestId('mode').textContent, 'light:light:#E85D75');
+    assert.equal(document.querySelector('meta[name="theme-color"]')?.getAttribute('content'), '#f5f5f4');
     fireEvent(window, new StorageEvent('storage', { key: 'theme', newValue: 'dark' }));
     assert.match(screen.getByTestId('mode').textContent!, /^dark:dark:/);
+    assert.equal(document.querySelector('meta[name="theme-color"]')?.getAttribute('content'), '#0c0a09');
   });
 
   test('requires the provider', () => {
@@ -111,6 +119,45 @@ describe('ThemeProvider', () => {
     assert.equal(preferences.mode, 'dark');
     assert.equal(document.documentElement.classList.contains('dark'), true);
     assert.equal(document.documentElement.style.getPropertyValue('--theme-accent'), '#123456');
+  });
+
+  test.each([
+    ['dark', false, 'dark', '#0c0a09'],
+    ['light', true, 'light', '#f5f5f4'],
+    ['system', true, 'dark', '#0c0a09'],
+    ['system', false, 'light', '#f5f5f4'],
+  ] as const)('applies %s mode with system dark=%s to browser chrome', (mode: ThemeMode, systemDark, resolved, color) => {
+    applyThemeToRoot({ ...DEFAULT_THEME_PREFERENCES, mode }, systemDark);
+    assert.equal(document.documentElement.classList.contains('dark'), resolved === 'dark');
+    assert.equal(document.documentElement.style.colorScheme, resolved);
+    assert.equal(document.querySelector('meta[name="theme-color"]')?.getAttribute('content'), color);
+  });
+
+  test.each(['getter', 'methods'] as const)('keeps theme initialization and controls working when storage %s throw', (failure) => {
+    if (failure === 'getter') {
+      const storage = window.localStorage;
+      Object.defineProperty(window, 'localStorage', { configurable: true, get: () => storage });
+      vi.spyOn(window, 'localStorage', 'get').mockImplementation(() => {
+        throw new DOMException('Storage denied', 'SecurityError');
+      });
+    } else {
+      for (const method of ['getItem', 'setItem', 'removeItem'] as const) {
+        vi.spyOn(window.localStorage, method).mockImplementation(() => {
+          throw new DOMException('Storage denied', 'SecurityError');
+        });
+      }
+    }
+    try {
+      assert.deepEqual(initializeTheme(), DEFAULT_THEME_PREFERENCES);
+      render(<ThemeProvider><ThemeProbe /></ThemeProvider>);
+      fireEvent.click(screen.getByRole('button', { name: 'dark' }));
+      assert.equal(document.documentElement.dataset.resolvedTheme, 'dark');
+      assert.equal(document.querySelector('meta[name="theme-color"]')?.getAttribute('content'), '#0c0a09');
+      fireEvent.click(screen.getByRole('button', { name: 'reset' }));
+      assert.equal(document.documentElement.dataset.resolvedTheme, 'light');
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 

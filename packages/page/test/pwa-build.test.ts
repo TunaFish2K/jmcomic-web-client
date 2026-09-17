@@ -20,6 +20,8 @@ interface WebAppManifest {
   scope?: string;
   display?: string;
   prefer_related_applications?: boolean;
+  background_color?: string;
+  theme_color?: string;
   icons?: Array<{
     src: string;
     sizes?: string;
@@ -52,6 +54,8 @@ describe('PWA build output', () => {
     assert.equal(manifest.scope, '/');
     assert.equal(manifest.display, 'standalone');
     assert.equal(manifest.prefer_related_applications, false);
+    assert.equal(manifest.background_color, '#0c0a09');
+    assert.equal(manifest.theme_color, '#0c0a09');
 
     const icons = manifest.icons ?? [];
     assert.ok(icons.some((icon) => icon.sizes === '192x192' && icon.purpose === 'any'));

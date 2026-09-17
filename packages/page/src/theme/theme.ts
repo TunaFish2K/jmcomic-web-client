@@ -82,7 +82,16 @@ export function parseThemePreferences(raw: string | null, legacyTheme: string | 
   }
 }
 
-export function loadThemePreferences(storage: ThemeStorage): ThemePreferences {
+export function getThemeStorage(): ThemeStorage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function loadThemePreferences(storage: ThemeStorage | undefined): ThemePreferences {
+  if (!storage) return DEFAULT_THEME_PREFERENCES;
   try {
     return parseThemePreferences(
       storage.getItem(THEME_STORAGE_KEY),
@@ -93,7 +102,8 @@ export function loadThemePreferences(storage: ThemeStorage): ThemePreferences {
   }
 }
 
-export function saveThemePreferences(storage: ThemeStorage, preferences: ThemePreferences) {
+export function saveThemePreferences(storage: ThemeStorage | undefined, preferences: ThemePreferences) {
+  if (!storage) return;
   try {
     storage.setItem(THEME_STORAGE_KEY, JSON.stringify(preferences));
     if (preferences.mode === 'system') {
@@ -106,7 +116,8 @@ export function saveThemePreferences(storage: ThemeStorage, preferences: ThemePr
   }
 }
 
-export function migrateThemePreferences(storage: ThemeStorage): ThemePreferences {
+export function migrateThemePreferences(storage: ThemeStorage | undefined): ThemePreferences {
+  if (!storage) return DEFAULT_THEME_PREFERENCES;
   const preferences = loadThemePreferences(storage);
   try {
     if (storage.getItem(THEME_STORAGE_KEY) === null) {

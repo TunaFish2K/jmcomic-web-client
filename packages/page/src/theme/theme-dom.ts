@@ -1,6 +1,7 @@
 import {
   getAccentColor,
   getAccentForeground,
+  getThemeStorage,
   migrateThemePreferences,
   resolveThemeMode,
   type ThemePreferences,
@@ -18,6 +19,10 @@ export function applyThemeToRoot(preferences: ThemePreferences, systemDark = sys
   root.classList.toggle('dark', resolvedMode === 'dark');
   root.dataset.themeMode = preferences.mode;
   root.dataset.resolvedTheme = resolvedMode;
+  root.style.colorScheme = resolvedMode;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute(
+    'content', resolvedMode === 'dark' ? '#0c0a09' : '#f5f5f4',
+  );
   root.dataset.accent = preferences.accent.kind === 'preset' ? preferences.accent.id : 'custom';
   root.style.setProperty('--theme-accent', accentColor);
   root.style.setProperty('--theme-accent-foreground', getAccentForeground(accentColor));
@@ -26,7 +31,7 @@ export function applyThemeToRoot(preferences: ThemePreferences, systemDark = sys
 }
 
 export function initializeTheme() {
-  const preferences = migrateThemePreferences(window.localStorage);
+  const preferences = migrateThemePreferences(getThemeStorage());
   applyThemeToRoot(preferences);
   return preferences;
 }

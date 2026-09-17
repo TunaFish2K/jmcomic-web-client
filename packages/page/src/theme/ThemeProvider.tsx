@@ -3,6 +3,7 @@ import {
   DEFAULT_THEME_PREFERENCES,
   getAccentColor,
   getLegacyThemeMode,
+  getThemeStorage,
   LEGACY_THEME_STORAGE_KEY,
   loadThemePreferences,
   normalizeHexColor,
@@ -22,11 +23,11 @@ function systemPrefersDark() {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [preferences, setPreferences] = useState<ThemePreferences>(() => loadThemePreferences(window.localStorage));
+  const [preferences, setPreferences] = useState<ThemePreferences>(() => loadThemePreferences(getThemeStorage()));
   const [systemDark, setSystemDark] = useState(systemPrefersDark);
 
   const commitPreferences = useCallback((next: ThemePreferences) => {
-    saveThemePreferences(window.localStorage, next);
+    saveThemePreferences(getThemeStorage(), next);
     applyThemeToRoot(next, systemPrefersDark());
     setPreferences(next);
   }, []);
@@ -64,13 +65,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const onStorage = (event: StorageEvent) => {
       if (event.key !== THEME_STORAGE_KEY && event.key !== LEGACY_THEME_STORAGE_KEY) return;
       const next = event.key === THEME_STORAGE_KEY
-        ? parseThemePreferences(event.newValue, window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY))
+        ? parseThemePreferences(event.newValue, getThemeStorage()?.getItem(LEGACY_THEME_STORAGE_KEY))
         : {
-            ...loadThemePreferences(window.localStorage),
+            ...loadThemePreferences(getThemeStorage()),
             mode: getLegacyThemeMode(event.newValue),
           };
       if (event.key === LEGACY_THEME_STORAGE_KEY) {
-        saveThemePreferences(window.localStorage, next);
+        saveThemePreferences(getThemeStorage(), next);
       }
       applyThemeToRoot(next, systemPrefersDark());
       setPreferences(next);

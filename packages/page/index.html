@@ -5,8 +5,44 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32-v3.png" />
     <link id="app-favicon" rel="icon" type="image/svg+xml" sizes="any" href="/icons/favicon-v3.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#030712" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#0c0a09" />
+    <script>
+      // Keep mode resolution in sync with src/theme/theme.ts. Run before external assets load.
+      (() => {
+        let mode = 'system';
+        try {
+          const raw = localStorage.getItem('theme-preferences:v1');
+          const legacy = localStorage.getItem('theme');
+          if (legacy === 'light' || legacy === 'dark') mode = legacy;
+          try {
+            const preferences = JSON.parse(raw);
+            if (preferences?.version === 1 && ['light', 'dark', 'system'].includes(preferences.mode)) {
+              mode = preferences.mode;
+            }
+          } catch {
+            // Invalid preferences fall back to the legacy mode.
+          }
+        } catch {
+          // Storage can be unavailable; use the system theme.
+        }
+        const resolved = mode === 'system'
+          ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          : mode;
+        const root = document.documentElement;
+        root.classList.toggle('dark', resolved === 'dark');
+        root.dataset.themeMode = mode;
+        root.dataset.resolvedTheme = resolved;
+        document.querySelector('meta[name="theme-color"]').content = resolved === 'dark' ? '#0c0a09' : '#f5f5f4';
+      })();
+    </script>
+    <style>
+      html { background-color: #f5f5f4; color-scheme: light; }
+      html.dark { background-color: #0c0a09; color-scheme: dark; }
+      body { margin: 0; background-color: inherit; }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-resolved-theme]) { background-color: #0c0a09; color-scheme: dark; }
+      }
+    </style>
     <meta name="description" content="JM第三方客户端" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
