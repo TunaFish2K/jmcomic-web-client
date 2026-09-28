@@ -209,6 +209,6 @@ API Key 会按用户选择始终保存在当前浏览器的 `localStorage` 中�
 
 [packages/sdk](packages/sdk) 可单独安装，不需要启动 PWA。它支持本机调用、独立 HTTP 服务和远程连接三种模式；具体示例见 [SDK 文档](packages/sdk/README.md)。
 
-从本仓库的 [Releases](https://github.com/TunaFish2K/jmcomic-web-client/releases) 下载 SDK `.tgz` 后，用 `npm install ./jmcomic-sdk-pwa-<版本>.tgz` 安装。仓库内使用 `workspace:*`，执行 `pnpm sdk:pack` 可以生成安装包。SDK 源码使用 Unlicense。npm 首次授权完成后，main 自动发布 `jmcomic-sdk-pwa`，可通过 `npm install jmcomic-sdk-pwa` 安装；启用步骤见 [npm 发布配置](docs/sdk-npm.md)。
+从本仓库的 [Releases](https://github.com/TunaFish2K/jmcomic-web-client/releases) 下载 SDK `.tgz` 后，用 `npm install ./jmcomic-sdk-pwa-<版本>.tgz` 安装。仓库内使用 `workspace:*`，执行 `pnpm sdk:pack` 可以生成安装包。SDK 源码使用 Unlicense。main 通过 OIDC 自动发布 `jmcomic-sdk-pwa`，可通过 `npm install jmcomic-sdk-pwa` 安装；启用步骤见 [npm 发布配置](docs/sdk-npm.md)。
 
 迁移边界和验证方法见 [SDK 迁移说明](docs/sdk-migration.md)。

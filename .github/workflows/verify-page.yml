@@ -171,7 +171,7 @@ jobs:
       github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
       vars.NPM_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     concurrency:
       group: sdk-npm-publish
       cancel-in-progress: false

@@ -6,13 +6,13 @@ SDK 提供域名发现、签名、响应解密、搜索、详情、章节、图�
 
 ## 安装与本机调用
 
-npm 首次发布完成后可直接安装：
+直接从 npm 安装：
 
 ```sh
 npm install jmcomic-sdk-pwa
 ```
 
-尚未发布或需要指定构建时，从 [jmcomic-web-client Releases](https://github.com/TunaFish2K/jmcomic-web-client/releases) 下载 SDK `.tgz`，然后安装（将文件名替换为实际版本）：
+需要指定构建时，从 [jmcomic-web-client Releases](https://github.com/TunaFish2K/jmcomic-web-client/releases) 下载 SDK `.tgz`，然后安装（将文件名替换为实际版本）：
 
 ```sh
 npm install ./jmcomic-sdk-pwa-0.2.0.tgz
@@ -215,7 +215,7 @@ python3 packages/sdk/tools/test-proxy.py -- pnpm --filter jmcomic-sdk-pwa test:r
 
 工具读取本机 v2rayN 的活跃 VLESS TCP Reality 节点，为该测试进程启动独立 sing-box，退出后清理；不会修改 v2rayN。其他节点类型明确报错。无代理环境可以直接运行 `pnpm --filter jmcomic-sdk-pwa test:real`。报告写入 `packages/sdk/.artifacts/real-report.json`，不会保存漫画图片或节点凭据。
 
-CI 只用 mock 上游及合成图片，按受影响包执行检查。SDK 或根依赖配置变化后，运行 SDK、应用 Worker 和前端测试，通过后发布 `sdk-build-<commit>`；main 是正式 Release，其他分支为预发布。包版本使用 `0.2.<workflow run number>`。npm 首次授权完成后，main 通过独立 job 自动发布同一 tarball；其他分支不发布 npm。应用 Worker 有独立的部署步骤；SDK 的独立服务示例不自动部署。
+CI 只用 mock 上游及合成图片，按受影响包执行检查。SDK 或根依赖配置变化后，运行 SDK、应用 Worker 和前端测试，通过后发布 `sdk-build-<commit>`；main 是正式 Release，其他分支为预发布。包版本使用 `0.2.<workflow run number>`。main 通过已绑定 OIDC 的独立 job 自动发布同一 tarball；其他分支不发布 npm。应用 Worker 有独立的部署步骤；SDK 的独立服务示例不自动部署。
 
 ## 应用适配入口
 

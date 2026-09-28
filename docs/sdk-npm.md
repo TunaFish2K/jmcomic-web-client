@@ -18,6 +18,10 @@ SDK 或根依赖变化通过 mock 和受影响应用测试后，CI 生成 `0.2.<
 
 发布 job 串行运行。新于 registry `latest` 的版本直接以 `latest` 发布；较旧版本使用 `build-0-2-N` 标签，避免回退默认安装版本。重复执行先比对该版本的 SHA-512 完整性，只有字节一致才跳过发布；认证失败、网络失败和同版本不同内容都报错，不伪装成功。
 
+首次发布及 OIDC 绑定已完成，仓库已启用自动发布。
+
+npm 有时先接受上传，再异步处理安装包；CI 最多等待 10 分钟，版本一旦可安装就立即继续。等待只发生在独立 npm job，不阻塞应用部署；超过上限明确失败，待 npm 完成处理后只重跑发布 job。
+
 发布后从 registry 安装确切版本，验证导出、类型、CLI 和 WASM。失败可重试 `publish-npm`，不必重跑已通过的应用测试。应用部署不依赖 npm job。
 
 [npm trusted publishing 官方说明](https://docs.npmjs.com/trusted-publishers/)；要求 npm 11.5.1+，CI 使用 Node 24 和 npm 11。
