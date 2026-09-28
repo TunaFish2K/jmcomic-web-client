@@ -1,5 +1,7 @@
-import { getClientDataAndCreateClient, getDomainsFromDomainServer } from '@tiny-client/shared/client';
-import { DOMAIN_SERVER_URL, SEARCH_PAGE_SIZE } from '@tiny-client/shared/constants';
+import { getClientDataAndCreateClient, getDomainsFromDomainServer } from './upstream-adapter';
+import { DOMAIN_SERVER_URL } from 'jmcomic-sdk/upstream';
+import { SEARCH_PAGE_SIZE } from '@tiny-client/shared/constants';
+import { requestScope, withRequestScope, type ClientContext } from './request-scope';
 import { assertDistinctSearchResult, selectFirstDistinctSearchResult } from './search';
 import { SearchResultCache, SEARCH_RESULT_CACHE_TTL_MS } from './search-cache';
 import { handleLlmProxyRequest, LLM_PROXY_TARGET_HEADER } from './llm-proxy';
@@ -23,21 +25,21 @@ const DOMAIN_LIST_CACHE_TTL_MS = 5 * 60_000;
 // ─── Search session client stickiness ────────────────────────────
 const SEARCH_CLIENT_CACHE_TTL = 60_000;
 const SEARCH_CLIENT_CACHE_MAX_ENTRIES = 128;
-const searchClientCache = new Map<string, { context: ClientContext; ts: number }>();
+const searchClientCache = new Map<string, { domain: string; ts: number }>();
 
-function getCachedSearchClient(key: string): ClientContext | undefined {
+async function getCachedSearchClient(key: string): Promise<ClientContext | undefined> {
 	const entry = searchClientCache.get(key);
 	if (!entry) return undefined;
 	if (Date.now() - entry.ts > SEARCH_CLIENT_CACHE_TTL) {
 		searchClientCache.delete(key);
 		return undefined;
 	}
-	return entry.context;
+	return getDomainClient(entry.domain);
 }
 
 function setCachedSearchClient(key: string, context: ClientContext) {
 	searchClientCache.delete(key);
-	searchClientCache.set(key, { context, ts: Date.now() });
+	searchClientCache.set(key, { domain: context.domain, ts: Date.now() });
 	while (searchClientCache.size > SEARCH_CLIENT_CACHE_MAX_ENTRIES) {
 		const oldest = searchClientCache.keys().next().value as string | undefined;
 		if (!oldest) break;
@@ -50,7 +52,7 @@ function setCachedSearchClient(key: string, context: ClientContext) {
 // repeated pagination round-trips don't hammer upstream. Short TTL: search
 // results change often. Warmup still runs on the first (miss) request.
 const searchResultCache = new SearchResultCache<unknown>();
-const searchFlights = new Map<string, Promise<unknown>>();
+
 
 type WorkerBatchErrorStage = 'client_init' | 'get_album' | 'get_photo' | 'get_scramble_id' | 'unknown';
 
@@ -60,11 +62,6 @@ type WorkerBatchError = {
 	domain: string | null;
 	reference: string | null;
 	retryable: boolean;
-};
-
-type ClientContext = {
-	client: Awaited<ReturnType<typeof getClientDataAndCreateClient>>;
-	domain: string;
 };
 
 type BatchAlbumItem = {
@@ -80,10 +77,10 @@ type BatchPhotoItem = {
 	error?: WorkerBatchError;
 };
 
-let preferredClient: { context: ClientContext; ts: number } | null = null;
-let preferredClientFlight: Promise<ClientContext> | null = null;
+let preferredClient: { domain: string; ts: number } | null = null;
+
 let domainListCache: { domains: string[]; ts: number } | null = null;
-let domainListFlight: Promise<string[]> | null = null;
+
 
 const corsHeaders = {
 	'Access-Control-Allow-Origin': '*',
@@ -196,7 +193,8 @@ async function getDomains(forceRefresh = false): Promise<string[]> {
 	if (!forceRefresh && domainListCache && Date.now() - domainListCache.ts < DOMAIN_LIST_CACHE_TTL_MS) {
 		return domainListCache.domains;
 	}
-	if (!forceRefresh && domainListFlight) return domainListFlight;
+	const existingFlight = requestScope().domainListFlight;
+	if (!forceRefresh && existingFlight) return existingFlight;
 	const domainServerURL = DOMAIN_SERVER_URL[Math.floor(Math.random() * DOMAIN_SERVER_URL.length)];
 	const promise = getDomainsFromDomainServer(domainServerURL)
 		.then((domains) => {
@@ -204,18 +202,29 @@ async function getDomains(forceRefresh = false): Promise<string[]> {
 			return domains;
 		})
 		.finally(() => {
-			if (domainListFlight === promise) domainListFlight = null;
+			if (requestScope().domainListFlight === promise) requestScope().domainListFlight = null;
 		});
-	domainListFlight = promise;
+	requestScope().domainListFlight = promise;
 	return promise;
 }
 
 function rememberPreferredClient(context: ClientContext) {
-	preferredClient = { context, ts: Date.now() };
+	preferredClient = { domain: context.domain, ts: Date.now() };
 }
 
 function invalidateClient(domain: string | null) {
-	if (!domain || preferredClient?.context.domain === domain) preferredClient = null;
+	if (!domain || preferredClient?.domain === domain) preferredClient = null;
+}
+
+function getDomainClient(domain: string): Promise<ClientContext> {
+  const clients = requestScope().clients;
+  let pending = clients.get(domain);
+  if (!pending) {
+    pending = getClientDataAndCreateClient(`https://${domain}`).then(client => ({client, domain}));
+    clients.set(domain, pending);
+    void pending.catch(() => { if (clients.get(domain) === pending) clients.delete(domain); });
+  }
+  return pending;
 }
 
 async function createClient(excludedDomains: string[] = []): Promise<ClientContext> {
@@ -226,7 +235,7 @@ async function createClient(excludedDomains: string[] = []): Promise<ClientConte
 
 	for (const domain of candidateDomains.slice(0, CLIENT_DOMAIN_RETRY_COUNT)) {
 		try {
-			const client = await getClientDataAndCreateClient(`https://${domain}`);
+			const { client } = await getDomainClient(domain);
 			console.log('Client created.', domain);
 			const context = { client, domain };
 			rememberPreferredClient(context);
@@ -246,14 +255,15 @@ async function getClient(excludedDomains: string[] = []): Promise<ClientContext>
 		&& preferredClient
 		&& Date.now() - preferredClient.ts < CLIENT_CONTEXT_CACHE_TTL_MS
 	) {
-		return preferredClient.context;
+		return getDomainClient(preferredClient.domain);
 	}
 	if (excludedDomains.length > 0) return createClient(excludedDomains);
-	if (preferredClientFlight) return preferredClientFlight;
+	const existingFlight = requestScope().preferredClientFlight;
+	if (existingFlight) return existingFlight;
 	const promise = createClient().finally(() => {
-		if (preferredClientFlight === promise) preferredClientFlight = null;
+		if (requestScope().preferredClientFlight === promise) requestScope().preferredClientFlight = null;
 	});
-	preferredClientFlight = promise;
+	requestScope().preferredClientFlight = promise;
 	return promise;
 }
 
@@ -388,8 +398,8 @@ function scheduleSearchWarmup(result: any, url: URL, ctx: ExecutionContext) {
 	}).catch((error) => console.warn('Warmup batch-album failed', error)));
 }
 
-export default {
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+        const searchFlights = requestScope().searchFlights;
 		const startedAt = performance.now();
 		const url = new URL(request.url);
 
@@ -451,9 +461,9 @@ export default {
 							const promise = (async () => {
 								const sessionKey = `search:${query}:${searchOptions.mainTag}:${searchOptions.orderBy}:${searchOptions.time}`;
 								const reusablePreferred = preferredClient && Date.now() - preferredClient.ts < CLIENT_CONTEXT_CACHE_TTL_MS
-									? preferredClient.context
+									? await getDomainClient(preferredClient.domain).catch(() => undefined)
 									: undefined;
-								const cachedContext = getCachedSearchClient(sessionKey) ?? reusablePreferred;
+								const cachedContext = await getCachedSearchClient(sessionKey).catch(() => undefined) ?? reusablePreferred;
 								let upstreamResult: any;
 								if (cachedContext) {
 									try {
@@ -475,7 +485,7 @@ export default {
 									.slice(0, SEARCH_CLIENT_RACE_COUNT);
 								const winner = await selectFirstDistinctSearchResult(
 									candidateDomains.map((domain) => async () => {
-										const client = await getClientDataAndCreateClient(`https://${domain}`);
+										const { client } = await getDomainClient(domain);
 										return { result: await client.search(query, searchOptions), value: { client, domain } };
 									}),
 									duplicateGuardIds,
@@ -645,5 +655,10 @@ export default {
 				headers: corsHeaders,
 			});
 		}
-	},
+}
+
+export default {
+  fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    return withRequestScope(ctx, scoped => handleRequest(request, env, scoped));
+  },
 } satisfies ExportedHandler<Env>;

@@ -21,6 +21,7 @@ const releaseMetadata = {
 
 // https://vite.dev/config/
 export default defineConfig({
+  worker: { format: 'es' },
   resolve: {
     conditions: [
       'onnxruntime-web-use-extern-wasm',

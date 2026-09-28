@@ -39,7 +39,7 @@ const STABLE_FRESH_MS = 60 * 60 * 1000;
 const STABLE_STALE_MS = 24 * 60 * 60 * 1000;
 
 const memoryCache = new Map<string, CacheEnvelope>();
-const upstreamFlights = new Map<string, Promise<CacheEnvelope>>();
+let requestFlights = new WeakMap<ExecutionContext, Map<string, Promise<CacheEnvelope>>>();
 
 function descriptorKey({ kind, id }: ResourceDescriptor) {
 	return `${kind}:${id}`;
@@ -219,7 +219,9 @@ export async function resolveResource<T>(options: {
 	fetcher: () => Promise<T | null>;
 }): Promise<CachedResource<T>> {
 	const { descriptor, cached, forceRefresh, requestUrl, kv, ctx, fetcher } = options;
-	if (cached?.freshness === 'fresh') return cached as CachedResource<T>;
+    let upstreamFlights = requestFlights.get(ctx);
+    if (!upstreamFlights) { upstreamFlights = new Map(); requestFlights.set(ctx, upstreamFlights); }
+	if (cached?.freshness === 'fresh' && !forceRefresh) return cached as CachedResource<T>;
 
 	const key = descriptorKey(descriptor);
 	const refresh = () => {
@@ -270,7 +272,7 @@ export function getResourceCacheKey(descriptor: ResourceDescriptor) {
 
 export function clearResourceCacheForTest() {
 	memoryCache.clear();
-	upstreamFlights.clear();
+	requestFlights = new WeakMap();
 }
 
 export const RESOURCE_CACHE_TTLS = {

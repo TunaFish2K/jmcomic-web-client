@@ -8,3 +8,8 @@ onlyBuiltDependencies:
   - '@heroui/shared-utils'
   - esbuild
   - workerd
+  - deno
+
+overrides:
+  'miniflare@4.20260730.0>undici': '^7.30.0'
+  'miniflare@4.20260730.0>sharp': '^0.35.4'

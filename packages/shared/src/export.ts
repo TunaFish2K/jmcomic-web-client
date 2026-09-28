@@ -33,7 +33,7 @@ export interface TemporaryDownload {
 }
 
 interface ByteSink {
-    write(data: Uint8Array): Promise<void>;
+    write(data: Uint8Array<ArrayBuffer>): Promise<void>;
     close(): Promise<void>;
     abort(reason?: unknown): Promise<void>;
 }
@@ -90,7 +90,7 @@ export async function cleanupTemporaryExports(maxAgeMs: number = STALE_EXPORT_AG
     for await (const [name, handle] of directory.entries()) {
         if (handle.kind !== 'file') continue;
         try {
-            const file = await handle.getFile();
+            const file = await (handle as FileSystemFileHandle).getFile();
             if (file.lastModified < cutoff) await directory.removeEntry(name);
         } catch {
             // Another tab may already have removed the file.
@@ -165,8 +165,8 @@ async function createTemporarySink(filename: string): Promise<TemporarySink> {
 
 class SequentialSinkWriter {
     private pending: Promise<void> = Promise.resolve();
-
-    constructor(private readonly sink: ByteSink) {}
+    private readonly sink: ByteSink;
+    constructor(sink: ByteSink) { this.sink = sink; }
 
     enqueue(chunk: Uint8Array) {
         const ownedChunk = chunk.slice();

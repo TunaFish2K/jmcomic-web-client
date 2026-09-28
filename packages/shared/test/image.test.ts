@@ -2,38 +2,18 @@ import assert from 'node:assert/strict';
 import { before, describe, it } from 'node:test';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 
-const drawCalls: unknown[][] = [];
-let bitmapCloseCount = 0;
+import { readFile } from 'node:fs/promises';
+import { createImageProcessor } from 'jmcomic-sdk/image';
+import { createNodeWasmLoader } from 'jmcomic-sdk/node';
+import { configureImageProcessing } from '../src/image-bridge';
 
+const source = new Uint8Array(await readFile(new URL('../../sdk/test/fixtures/17x103-10-upright.png', import.meta.url)));
+const processor = createImageProcessor({ loadWasm: createNodeWasmLoader() });
+const expected = await processor.process(source, 0);
 before(() => {
     Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: new IDBFactory() });
     Object.defineProperty(globalThis, 'IDBKeyRange', { configurable: true, value: IDBKeyRange });
-    Object.defineProperty(globalThis, 'createImageBitmap', {
-        configurable: true,
-        value: async () => ({
-            width: 8,
-            height: 12,
-            close: () => { bitmapCloseCount += 1; },
-        }),
-    });
-    class TestOffscreenCanvas {
-        width: number;
-        height: number;
-
-        constructor(width: number, height: number) {
-            this.width = width;
-            this.height = height;
-        }
-
-        getContext() {
-            return { drawImage: (...args: unknown[]) => drawCalls.push(args) };
-        }
-
-        async convertToBlob() {
-            return new Blob([new Uint8Array([7, 8, 9])], { type: 'image/jpeg' });
-        }
-    }
-    Object.defineProperty(globalThis, 'OffscreenCanvas', { configurable: true, value: TestOffscreenCanvas });
+    configureImageProcessing((data, slices, options) => processor.process(new Uint8Array(data), slices, options));
 });
 
 describe('processed image network policy', () => {
@@ -68,26 +48,25 @@ describe('processed image network policy', () => {
         const fetchImpl: typeof fetch = async () => {
             calls += 1;
             if (calls === 1) return new Response('busy', { status: 429, headers: { 'retry-after': '0' } });
-            return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+            return new Response(source.slice(), { status: 200 });
         };
         const photo = { id: '1002', scrambleId: 999999 };
         const image = { name: 'page.jpg', url: 'https://example.test/page.jpg' };
         const result = await getProcessedPhotoImage(photo, image, undefined, { fetchImpl });
         assert.equal(calls, 2);
         assert.deepEqual({ width: result.width, height: result.height, byteLength: result.byteLength }, {
-            width: 8,
-            height: 12,
-            byteLength: 3,
+            width: 17,
+            height: 103,
+            byteLength: expected.data.byteLength,
         });
-        assert.ok(drawCalls.length > 0);
-        assert.ok(bitmapCloseCount > 0);
+        assert.deepEqual(new Uint8Array(result.data), expected.data);
 
         const cached = await getProcessedPhotoImage(photo, image, undefined, {
             fetchImpl: async () => { throw new Error('cache was not used'); },
         });
-        assert.deepEqual([...new Uint8Array(cached.data)], [7, 8, 9]);
-        assert.equal(cached.width, 8);
-        assert.equal(cached.height, 12);
+        assert.deepEqual(new Uint8Array(cached.data), expected.data);
+        assert.equal(cached.width, 17);
+        assert.equal(cached.height, 103);
     });
 
     it('returns before a background cache write is required by the caller', async () => {
@@ -98,10 +77,10 @@ describe('processed image network policy', () => {
             undefined,
             {
                 cacheWriteMode: 'background',
-                fetchImpl: async () => new Response(new Uint8Array([1]), { status: 200 }),
+                fetchImpl: async () => new Response(source.slice(), { status: 200 }),
             },
         );
-        assert.equal(result.byteLength, 3);
+        assert.equal(result.byteLength, expected.data.byteLength);
     });
 
     it('stops retrying as soon as its signal is aborted', async () => {

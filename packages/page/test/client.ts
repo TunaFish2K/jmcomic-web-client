@@ -1,18 +1,10 @@
-import {
-    getClientDataAndCreateClient,
-    getFastestAvailableBaseURL,
-} from "@tiny-client/shared/client";
-
-async function start() {
-    const baseURL = await getFastestAvailableBaseURL();
-    console.log("baseURL:", baseURL);
-    const client = await getClientDataAndCreateClient(baseURL!);
-    const searchResult = await client.search("蔚蓝档案");
-    console.log("搜索结果：", searchResult);
-    const album = await client.getAlbum("1235125");
-    console.log("获取的本子：", album);
-    const photo = await client.getPhoto("1235125");
-    console.log("获取的章节：", photo);
-}
-
-start();
+// Optional developer smoke test; not part of CI.
+import { createLocalClient } from 'jmcomic-sdk/node';
+const client = createLocalClient();
+try {
+    const result = await client.search('291535');
+    console.log({ total: result.total, redirectId: result.redirectId });
+    const album = await client.getAlbum('291535');
+    const chapter = await client.getChapter(album.chapters[0]?.id ?? album.id);
+    console.log({ albumId: album.id, chapterId: chapter.id, pages: chapter.images.length });
+} finally { client.dispose(); }

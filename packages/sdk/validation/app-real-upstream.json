@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-09-28T10:13:26.380Z",
+  "elapsedMs": 7395,
+  "albumId": "291535",
+  "pageCount": 15,
+  "checks": [
+    "old search DTO",
+    "batch album and chapter",
+    "cache metadata",
+    "forced refresh reaches upstream",
+    "concurrent photo requests"
+  ]
+}

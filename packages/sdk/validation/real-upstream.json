@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-09-28T10:09:07.012Z",
+  "elapsedMs": 5671,
+  "search": {
+    "total": 1,
+    "redirect": true
+  },
+  "albumId": "291535",
+  "chapterId": "291535",
+  "pageCount": 15,
+  "images": [
+    {
+      "width": 340,
+      "height": 480,
+      "mime": "image/jpeg",
+      "bytes": 69812,
+      "sha256": "48dc9380c10287b02d8699de65ddbd61d9057fd267459bd076c1806714c4ec16"
+    },
+    {
+      "width": 510,
+      "height": 720,
+      "mime": "image/jpeg",
+      "bytes": 121919,
+      "sha256": "893550b2d99aa1be372f5fcd699e8b9f3b5a28612fb6b7118cb64136cc3f75be"
+    },
+    {
+      "width": 720,
+      "height": 1016,
+      "mime": "image/jpeg",
+      "bytes": 200687,
+      "sha256": "ebf18dfc4d6b0d27820b8af06f32674f3c20f8abae4fce8372f54db284a126c8"
+    }
+  ],
+  "slices": 2,
+  "imageDownloads": 1,
+  "checks": [
+    "discovery",
+    "signed settings",
+    "search",
+    "album",
+    "chapter and scramble",
+    "real image restore",
+    "three sizes reuse original",
+    "HTTP remote equality"
+  ]
+}

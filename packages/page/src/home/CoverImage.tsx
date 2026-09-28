@@ -36,7 +36,7 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
         };
 
         coverLimit(async () => {
-            const cached = await getCachedImageEntry(cacheKey);
+            const cached = await getCachedImageEntry(cacheKey) ?? await getCachedImageEntry(`cover/${albumId}/${coverUrl.split('/').pop() ?? 'cover'}`);
             if (cancelled) return;
             if (cached) {
                 render(cached.data);
@@ -58,7 +58,7 @@ export function CoverImage({ coverUrl, scrambleId, albumId, className }: {
                     const filename = coverUrl.slice(coverUrl.lastIndexOf('/') + 1);
                     const slices = getSliceCount(scrambleId, parseInt(albumId), filename);
                     const { data } = slices > 0
-                        ? await reverseImageBySlice(buffer, slices)
+                        ? await reverseImageBySlice(buffer, slices, controller.signal)
                         : { data: buffer };
                     setCachedImage(cacheKey, data).catch(() => {});
                     render(data);

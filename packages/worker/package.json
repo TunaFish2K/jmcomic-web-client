@@ -1,23 +1,24 @@
 {
-	"name": "@tiny-client/worker",
-	"dependencies": {
-		"@tiny-client/shared": "workspace:*"
-	},
-	"version": "0.0.0",
-	"private": true,
-	"scripts": {
-		"deploy": "wrangler deploy",
-		"dev": "wrangler dev --ip 0.0.0.0 --port 8787",
-		"start": "wrangler dev --ip 0.0.0.0 --port 8787",
-		"test": "vitest",
-		"typecheck": "tsc --noEmit",
-		"cf-typegen": "wrangler types"
-	},
-	"devDependencies": {
-		"@cloudflare/vitest-pool-workers": "^0.12.4",
-		"@types/node": "^25.2.3",
-		"typescript": "^5.5.2",
-		"vitest": "~3.2.0",
-		"wrangler": "^4.65.0"
-	}
+  "name": "@tiny-client/worker",
+  "dependencies": {
+    "@tiny-client/shared": "workspace:*",
+    "jmcomic-sdk": "workspace:*"
+  },
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --ip 0.0.0.0 --port 8787",
+    "start": "wrangler dev --ip 0.0.0.0 --port 8787",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.4",
+    "@types/node": "^25.2.3",
+    "typescript": "^5.5.2",
+    "vitest": "~3.2.0",
+    "wrangler": "^4.65.0"
+  }
 }

@@ -7,37 +7,16 @@ import type { PhotoWithScrambleId } from '../src/client';
 Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: new IDBFactory() });
 Object.defineProperty(globalThis, 'IDBKeyRange', { configurable: true, value: IDBKeyRange });
 
-const jpegBytes = Uint8Array.from(Buffer.from(
-    '/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AKpAB//Z',
-    'base64',
-));
-
-class FakeOffscreenCanvas {
-    width: number;
-    height: number;
-
-    constructor(width: number, height: number) {
-        this.width = width;
-        this.height = height;
-    }
-
-    getContext() {
-        return { drawImage() {} };
-    }
-
-    async convertToBlob() {
-        return new Blob([jpegBytes], { type: 'image/jpeg' });
-    }
-}
-
-Object.defineProperty(globalThis, 'createImageBitmap', {
-    configurable: true,
-    value: async () => ({ width: 1000, height: 1600, close() {} }),
-});
-Object.defineProperty(globalThis, 'OffscreenCanvas', { configurable: true, value: FakeOffscreenCanvas });
+import { readFile } from 'node:fs/promises';
+import { createImageProcessor } from 'jmcomic-sdk/image';
+import { createNodeWasmLoader } from 'jmcomic-sdk/node';
+import { configureImageProcessing } from '../src/image-bridge';
+const source = new Uint8Array(await readFile(new URL('../../sdk/test/fixtures/17x103-10-upright.png', import.meta.url)));
+const processor = createImageProcessor({ loadWasm: createNodeWasmLoader() });
+configureImageProcessing((data, slices, options) => processor.process(new Uint8Array(data), slices, options));
 Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
-    value: async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+    value: async () => new Response(source.slice(), { status: 200 }),
 });
 
 class FakeFileHandle {
@@ -106,9 +85,10 @@ class FakeDirectoryHandle {
     }
 }
 
+let photoSequence = 1000;
 function makePhoto(id: string, pageCount: number): PhotoWithScrambleId {
     return {
-        id,
+        id: String(photoSequence++),
         scrambleId: Number.MAX_SAFE_INTEGER,
         images: Array.from({ length: pageCount }, (_, index) => ({
             name: `${index + 1}.jpg`,

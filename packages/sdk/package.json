@@ -1,0 +1,85 @@
+{
+  "name": "jmcomic-sdk",
+  "version": "0.2.0",
+  "description": "Portable JM upstream and image SDK with local, server and remote modes",
+  "type": "module",
+  "license": "Unlicense",
+  "files": [
+    "dist",
+    "README.md",
+    "examples",
+    "LICENSE"
+  ],
+  "bin": {
+    "jmcomic-sdk": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/local.d.ts",
+      "import": "./dist/local.js"
+    },
+    "./remote": {
+      "types": "./dist/remote.d.ts",
+      "import": "./dist/remote.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./image": {
+      "types": "./dist/image.d.ts",
+      "import": "./dist/image.js"
+    },
+    "./node": {
+      "types": "./dist/adapters/node.d.ts",
+      "import": "./dist/adapters/node.js"
+    },
+    "./workers": {
+      "types": "./dist/adapters/workers.d.ts",
+      "import": "./dist/adapters/workers.js"
+    },
+    "./wasm/*": "./dist/wasm/*",
+    "./upstream": {
+      "types": "./dist/upstream.d.ts",
+      "import": "./dist/upstream.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc && node tools/assets.mjs",
+    "test": "tsx --test test/*.test.ts",
+    "check": "tsc --noEmit",
+    "test:platforms": "node tools/platforms.mjs",
+    "test:browser": "node tools/browser.mjs",
+    "test:workers": "node tools/workers.mjs",
+    "test:package": "node tools/package.mjs",
+    "test:real": "node tools/real.mjs",
+    "watch": "tsc --watch --preserveWatchOutput",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@jsquash/jpeg": "1.6.0",
+    "@jsquash/png": "3.1.1",
+    "@jsquash/webp": "1.5.0",
+    "crypto-js": "4.2.0"
+  },
+  "devDependencies": {
+    "@types/crypto-js": "4.2.2",
+    "@types/node": "^24.0.0",
+    "deno": "2.9.6",
+    "esbuild": "^0.25.0",
+    "miniflare": "4.20260730.0",
+    "playwright": "^1.55.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.3",
+    "undici": "^7.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TunaFish2K/jmcomic-web-client.git",
+    "directory": "packages/sdk"
+  }
+}

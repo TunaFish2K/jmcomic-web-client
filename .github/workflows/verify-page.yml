@@ -1,38 +1,204 @@
-name: Verify Page
+name: Verify and release
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
-      - "recovery/**"
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: verify-page-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  verify-page:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      sdk: ${{ steps.paths.outputs.sdk }}
+      page: ${{ steps.paths.outputs.page }}
+      worker: ${{ steps.paths.outputs.worker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: paths
+        name: Select affected packages
+        shell: python
+        run: |
+          import json, os, subprocess
+          event = json.load(open(os.environ['GITHUB_EVENT_PATH']))
+          base = event.get('pull_request', {}).get('base', {}).get('sha') or event.get('before')
+          all_packages = not base or set(base) == {'0'} or os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch'
+          paths = [] if all_packages else subprocess.check_output(['git', 'diff', '--name-only', base, 'HEAD'], text=True).splitlines()
+          all_packages |= any(p in ('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml') or p.startswith('.github/workflows/verify-page.yml') for p in paths)
+          sdk = all_packages or any(p.startswith('packages/sdk/') for p in paths)
+          shared = any(p.startswith('packages/shared/') for p in paths)
+          page = sdk or shared or any(p.startswith('packages/page/') for p in paths)
+          worker = sdk or shared or any(p.startswith('packages/worker/') for p in paths)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              for name, value in [('sdk', sdk), ('page', page), ('worker', worker)]:
+                  out.write(f'{name}={str(value).lower()}\n')
+
+  sdk:
+    needs: changes
+    if: needs.changes.outputs.sdk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24'
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.0'
+      - run: pnpm install --frozen-lockfile
+      - name: Set package version
+        run: node -e 'const fs=require("node:fs");const p="packages/sdk/package.json";const j=JSON.parse(fs.readFileSync(p));j.version="0.2."+process.env.GITHUB_RUN_NUMBER;fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n")'
+      - run: pnpm sdk:test
+      - run: pnpm --filter jmcomic-sdk test:platforms
+      - run: pnpm --filter jmcomic-sdk test:workers
+      - run: pnpm --filter jmcomic-sdk test:package
+      - name: Checksum
+        working-directory: packages/sdk
+        run: sha256sum jmcomic-sdk-*.tgz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-package
+          path: |
+            packages/sdk/jmcomic-sdk-*.tgz
+            packages/sdk/SHA256SUMS
+          retention-days: 14
+
+  verify-page:
+    needs: changes
+    if: needs.changes.outputs.page == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
       - run: pnpm --filter @tiny-client/page exec playwright install --with-deps chromium firefox webkit
-      - run: pnpm --filter @tiny-client/page run lint
-      - run: pnpm run page:build
-      - run: pnpm --filter @tiny-client/page run test:coverage
-      - run: pnpm --filter @tiny-client/page run test:browser
+      - run: pnpm sdk:build
+      - run: pnpm --filter @tiny-client/page lint
+      - run: pnpm --filter @tiny-client/page exec tsc --noEmit -p tsconfig.app.json
+      - run: pnpm --filter @tiny-client/shared test
+      - run: pnpm --filter @tiny-client/page build
+        env:
+          VITE_BACKEND_URL: http://backend.test
+      - run: pnpm --filter @tiny-client/page test:coverage
+      - run: pnpm --filter @tiny-client/page test:browser
+      - if: needs.changes.outputs.sdk == 'true'
+        run: pnpm --filter jmcomic-sdk test:browser
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: page-test-results
           path: packages/page/test-results
           if-no-files-found: ignore
+
+  worker:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm sdk:build
+      - run: pnpm --filter @tiny-client/worker typecheck
+      - run: pnpm --filter @tiny-client/worker exec vitest run
+      - run: pnpm --filter @tiny-client/worker exec wrangler deploy --dry-run
+
+  release-sdk:
+    needs: [changes, sdk, verify-page, worker]
+    if: >-
+      always() && github.event_name != 'pull_request' &&
+      needs.changes.outputs.sdk == 'true' && needs.sdk.result == 'success' &&
+      needs.verify-page.result == 'success' && needs.worker.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-package
+          path: release
+      - name: Publish SDK commit release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="sdk-build-${GITHUB_SHA}"
+          cat > release-notes.md <<'NOTES'
+          JMComic SDK 现由本仓库的 packages/sdk 维护，可独立安装，支持本机、独立 HTTP 服务和远程连接。
+
+          本提交通过 mock 上游、Node/Bun/Deno、浏览器真实 WASM、workerd、旧应用接口及独立安装包验证。应用继续使用原有 HTTP 接口；浏览器图片处理在 Web Worker 中执行。
+
+          下载附件后使用 npm install ./jmcomic-sdk-*.tgz 安装。SHA256SUMS 提供校验值。CI 不访问真实上游，不发布到 npm。
+          NOTES
+          flags=(--prerelease --latest=false)
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            main_head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+            if [[ "$main_head" == "$GITHUB_SHA" ]]; then flags=(--latest); else flags=(--latest=false); fi
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" release/* --clobber
+          else
+            gh release create "$tag" release/* --target "$GITHUB_SHA" --title "JMComic SDK 0.2.${GITHUB_RUN_NUMBER}" --notes-file release-notes.md "${flags[@]}"
+          fi
+
+  deploy-worker:
+    needs: [changes, sdk, verify-page, worker]
+    if: >-
+      always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+      needs.changes.outputs.worker == 'true' && needs.worker.result == 'success' &&
+      (needs.sdk.result == 'success' || needs.sdk.result == 'skipped') &&
+      (needs.verify-page.result == 'success' || needs.verify-page.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: deploy-worker
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - name: Check this is still main
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          main_head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
+          if [[ "$main_head" == "$GITHUB_SHA" ]]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'deploy=false' >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.current.outputs.deploy == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.current.outputs.deploy == 'true'
+        run: pnpm worker:deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

@@ -241,7 +241,7 @@ export async function getCacheStats(): Promise<{ count: number; totalSize: numbe
 }
 
 export function generateImageCacheKey(photoId: string, imageName: string): string {
-    return `${photoId}/${imageName}`;
+    return `sdk-v1/${photoId}/${imageName}`;
 }
 
 // Cover images are stored separately from reader photos: the stored bytes are
@@ -250,7 +250,7 @@ export function generateImageCacheKey(photoId: string, imageName: string): strin
 // covers distinct.
 export function generateCoverCacheKey(albumId: string, coverUrl: string): string {
     const filename = coverUrl.split('/').pop() ?? 'cover';
-    return `cover/${albumId}/${filename}`;
+    return `sdk-v1/cover/${albumId}/${filename}`;
 }
 
 export async function clearAllCache(): Promise<void> {

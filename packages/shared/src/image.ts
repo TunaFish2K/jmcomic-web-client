@@ -6,6 +6,7 @@ import {
     setCachedImageMetadata,
 } from './cache';
 import { getSliceCount } from './data';
+import { processImage } from './image-bridge';
 
 export interface ProcessedImage {
     data: ArrayBuffer;
@@ -67,51 +68,9 @@ export async function encodeScrambledImageAsJpeg(
     signal?: AbortSignal,
 ): Promise<ProcessedImage> {
     throwIfAborted(signal);
-    const bitmap = await createImageBitmap(new Blob([source]));
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    try {
-        throwIfAborted(signal);
-        const context = canvas.getContext('2d');
-        if (!context) throw new Error('无法创建图片画布');
-
-        if (sliceCount <= 0) {
-            context.drawImage(bitmap, 0, 0);
-        } else {
-            const remainder = bitmap.height % sliceCount;
-            const sliceHeightBase = Math.floor(bitmap.height / sliceCount);
-            for (let index = 0; index < sliceCount; index++) {
-                const sourceY = bitmap.height - sliceHeightBase * (index + 1) - remainder;
-                const destinationY = sliceHeightBase * index + (index === 0 ? 0 : remainder);
-                const sliceHeight = sliceHeightBase + (index === 0 ? remainder : 0);
-                context.drawImage(
-                    bitmap,
-                    0,
-                    sourceY,
-                    bitmap.width,
-                    sliceHeight,
-                    0,
-                    destinationY,
-                    bitmap.width,
-                    sliceHeight,
-                );
-            }
-        }
-
-        throwIfAborted(signal);
-        const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
-        const data = await jpeg.arrayBuffer();
-        throwIfAborted(signal);
-        return {
-            data,
-            width: bitmap.width,
-            height: bitmap.height,
-            byteLength: data.byteLength,
-        };
-    } finally {
-        bitmap.close();
-        canvas.width = 1;
-        canvas.height = 1;
-    }
+    const result = await processImage(source, sliceCount, { format: 'jpeg', signal });
+    throwIfAborted(signal);
+    return { data: result.data.buffer as ArrayBuffer, width: result.width, height: result.height, byteLength: result.data.byteLength };
 }
 
 export async function getProcessedPhotoImage(
@@ -121,7 +80,12 @@ export async function getProcessedPhotoImage(
     options: ProcessPhotoImageOptions = {},
 ): Promise<ProcessedImage> {
     const cacheKey = generateImageCacheKey(photo.id, image.name);
-    const cached = await getCachedImageEntry(cacheKey);
+    let storedKey = cacheKey;
+    let cached = await getCachedImageEntry(storedKey);
+    if (!cached) {
+        storedKey = `${photo.id}/${image.name}`;
+        cached = await getCachedImageEntry(storedKey);
+    }
     throwIfAborted(signal);
 
     if (cached) {
@@ -131,7 +95,7 @@ export async function getProcessedPhotoImage(
             const dimensions = await readImageDimensions(cached.data, signal);
             width = dimensions.width;
             height = dimensions.height;
-            await setCachedImageMetadata(cacheKey, width, height, cached.byteLength);
+            await setCachedImageMetadata(storedKey, width, height, cached.byteLength);
         }
         return {
             data: cached.data,
@@ -179,7 +143,7 @@ export async function getProcessedPhotoImage(
         width: processed.width,
         height: processed.height,
     });
-    if (options.cacheWriteMode === 'background') void cacheWrite;
+    if (options.cacheWriteMode === 'background') void cacheWrite.catch(() => {});
     else await cacheWrite;
     return processed;
 }

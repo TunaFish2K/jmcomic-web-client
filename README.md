@@ -2,7 +2,7 @@
 
 禁漫天堂第三方 Web 客户端。项目支持作品搜索、在线阅读、本地缓存和文件导出。
 
-前端通过 Cloudflare Worker 获取作品和章节信息。浏览器直接获取图片，并在本地还原、缓存或导出图片。
+前端通过 Cloudflare Worker 获取作品和章节信息。后端上游访问和浏览器图片处理共用 [JMComic SDK](packages/sdk)。浏览器直接获取图片，在独立 Web Worker 中还原，再缓存或导出图片。
 
 ## 功能
 
@@ -20,13 +20,14 @@
 
 - **前端**：React 19、Vite 8、Tailwind CSS 4、HeroUI、React Router 7、TanStack Query 5
 - **后端**：Cloudflare Workers 原生 Fetch Handler
-- **共享模块**：TypeScript、CryptoJS、fflate、pdf-lib
+- **SDK**：TypeScript、CryptoJS、jSquash WASM
+- **应用共享模块**：缓存、数据类型、fflate、PDFKit
 - **项目管理**：pnpm workspace
 - **部署平台**：Cloudflare Pages 和 Cloudflare Workers
 
 ## 运行要求
 
-- Node.js 22.12 或更高版本
+- Node.js 24 或更高版本
 - pnpm 10.28.0
 - 支持 IndexedDB、OffscreenCanvas 和 `createImageBitmap` 的现代浏览器
 
@@ -92,7 +93,7 @@ pnpm run worker:deploy
 
 部署成功后，Wrangler 会返回一个 `https://<worker-name>.<account>.workers.dev` 地址。
 
-仓库也包含 `.github/workflows/deploy-worker.yml`。当 `main` 分支中的 `packages/worker/**` 发生变化时，该工作流会自动部署 Worker。使用工作流前，必须在 GitHub 仓库中配置以下 Secrets：
+仓库的 `.github/workflows/verify-page.yml` 按受影响包执行测试。`main` 中的 Worker、shared、SDK 或依赖配置变化时，相关检查通过后自动部署 Worker。使用工作流前，必须在 GitHub 仓库中配置以下 Secrets：
 
 - `CF_API_TOKEN`
 - `CF_ACCOUNT_ID`
@@ -203,3 +204,11 @@ API Key 会按用户选择始终保存在当前浏览器的 `localStorage` 中�
 ## 许可
 
 本项目的软件代码按 [Unlicense](LICENSE) 发布。
+
+## 独立使用 SDK
+
+[packages/sdk](packages/sdk) 可单独安装，不需要启动 PWA。它支持本机调用、独立 HTTP 服务和远程连接三种模式；具体示例见 [SDK 文档](packages/sdk/README.md)。
+
+从本仓库的 [Releases](https://github.com/TunaFish2K/jmcomic-web-client/releases) 下载 SDK `.tgz` 后，用 `npm install ./jmcomic-sdk-<版本>.tgz` 安装。仓库内使用 `workspace:*`，执行 `pnpm sdk:pack` 可以生成安装包。SDK 源码使用 Unlicense，不自动发布到 npm。
+
+迁移边界和验证方法见 [SDK 迁移说明](docs/sdk-migration.md)。

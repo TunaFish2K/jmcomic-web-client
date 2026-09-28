@@ -74,6 +74,7 @@ import {
   type PendingNavigation,
   type PinchGesture,
   type ReaderLayoutAnchor,
+  type ZoomTarget,
 } from './reader-types';
 import { useReaderData } from './useReaderData';
 import { ReaderLoadingView } from './ReaderLoadingView';
@@ -1741,7 +1742,7 @@ export default function ReaderPage() {
         seamlessMode={seamlessMode}
         snapEnabled={readerPolicy.snapEnabled}
         imgCls={imgCls}
-        chapterId={photo.id}
+        chapterId={photo?.id ?? currentChapterId}
         scrollDivStyle={scrollDivStyle}
         currentPage={currentPage}
         translationRecord={translation.currentRecord}

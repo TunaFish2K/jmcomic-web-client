@@ -218,7 +218,7 @@ export default function Home() {
                         {hasResults && (
                             <div ref={listRef} className="flex-1 overflow-y-auto min-h-0 mb-3">
                                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                                    {data.content.map(item => (
+                                    {data?.content.map(item => (
                                         <AlbumCard
                                             key={item.id}
                                             item={item}

@@ -64,7 +64,7 @@ describe('image cache v2 metadata', () => {
         const a = cache.generateCoverCacheKey('123', 'https://cdn.example/path/cover.jpg');
         const b = cache.generateCoverCacheKey('123', 'https://cdn.example/path/cover_thumb.jpg');
         const c = cache.generateCoverCacheKey('456', 'https://cdn.example/path/cover.jpg');
-        assert.equal(a, 'cover/123/cover.jpg');
+        assert.equal(a, 'sdk-v1/cover/123/cover.jpg');
         assert.notEqual(a, b);
         assert.notEqual(a, c);
     });

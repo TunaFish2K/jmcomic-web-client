@@ -2,12 +2,15 @@
   "name": "jm-web-client",
   "private": true,
   "scripts": {
-    "page:dev": "pnpm --filter @tiny-client/page dev",
-    "page:build": "pnpm --filter @tiny-client/page build",
-    "worker:dev": "pnpm --filter @tiny-client/worker dev",
-    "worker:deploy": "pnpm --filter @tiny-client/worker deploy",
-    "dev": "concurrently \"pnpm run worker:dev\" \"wait-on tcp:localhost:8787 && VITE_BACKEND_URL=http://localhost:8787 pnpm run page:dev\"",
-    "test:integration": "concurrently \"pnpm run worker:dev\" \"wait-on tcp:localhost:8787 && node scripts/test-integration.js\""
+    "page:dev": "pnpm sdk:build && concurrently -k \"pnpm --filter jmcomic-sdk watch\" \"pnpm --filter @tiny-client/page dev\"",
+    "page:build": "pnpm sdk:build && pnpm --filter @tiny-client/page build",
+    "worker:dev": "pnpm sdk:build && concurrently -k \"pnpm --filter jmcomic-sdk watch\" \"pnpm --filter @tiny-client/worker dev\"",
+    "worker:deploy": "pnpm sdk:build && pnpm --filter @tiny-client/worker deploy",
+    "dev": "pnpm sdk:build && concurrently -k \"pnpm --filter jmcomic-sdk watch\" \"pnpm --filter @tiny-client/worker dev\" \"wait-on tcp:localhost:8787 && VITE_BACKEND_URL=http://localhost:8787 pnpm --filter @tiny-client/page dev\"",
+    "test:integration": "concurrently \"pnpm run worker:dev\" \"wait-on tcp:localhost:8787 && node scripts/test-integration.js\"",
+    "sdk:build": "pnpm --filter jmcomic-sdk build",
+    "sdk:test": "pnpm sdk:build && pnpm --filter jmcomic-sdk test",
+    "sdk:pack": "pnpm --filter jmcomic-sdk pack"
   },
   "packageManager": "pnpm@10.28.0",
   "devDependencies": {

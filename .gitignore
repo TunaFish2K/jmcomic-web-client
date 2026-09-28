@@ -194,3 +194,4 @@ packages/page/test-results/
 .env*
 !.env.example
 .wrangler/
+.artifacts/

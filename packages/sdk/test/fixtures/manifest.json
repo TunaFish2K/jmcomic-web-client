@@ -1,0 +1,30 @@
+[
+  {
+    "stem": "17x103-10",
+    "width": 17,
+    "height": 103,
+    "slices": 10,
+    "rgbaSha256": "7e25f049fb0922e4f477bec40bfd00a25000cf51cfc2759c948901be6fb5cfbc"
+  },
+  {
+    "stem": "31x1016-16",
+    "width": 31,
+    "height": 1016,
+    "slices": 16,
+    "rgbaSha256": "09ba81849337cba7c05238a828002b31db2c295d191d3b27838302461881e1a5"
+  },
+  {
+    "stem": "9x8197-18",
+    "width": 9,
+    "height": 8197,
+    "slices": 18,
+    "rgbaSha256": "c00d0dd0fac443acc3294b8971aa63015ed7b87f2fd511f4ba764014650e9794"
+  },
+  {
+    "stem": "720x1016-2",
+    "width": 720,
+    "height": 1016,
+    "slices": 2,
+    "rgbaSha256": "197d88aea6ed90d242cff2652507b769253281b6d07af4d85ff00e6913f603fd"
+  }
+]
