@@ -3,7 +3,7 @@ import { createCipheriv, createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import { clearResourceCacheForTest } from '../src/resource-cache';
-import { createUpstreamClient, discoverDomains } from 'jmcomic-sdk/upstream';
+import { createUpstreamClient, discoverDomains } from 'jmcomic-sdk-pwa/upstream';
 
 afterEach(() => { vi.unstubAllGlobals(); clearResourceCacheForTest(); });
 function encrypted(value: unknown, key: string) {

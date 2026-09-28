@@ -8,8 +8,8 @@ Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: new 
 Object.defineProperty(globalThis, 'IDBKeyRange', { configurable: true, value: IDBKeyRange });
 
 import { readFile } from 'node:fs/promises';
-import { createImageProcessor } from 'jmcomic-sdk/image';
-import { createNodeWasmLoader } from 'jmcomic-sdk/node';
+import { createImageProcessor } from 'jmcomic-sdk-pwa/image';
+import { createNodeWasmLoader } from 'jmcomic-sdk-pwa/node';
 import { configureImageProcessing } from '../src/image-bridge';
 const source = new Uint8Array(await readFile(new URL('../../sdk/test/fixtures/17x103-10-upright.png', import.meta.url)));
 const processor = createImageProcessor({ loadWasm: createNodeWasmLoader() });

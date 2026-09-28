@@ -1,5 +1,5 @@
-import type { ImageOptions, ImageResult } from 'jmcomic-sdk';
-import { JmError } from 'jmcomic-sdk';
+import type { ImageOptions, ImageResult } from 'jmcomic-sdk-pwa';
+import { JmError } from 'jmcomic-sdk-pwa';
 
 export type ImageProcessing = (data: ArrayBuffer, slices: number, options?: ImageOptions) => Promise<ImageResult>;
 type Job = { id: number; data: ArrayBuffer; slices: number; options: ImageOptions;

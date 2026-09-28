@@ -1,9 +1,9 @@
-import { createImageProcessor } from 'jmcomic-sdk/image';
-import type { ImageOptions } from 'jmcomic-sdk';
-import jpegDec from 'jmcomic-sdk/wasm/mozjpeg_dec.wasm?url';
-import jpegEnc from 'jmcomic-sdk/wasm/mozjpeg_enc.wasm?url';
-import png from 'jmcomic-sdk/wasm/squoosh_png_bg.wasm?url';
-import webpDec from 'jmcomic-sdk/wasm/webp_dec.wasm?url';
+import { createImageProcessor } from 'jmcomic-sdk-pwa/image';
+import type { ImageOptions } from 'jmcomic-sdk-pwa';
+import jpegDec from 'jmcomic-sdk-pwa/wasm/mozjpeg_dec.wasm?url';
+import jpegEnc from 'jmcomic-sdk-pwa/wasm/mozjpeg_enc.wasm?url';
+import png from 'jmcomic-sdk-pwa/wasm/squoosh_png_bg.wasm?url';
+import webpDec from 'jmcomic-sdk-pwa/wasm/webp_dec.wasm?url';
 
 const assets = { 'jpeg-dec': jpegDec, 'jpeg-enc': jpegEnc, png, 'webp-dec': webpDec };
 const processor = createImageProcessor({ loadWasm: async name => {

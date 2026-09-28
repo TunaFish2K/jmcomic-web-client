@@ -5,7 +5,7 @@ SDK 从 TunaFish2K/jmcomic-sdk 的提交 `1cd10156385b80558bf50eb9bec25c6477f138
 ## 模块边界
 
 - `sdk`：域名发现、签名、会话、响应解密、上游业务接口、下载、整数切片还原、WASM 编解码、本机 / 服务 / 远程三种模式。
-- `worker`：通过 `jmcomic-sdk/upstream` 访问协议层，映射原有 DTO；保留 `/search`、`/album`、`/photo`、批量接口、缓存元信息、强制刷新、重复页保护和 LLM 代理。
+- `worker`：通过 `jmcomic-sdk-pwa/upstream` 访问协议层，映射原有 DTO；保留 `/search`、`/album`、`/photo`、批量接口、缓存元信息、强制刷新、重复页保护和 LLM 代理。
 - `shared`：应用 DTO、IndexedDB、图片 Worker 通信和 PDF/ZIP/CBZ 导出。
 - `page`：原有 UI、阅读交互、OCR、翻译和阅读状态。图片算法在独立 Web Worker 中执行，四个 WASM 文件由 Vite 打包。
 
@@ -20,9 +20,9 @@ Cloudflare 请求各自持有 SDK 客户端和在途任务，`waitUntil` 后台�
 ```sh
 pnpm install --frozen-lockfile
 pnpm sdk:test
-pnpm --filter jmcomic-sdk test:platforms
-pnpm --filter jmcomic-sdk test:workers
-pnpm --filter jmcomic-sdk test:package
+pnpm --filter jmcomic-sdk-pwa test:platforms
+pnpm --filter jmcomic-sdk-pwa test:workers
+pnpm --filter jmcomic-sdk-pwa test:package
 pnpm --filter @tiny-client/shared test
 pnpm --filter @tiny-client/worker typecheck
 pnpm --filter @tiny-client/worker exec vitest run
@@ -32,7 +32,7 @@ VITE_BACKEND_URL=http://backend.test pnpm page:build
 pnpm --filter @tiny-client/page test:coverage
 pnpm --filter @tiny-client/page exec playwright install --with-deps chromium firefox webkit
 pnpm --filter @tiny-client/page test:browser
-pnpm --filter jmcomic-sdk test:browser
+pnpm --filter jmcomic-sdk-pwa test:browser
 ```
 
 浏览器测试使用生产构建，覆盖搜索到阅读的图片链路、独立 Worker 的真实 PNG/WebP/JPEG 编解码及逐像素还原、旧离线缓存、阅读输入、PWA 升级和主题启动。共享层测试覆盖任务取消、队列上限、Worker 故障恢复以及真实编解码器下的 120 页流式导出。
@@ -43,7 +43,7 @@ pnpm --filter jmcomic-sdk test:browser
 
 根开发命令先构建 SDK，再监视 SDK 源码；前端构建和 Worker 部署命令也会先构建 SDK。`pnpm sdk:pack` 生成包含 JS、声明、WASM 和许可证的 npm tarball，外部消费者不需要此 workspace。
 
-`.github/workflows/verify-page.yml` 按变更路径选择 SDK、page、worker 检查。SDK 变更会触发全部检查；只改应用时不重复发布 SDK。SDK 检查还覆盖 Node 24、Bun、Deno、workerd 和临时目录安装。通过所有相关检查后生成 `sdk-build-<commit>` 和 `0.2.<工作流运行序号>` 安装包。main 发布正式版本，其他分支为预发布；不发布 npm。
+`.github/workflows/verify-page.yml` 按变更路径选择 SDK、page、worker 检查。SDK 变更会触发全部检查；只改应用时不重复发布 SDK。SDK 检查还覆盖 Node 24、Bun、Deno、workerd 和临时目录安装。通过所有相关检查后生成 `sdk-build-<commit>` 和 `0.2.<工作流运行序号>` 安装包。main 发布正式版本，其他分支为预发布；npm 首次授权完成后，main 通过 OIDC 发布同一安装包，其他分支不发布 npm。步骤见 [npm 发布配置](sdk-npm.md)。
 
 应用 Worker 在相关检查通过后部署，旧提交不会覆盖更新的 main。Cloudflare Pages 仍使用原来的 Git 集成；可从根目录运行 `pnpm page:build`，也可将构建根目录设为 `packages/page` 后运行 `pnpm build`，两种入口都会编译 SDK。Node 版本使用 24 或更新。Flutter App 和 SDK 独立服务示例不由本次工作流部署。
 

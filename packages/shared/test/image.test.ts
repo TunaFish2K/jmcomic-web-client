@@ -3,8 +3,8 @@ import { before, describe, it } from 'node:test';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 
 import { readFile } from 'node:fs/promises';
-import { createImageProcessor } from 'jmcomic-sdk/image';
-import { createNodeWasmLoader } from 'jmcomic-sdk/node';
+import { createImageProcessor } from 'jmcomic-sdk-pwa/image';
+import { createNodeWasmLoader } from 'jmcomic-sdk-pwa/node';
 import { configureImageProcessing } from '../src/image-bridge';
 
 const source = new Uint8Array(await readFile(new URL('../../sdk/test/fixtures/17x103-10-upright.png', import.meta.url)));

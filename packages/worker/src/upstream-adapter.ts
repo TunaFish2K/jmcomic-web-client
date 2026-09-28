@@ -1,5 +1,5 @@
-import { createUpstreamClient, discoverDomains, type UpstreamClient, type ConnectionInfo } from 'jmcomic-sdk/upstream';
-import { JmError } from 'jmcomic-sdk';
+import { createUpstreamClient, discoverDomains, type UpstreamClient, type ConnectionInfo } from 'jmcomic-sdk-pwa/upstream';
+import { JmError } from 'jmcomic-sdk-pwa';
 import { normalizeSearchResult, type Album, type Photo, type SearchResult } from '@tiny-client/shared/client';
 
 export async function getDomainsFromDomainServer(source: string) {

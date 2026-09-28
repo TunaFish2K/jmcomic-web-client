@@ -204,6 +204,9 @@ test('immediate cancellation does not start transport work', async () => {
 });
 
 test('remote rejects malformed typed responses and invalid calls use promise rejection in both modes', async () => {
+  for (const baseUrl of ['not-a-url', '', 'ftp://sdk.test', 'https://user:secret@sdk.test', 'https://sdk.test?token=secret', 'https://sdk.test#fragment']) {
+    assert.throws(() => createRemoteClient({ baseUrl }), code('INVALID_ARGUMENT'));
+  }
   const remote = createRemoteClient({ baseUrl: 'https://sdk.test', fetch: (async () => new Response('{}', { headers: { 'x-jm-protocol': '1' } })) as Fetch });
   const client = local();
   try {

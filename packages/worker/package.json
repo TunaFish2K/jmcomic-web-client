@@ -2,7 +2,7 @@
   "name": "@tiny-client/worker",
   "dependencies": {
     "@tiny-client/shared": "workspace:*",
-    "jmcomic-sdk": "workspace:*"
+    "jmcomic-sdk-pwa": "workspace:*"
   },
   "version": "0.0.0",
   "private": true,

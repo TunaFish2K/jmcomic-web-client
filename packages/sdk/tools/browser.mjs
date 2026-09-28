@@ -8,7 +8,7 @@ import { createServer } from '../dist/server.js';
 await build({ entryPoints: ['test/mock.ts'], outfile: '.artifacts/mock.mjs', platform: 'neutral', format: 'esm' });
 const { mockUpstream } = await import('../.artifacts/mock.mjs');
 
-await build({ stdin: { contents: `export {createRemoteClient} from './dist/remote.js'; export {createImageProcessor,createUrlWasmLoader} from './dist/image.js';`, resolveDir: process.cwd() }, outfile: '.artifacts/browser/sdk.js', bundle: true, format: 'esm', platform: 'browser' });
+await build({ entryPoints: ['examples/browser.mjs'], outfile: '.artifacts/browser/sdk.js', bundle: true, format: 'esm', platform: 'browser' });
 const isolated = await build({ entryPoints: ['dist/remote.js'], bundle: true, format: 'esm', platform: 'browser', write: false, metafile: true });
 assert.ok(!Object.keys(isolated.metafile.inputs).some(x => /jsquash|image\.js|server\.js|crypto-js|adapters/.test(x)), 'Remote bundle imports local-only dependencies');
 const fixtures = {};
@@ -32,9 +32,9 @@ try {
     try {
       const page = await browser.newPage(); await page.goto(origin);
       const result = await page.evaluate(async ({ baseUrl, fixtures }) => {
-        const { createRemoteClient, createImageProcessor, createUrlWasmLoader } = await import('/sdk.js');
-        const client = createRemoteClient({ baseUrl, token: 'browser-test' });
-        const processor = createImageProcessor({ loadWasm: createUrlWasmLoader(new URL('/wasm/', location.href)) });
+        const { createBrowserClient, createBrowserImages } = await import('/sdk.js');
+        const client = createBrowserClient({ baseUrl, token: 'browser-test' });
+        const processor = createBrowserImages();
         const search = await client.search('x'); const album = await client.getAlbum('123'); const chapter = await client.getChapter('123');
         const remote = await client.getImage('123', 0, { format: 'png' });
         const png = await processor.process(Uint8Array.from(fixtures.png), 10, { format: 'png' });

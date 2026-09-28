@@ -1,5 +1,5 @@
 {
-  "name": "jmcomic-sdk",
+  "name": "jmcomic-sdk-pwa",
   "version": "0.2.0",
   "description": "Portable JM upstream and image SDK with local, server and remote modes",
   "type": "module",
@@ -11,7 +11,7 @@
     "LICENSE"
   ],
   "bin": {
-    "jmcomic-sdk": "dist/cli.js"
+    "jmcomic-sdk-pwa": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -81,5 +81,12 @@
     "type": "git",
     "url": "https://github.com/TunaFish2K/jmcomic-web-client.git",
     "directory": "packages/sdk"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

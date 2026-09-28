@@ -1,4 +1,4 @@
-// Application DTOs for the existing PWA HTTP API. Protocol access lives in jmcomic-sdk.
+// Application DTOs for the existing PWA HTTP API. Protocol access lives in jmcomic-sdk-pwa.
 export type SearchResult = {
   search_query: string;
   total: string;

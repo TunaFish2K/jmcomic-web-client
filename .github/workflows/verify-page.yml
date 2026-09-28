@@ -57,17 +57,17 @@ jobs:
       - name: Set package version
         run: node -e 'const fs=require("node:fs");const p="packages/sdk/package.json";const j=JSON.parse(fs.readFileSync(p));j.version="0.2."+process.env.GITHUB_RUN_NUMBER;fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n")'
       - run: pnpm sdk:test
-      - run: pnpm --filter jmcomic-sdk test:platforms
-      - run: pnpm --filter jmcomic-sdk test:workers
-      - run: pnpm --filter jmcomic-sdk test:package
+      - run: pnpm --filter jmcomic-sdk-pwa test:platforms
+      - run: pnpm --filter jmcomic-sdk-pwa test:workers
+      - run: pnpm --filter jmcomic-sdk-pwa test:package
       - name: Checksum
         working-directory: packages/sdk
-        run: sha256sum jmcomic-sdk-*.tgz > SHA256SUMS
+        run: sha256sum jmcomic-sdk-pwa-*.tgz > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: sdk-package
           path: |
-            packages/sdk/jmcomic-sdk-*.tgz
+            packages/sdk/jmcomic-sdk-pwa-*.tgz
             packages/sdk/SHA256SUMS
           retention-days: 14
 
@@ -99,7 +99,7 @@ jobs:
       - run: pnpm --filter @tiny-client/page test:coverage
       - run: pnpm --filter @tiny-client/page test:browser
       - if: needs.changes.outputs.sdk == 'true'
-        run: pnpm --filter jmcomic-sdk test:browser
+        run: pnpm --filter jmcomic-sdk-pwa test:browser
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -152,7 +152,7 @@ jobs:
 
           本提交通过 mock 上游、Node/Bun/Deno、浏览器真实 WASM、workerd、旧应用接口及独立安装包验证。应用继续使用原有 HTTP 接口；浏览器图片处理在 Web Worker 中执行。
 
-          下载附件后使用 npm install ./jmcomic-sdk-*.tgz 安装。SHA256SUMS 提供校验值。CI 不访问真实上游，不发布到 npm。
+          下载附件后使用 npm install ./jmcomic-sdk-pwa-*.tgz 安装。SHA256SUMS 提供校验值。CI 不访问真实上游。main 在 npm 首次授权完成后自动发布同一安装包；具体结果见 publish-npm job。
           NOTES
           flags=(--prerelease --latest=false)
           if [[ "$GITHUB_REF_NAME" == "main" ]]; then
@@ -164,6 +164,37 @@ jobs:
           else
             gh release create "$tag" release/* --target "$GITHUB_SHA" --title "JMComic SDK 0.2.${GITHUB_RUN_NUMBER}" --notes-file release-notes.md "${flags[@]}"
           fi
+
+  publish-npm:
+    needs: release-sdk
+    if: >-
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/main' &&
+      vars.NPM_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: sdk-npm-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global npm@11
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdk-package
+          path: release
+      - name: Verify tested artifact checksum
+        working-directory: release
+        run: sha256sum --check SHA256SUMS
+      - name: Publish identical tested artifact with npm OIDC
+        run: node packages/sdk/tools/publish-npm.mjs release
+      - name: Install exact registry version and verify types, CLI and WASM
+        run: node packages/sdk/tools/registry-smoke.mjs release
 
   deploy-worker:
     needs: [changes, sdk, verify-page, worker]

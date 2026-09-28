@@ -21,8 +21,13 @@ function validResult(path: string, value: unknown): boolean {
     && value.images.every(x => record(x) && typeof x.name === 'string' && Number.isSafeInteger(x.index) && count(x.index));
 }
 export function createRemoteClient(options: RemoteOptions): JmClient {
-  const base = new URL(options.baseUrl.endsWith('/') ? options.baseUrl : options.baseUrl + '/');
-  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password)
+  let base: URL;
+  try {
+    base = new URL(options.baseUrl.endsWith('/') ? options.baseUrl : options.baseUrl + '/');
+  } catch {
+    throw new JmError('INVALID_ARGUMENT', 'Invalid server URL');
+  }
+  if (!['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash)
     throw new JmError('INVALID_ARGUMENT', 'Invalid server URL');
   const transport = options.fetch ?? globalThis.fetch.bind(globalThis), flights = new Flights();
   const timeoutMs = integer(options.timeoutMs ?? 60000, 1, 600000, 'remote timeout');

@@ -6,16 +6,22 @@ SDK 提供域名发现、签名、响应解密、搜索、详情、章节、图�
 
 ## 安装与本机调用
 
-从 [jmcomic-web-client Releases](https://github.com/TunaFish2K/jmcomic-web-client/releases) 下载 SDK `.tgz`，然后安装（将文件名替换为实际版本）：
+npm 首次发布完成后可直接安装：
 
 ```sh
-npm install ./jmcomic-sdk-0.2.0.tgz
+npm install jmcomic-sdk-pwa
+```
+
+尚未发布或需要指定构建时，从 [jmcomic-web-client Releases](https://github.com/TunaFish2K/jmcomic-web-client/releases) 下载 SDK `.tgz`，然后安装（将文件名替换为实际版本）：
+
+```sh
+npm install ./jmcomic-sdk-pwa-0.2.0.tgz
 ```
 
 Node、Bun、Deno 使用 `node` 入口，自动从安装包读取 WASM：
 
 ```js
-import { createLocalClient } from 'jmcomic-sdk/node';
+import { createLocalClient } from 'jmcomic-sdk-pwa/node';
 
 const client = createLocalClient();
 try {
@@ -37,17 +43,19 @@ try {
 ## 独立服务和远程调用
 
 ```sh
-JM_TOKEN=your-token npx jmcomic-sdk serve
+JM_TOKEN=local-example-token JM_ORIGINS=http://localhost:5173 npx --no-install jmcomic-sdk-pwa serve
 ```
+
+`--no-install` 使用上一步已安装的包。`--help` 查看参数，`--version` 输出已安装版本；未知参数会报错退出。
 
 默认监听 `127.0.0.1:3000`。`JM_HOST`、`JM_PORT` 可修改监听地址；非回环监听必须提供 `JM_TOKEN`。`JM_ORIGINS` 是以逗号分隔的浏览器来源，例如 `https://reader.example`，不要填页面路径。`JM_DOMAINS` 可覆盖上游 API 域名列表。
 
 ```js
-import { createRemoteClient } from 'jmcomic-sdk/remote';
+import { createRemoteClient } from 'jmcomic-sdk-pwa/remote';
 
 const client = createRemoteClient({
   baseUrl: 'http://127.0.0.1:3000',
-  token: 'your-token',
+  token: 'local-example-token',
 });
 try {
   console.log(await client.search('关键词'));
@@ -57,6 +65,21 @@ try {
 ```
 
 嵌入现有服务时，用 `createServer(client, options).fetch(request)`。该函数接受标准 `Request`，返回标准 `Response`；不绑定 Node、Express 或其他服务框架。Node 的 `listen()`、Bun.serve、Deno.serve 示例见 [examples](examples)。
+
+### 浏览器远程调用
+
+在 `http://localhost:5173` 的 Vite 页面中可直接使用上面的远程客户端代码；token 要与服务一致。来源包含协议、主机和端口，`http://127.0.0.1:5173` 与 `http://localhost:5173` 是不同来源，按实际地址设置 `JM_ORIGINS`。
+
+远程调用不需要浏览器 WASM。服务已返回处理后的图片：
+
+```js
+const image = await client.getImage('章节 ID', 0);
+const url = URL.createObjectURL(new Blob([image.data], { type: image.mime }));
+document.querySelector('img').src = url;
+// 替换图片或离开页面时执行 URL.revokeObjectURL(url)。
+```
+
+示例 token 只用于本机试用。部署时由宿主向客户端提供凭据，避免把服务端共享 token 写进公开静态页面。
 
 ## 平台支持
 
@@ -68,16 +91,16 @@ try {
 | Chromium / Firefox | 需要宿主传输 | 不提供监听器 | 支持 | WASM |
 | Cloudflare Workers | 支持 | Fetch handler | 支持 | 静态 WASM 模块 |
 
-浏览器直接访问上游受 CORS、Cookie 和受限请求头约束。使用远程模式，或通过 `fetch` 选项注入已解决这些限制的宿主传输；SDK 不会绕过浏览器限制。浏览器、Workers 的核心入口为 `jmcomic-sdk/local`，可配置 `image.loadWasm`。
+浏览器直接访问上游受 CORS、Cookie 和受限请求头约束。使用远程模式，或通过 `fetch` 选项注入已解决这些限制的宿主传输；SDK 不会绕过浏览器限制。浏览器、Workers 的核心入口为 `jmcomic-sdk-pwa/local`，可配置 `image.loadWasm`。
 
-仅引入 `jmcomic-sdk/remote` 或根入口不会加载上游协议、图片编解码器或 Node 适配代码。ESM 包提供 `.d.ts` 和包含源码的 source map，不提供 CommonJS 包。
+仅引入 `jmcomic-sdk-pwa/remote` 或根入口不会加载上游协议、图片编解码器或 Node 适配代码。ESM 包提供 `.d.ts` 和包含源码的 source map，不提供 CommonJS 包。
 
 ### 浏览器 WASM
 
 把安装包 `dist/wasm` 下的文件复制到站点 `/wasm/`，使用打包器构建 [browser.mjs](examples/browser.mjs)：
 
 ```js
-import { createImageProcessor, createUrlWasmLoader } from 'jmcomic-sdk/image';
+import { createImageProcessor, createUrlWasmLoader } from 'jmcomic-sdk-pwa/image';
 const images = createImageProcessor({
   loadWasm: createUrlWasmLoader(new URL('/wasm/', location.href)),
 });
@@ -92,7 +115,7 @@ const result = await images.process(inputBytes, sliceCount, { format: 'png' });
 
 图片服务使用付费 CPU 配额。免费请求只有 10 ms CPU，不能保证完成图片解码和编码。单 isolate 内存上限为 128 MB，包含 WASM 内存。[Cloudflare 官方限制](https://developers.cloudflare.com/workers/platform/limits/)
 
-首版已在本地 workerd 执行真实 WASM 测试；未部署到任何 Cloudflare 账户，本地测试不证明云端 CPU 配额或上游可达性。
+独立服务示例已在本地 workerd 执行真实 WASM 测试；它未单独部署。应用 Worker 的线上验收与此示例分开记录，本地测试不证明云端 CPU 配额或上游可达性。
 
 ## 接口与错误
 
@@ -142,17 +165,43 @@ JPEG、PNG、静态 WebP 使用内置 jSquash WASM 解码；先按原始尺寸�
 
 `logger(event)` 接收操作、耗时、重试次数及错误码，不记录搜索词、完整 URL、Cookie 或 token。自定义传输的代理配置只作用于该客户端；SDK 不修改系统代理。
 
+### 排查连接问题
+
+CLI 设置 `JM_DEBUG=1`，在标准错误输出中查看脱敏的请求、重试、切换和失败事件。程序调用可用 `logger: event => console.error(event)` 接收相同事件。远程连接失败时先核对 `baseUrl`、token 和浏览器来源；浏览器拦截 CORS 时，JavaScript 无法读取服务端错误正文。
+
+```js
+import { createLocalClient } from 'jmcomic-sdk-pwa/node';
+import { JmError } from 'jmcomic-sdk-pwa';
+const client = createLocalClient({ timeoutMs: 5000, retries: 0, logger: console.error });
+try {
+  await client.search('关键词', { signal: AbortSignal.timeout(15000) });
+} catch (error) {
+  if (error instanceof JmError) console.error(error.code, error.message, error.requestId);
+  else throw error;
+} finally { client.dispose(); }
+```
+
+`timeoutMs` 限制单次网络尝试；整个操作的时间限制通过 `signal` 设置。远程客户端的 `timeoutMs` 则限制一次服务请求。Node 中需为此客户端单独设置代理时，安装 `undici` 并注入传输：
+
+```js
+import { ProxyAgent, fetch as proxyFetch } from 'undici';
+const agent = new ProxyAgent('http://127.0.0.1:7890'); // 换成本机 HTTP 代理端口
+const client = createLocalClient({ fetch: (url, init) => proxyFetch(url, { ...init, dispatcher: agent }) });
+try { console.log(await client.search('关键词')); }
+finally { client.dispose(); await agent.close(); }
+```
+
 ## 开发与验收
 
 ```sh
 # 在 jmcomic-web-client 仓库根目录执行
 pnpm install --frozen-lockfile
 pnpm sdk:test
-pnpm --filter jmcomic-sdk test:platforms  # 需安装 Bun，Deno 随开发依赖安装
-pnpm --filter jmcomic-sdk test:workers    # workerd 真正执行 WASM
-pnpm --filter jmcomic-sdk exec playwright install chromium firefox
-pnpm --filter jmcomic-sdk test:browser    # 真实浏览器 CORS 与 WASM
-pnpm --filter jmcomic-sdk test:package    # 临时目录安装 tarball，检查类型、CLI 与 WASM
+pnpm --filter jmcomic-sdk-pwa test:platforms  # 需安装 Bun，Deno 随开发依赖安装
+pnpm --filter jmcomic-sdk-pwa test:workers    # workerd 真正执行 WASM
+pnpm --filter jmcomic-sdk-pwa exec playwright install chromium firefox
+pnpm --filter jmcomic-sdk-pwa test:browser    # 真实浏览器 CORS 与 WASM
+pnpm --filter jmcomic-sdk-pwa test:package    # 临时目录安装 tarball，检查类型、CLI 与 WASM
 pnpm sdk:pack                            # 只构建和打包，不发布 npm
 ```
 
@@ -161,17 +210,17 @@ pnpm sdk:pack                            # 只构建和打包，不发布 npm
 真实上游仅在开发机手动运行：
 
 ```sh
-python3 packages/sdk/tools/test-proxy.py -- pnpm --filter jmcomic-sdk test:real
+python3 packages/sdk/tools/test-proxy.py -- pnpm --filter jmcomic-sdk-pwa test:real
 ```
 
-工具读取本机 v2rayN 的活跃 VLESS TCP Reality 节点，为该测试进程启动独立 sing-box，退出后清理；不会修改 v2rayN。其他节点类型明确报错。无代理环境可以直接运行 `pnpm --filter jmcomic-sdk test:real`。报告写入 `packages/sdk/.artifacts/real-report.json`，不会保存漫画图片或节点凭据。
+工具读取本机 v2rayN 的活跃 VLESS TCP Reality 节点，为该测试进程启动独立 sing-box，退出后清理；不会修改 v2rayN。其他节点类型明确报错。无代理环境可以直接运行 `pnpm --filter jmcomic-sdk-pwa test:real`。报告写入 `packages/sdk/.artifacts/real-report.json`，不会保存漫画图片或节点凭据。
 
-CI 只用 mock 上游及合成图片，按受影响包执行检查。SDK 或根依赖配置变化后，运行 SDK、应用 Worker 和前端测试，通过后发布 `sdk-build-<commit>`；main 是正式 Release，其他分支为预发布。包版本使用 `0.2.<workflow run number>`，不自动发布到 npm。应用 Worker 有独立的部署步骤；SDK 的独立服务示例不自动部署。
+CI 只用 mock 上游及合成图片，按受影响包执行检查。SDK 或根依赖配置变化后，运行 SDK、应用 Worker 和前端测试，通过后发布 `sdk-build-<commit>`；main 是正式 Release，其他分支为预发布。包版本使用 `0.2.<workflow run number>`。npm 首次授权完成后，main 通过独立 job 自动发布同一 tarball；其他分支不发布 npm。应用 Worker 有独立的部署步骤；SDK 的独立服务示例不自动部署。
 
 ## 应用适配入口
 
-`jmcomic-sdk/upstream` 导出 `createUpstreamClient`、`discoverDomains` 和 `DOMAIN_SERVER_URL`。客户端提供 `initialize()`、`request('/search' | '/album' | '/chapter', params)`、`getChapterTemplate(id)`、`dispose()`；异步方法支持 `signal`。初始化只返回 API 地址、图片地址和版本，不暴露 Cookie。
+`jmcomic-sdk-pwa/upstream` 导出 `createUpstreamClient`、`discoverDomains` 和 `DOMAIN_SERVER_URL`。客户端提供 `initialize()`、`request('/search' | '/album' | '/chapter', params)`、`getChapterTemplate(id)`、`dispose()`；异步方法支持 `signal`。初始化只返回 API 地址、图片地址和版本，不暴露 Cookie。
 
 该入口保留上游原始字段，不缓存搜索、详情或章节结果，适用于由宿主掌握刷新和缓存策略的应用。失败时 `JmError.operation` 标识出错操作。jmcomic-web-client 在应用适配层转换旧接口数据，SDK 不包含 `/batch-album`、`/batch-photo` 或 LLM 代理。
 
-当前验收记录见 [VALIDATION.md](VALIDATION.md)。
+当前验收记录见 [仓库验收文档](https://github.com/TunaFish2K/jmcomic-web-client/blob/main/packages/sdk/VALIDATION.md)。npm 首次启用步骤见 [发布配置](https://github.com/TunaFish2K/jmcomic-web-client/blob/main/docs/sdk-npm.md)。

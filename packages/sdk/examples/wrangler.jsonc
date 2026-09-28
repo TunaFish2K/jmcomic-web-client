@@ -1,5 +1,5 @@
 {
-  "name": "jmcomic-sdk",
+  "name": "jmcomic-sdk-pwa",
   "main": "worker.mjs",
   "compatibility_date": "2026-07-30",
   "limits": { "cpu_ms": 30000 },

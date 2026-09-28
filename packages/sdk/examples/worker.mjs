@@ -1,8 +1,8 @@
-import { createWorkersServer } from 'jmcomic-sdk/workers';
-import jpegDec from 'jmcomic-sdk/wasm/mozjpeg_dec.wasm';
-import jpegEnc from 'jmcomic-sdk/wasm/mozjpeg_enc.wasm';
-import png from 'jmcomic-sdk/wasm/squoosh_png_bg.wasm';
-import webpDec from 'jmcomic-sdk/wasm/webp_dec.wasm';
+import { createWorkersServer } from 'jmcomic-sdk-pwa/workers';
+import jpegDec from 'jmcomic-sdk-pwa/wasm/mozjpeg_dec.wasm';
+import jpegEnc from 'jmcomic-sdk-pwa/wasm/mozjpeg_enc.wasm';
+import png from 'jmcomic-sdk-pwa/wasm/squoosh_png_bg.wasm';
+import webpDec from 'jmcomic-sdk-pwa/wasm/webp_dec.wasm';
 const wasm = { 'jpeg-dec': jpegDec, 'jpeg-enc': jpegEnc, png, 'webp-dec': webpDec };
 let server;
 export default {

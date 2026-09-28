@@ -1,5 +1,5 @@
 import { getClientDataAndCreateClient, getDomainsFromDomainServer } from './upstream-adapter';
-import { DOMAIN_SERVER_URL } from 'jmcomic-sdk/upstream';
+import { DOMAIN_SERVER_URL } from 'jmcomic-sdk-pwa/upstream';
 import { SEARCH_PAGE_SIZE } from '@tiny-client/shared/constants';
 import { requestScope, withRequestScope, type ClientContext } from './request-scope';
 import { assertDistinctSearchResult, selectFirstDistinctSearchResult } from './search';

@@ -19,7 +19,7 @@
     "fflate": "^0.8.2",
     "p-limit": "^7.3.0",
     "pdfkit": "^0.19.1",
-    "jmcomic-sdk": "workspace:*"
+    "jmcomic-sdk-pwa": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

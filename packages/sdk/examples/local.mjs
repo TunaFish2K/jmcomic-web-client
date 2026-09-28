@@ -1,4 +1,4 @@
-import { createLocalClient } from 'jmcomic-sdk/node';
+import { createLocalClient } from 'jmcomic-sdk-pwa/node';
 const client = createLocalClient();
 try {
   const results = await client.search(process.argv[2] ?? 'example');
