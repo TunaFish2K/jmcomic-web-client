@@ -1,0 +1,30 @@
+name: Inspect Pages build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read latest Pages build logs
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        shell: python
+        run: |
+          import json, os, urllib.request
+          base = 'https://api.cloudflare.com/client/v4/accounts/' + os.environ['CF_ACCOUNT_ID'] + '/pages/projects/'
+          def read(path):
+              request = urllib.request.Request(base + path, headers={'Authorization': 'Bearer ' + os.environ['CF_API_TOKEN']})
+              return json.load(urllib.request.urlopen(request, timeout=30))['result']
+          for project in ['jmcomic-web-client', 'jmcomic-web-client-demo']:
+              info = read(project)
+              config = info.get('build_config', {})
+              print(project, {key: config.get(key) for key in ['build_command', 'destination_dir', 'root_dir']})
+              deployment = read(project + '/deployments')[0]
+              print('Deployment', deployment['id'], deployment['latest_stage'])
+              logs = read(project + '/deployments/' + deployment['id'] + '/history/logs')
+              for entry in logs.get('data', [])[-80:]:
+                  print(entry.get('line', ''))
