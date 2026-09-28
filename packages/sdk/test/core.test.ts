@@ -184,12 +184,14 @@ test('GIF returns original bytes, excess input rejects before WASM loading', asy
   assert.equal(loaded, false);
 });
 
-test('cache expires entries and concurrent replacement keeps byte accounting correct', async () => {
+test('cache expires entries and concurrent replacement keeps byte accounting correct', async context => {
+  let now = 1000;
+  context.mock.method(Date, 'now', () => now);
   const cache = new MemoryCache(4);
   await Promise.all([cache.set('a', new Uint8Array(2), 1), cache.set('a', new Uint8Array(2), 1)]);
   await cache.set('b', new Uint8Array(2), 1000);
   assert.ok(await cache.get('a')); assert.ok(await cache.get('b'));
-  await new Promise(resolve => setTimeout(resolve, 5));
+  now += 1;
   assert.equal(await cache.get('a'), undefined); assert.ok(await cache.get('b'));
 });
 
