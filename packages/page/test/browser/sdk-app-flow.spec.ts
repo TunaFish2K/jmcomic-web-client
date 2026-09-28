@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
+// Service-worker-owned fetches bypass Playwright's route interception in WebKit.
+// PWA registration/upgrades are covered separately by pwa-upgrade.spec.ts.
+test.use({ serviceWorkers: 'block' });
+
 test('fresh search, detail and reader process upstream images through the SDK worker', async ({ page }) => {
     const image = await readFile('../sdk/test/fixtures/720x1016-2.png');
     const album = { id: '123', name: 'SDK migration fixture', images: ['001.png'], description: null, totalViews: '123', likes: '7', series: [], seriesID: '', author: ['Fixture'], tags: ['SDK'], works: [], actors: [] };
@@ -11,11 +15,12 @@ test('fresh search, detail and reader process upstream images through the SDK wo
     await page.route('http://backend.test/**', async route => {
         const path = new URL(route.request().url()).pathname;
         paths.add(path);
-        if (path === '/images/001.png') return route.fulfill({ contentType: 'image/png', body: image });
+        const headers = { 'Access-Control-Allow-Origin': '*' };
+        if (path === '/images/001.png') return route.fulfill({ contentType: 'image/png', headers, body: image });
         const result = path === '/search' ? { search_query: 'sdk', total: '1', content: [{ id: album.id, name: album.name, author: 'Fixture' }] }
             : path === '/batch-album' ? [{ albumId: album.id, album, photo }]
             : path === '/album/123' ? album : path === '/photo/123' ? photo : null;
-        await route.fulfill({ status: result ? 200 : 404, json: result });
+        await route.fulfill({ status: result ? 200 : 404, headers, json: result });
     });
     await page.goto('/');
     await page.getByPlaceholder('搜索内容...').fill('sdk');

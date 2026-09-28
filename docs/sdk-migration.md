@@ -45,4 +45,6 @@ pnpm --filter jmcomic-sdk test:browser
 
 `.github/workflows/verify-page.yml` 按变更路径选择 SDK、page、worker 检查。SDK 变更会触发全部检查；只改应用时不重复发布 SDK。SDK 检查还覆盖 Node 24、Bun、Deno、workerd 和临时目录安装。通过所有相关检查后生成 `sdk-build-<commit>` 和 `0.2.<工作流运行序号>` 安装包。main 发布正式版本，其他分支为预发布；不发布 npm。
 
-应用 Worker 在相关检查通过后部署，旧提交不会覆盖更新的 main。Cloudflare Pages 仍使用原来的 Git 集成，构建命令须为根目录的 `pnpm page:build`，Node 版本须为 24 或更新。Flutter App 和 SDK 独立服务示例不由本次工作流部署。
+应用 Worker 在相关检查通过后部署，旧提交不会覆盖更新的 main。Cloudflare Pages 仍使用原来的 Git 集成；可从根目录运行 `pnpm page:build`，也可将构建根目录设为 `packages/page` 后运行 `pnpm build`，两种入口都会编译 SDK。Node 版本使用 24 或更新。Flutter App 和 SDK 独立服务示例不由本次工作流部署。
+
+需要排查 Pages 构建时，可手动运行 `Inspect Pages build` 工作流，使用已有 Cloudflare 凭据读取两个站点的最新构建日志。该任务不修改部署配置，也不加入日常 CI。

@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "page:dev": "pnpm sdk:build && concurrently -k \"pnpm --filter jmcomic-sdk watch\" \"pnpm --filter @tiny-client/page dev\"",
-    "page:build": "pnpm sdk:build && pnpm --filter @tiny-client/page build",
+    "page:build": "pnpm --filter @tiny-client/page build",
     "worker:dev": "pnpm sdk:build && concurrently -k \"pnpm --filter jmcomic-sdk watch\" \"pnpm --filter @tiny-client/worker dev\"",
     "worker:deploy": "pnpm sdk:build && pnpm --filter @tiny-client/worker deploy",
     "dev": "pnpm sdk:build && concurrently -k \"pnpm --filter jmcomic-sdk watch\" \"pnpm --filter @tiny-client/worker dev\" \"wait-on tcp:localhost:8787 && VITE_BACKEND_URL=http://localhost:8787 pnpm --filter @tiny-client/page dev\"",
