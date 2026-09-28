@@ -13,7 +13,7 @@
 | 应用 Worker | 41 项测试通过；使用真实 SDK 和加密 mock 验证旧 API、刷新、批量和并发；类型检查及部署 dry-run 通过 |
 | 应用共享层 | 15 项通过，包含图片任务取消、队列上限、故障恢复和真实 WASM 下的 120 页导出 |
 | 前端 | lint、类型检查、291 项测试及覆盖率阈值通过；行覆盖率 98.41% |
-| PWA 真实浏览器 | 本机 Chromium、Firefox、移动 Chromium 共 59 项通过；4 项按输入设备不适用跳过。WebKit 本机缺少 libicu74，保留在 Ubuntu CI 中验证 |
+| PWA 真实浏览器 | 本机 Chromium、Firefox、移动 Chromium 共 59 项通过；4 项按输入设备不适用跳过。Ubuntu CI 四种浏览器共 77 项通过、7 项按平台能力跳过；本机 Ubuntu 容器另验证 WebKit 搜索到阅读、真实 WASM 图片处理两项通过 |
 
 三种服务运行时对相同合成 PNG 的处理结果 SHA-256 一致：
 

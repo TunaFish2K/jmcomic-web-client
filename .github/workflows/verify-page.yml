@@ -123,7 +123,7 @@ jobs:
       - run: pnpm sdk:build
       - run: pnpm --filter @tiny-client/worker typecheck
       - run: pnpm --filter @tiny-client/worker exec vitest run
-      - run: pnpm --filter @tiny-client/worker exec wrangler deploy --dry-run
+      - run: pnpm worker:deploy --dry-run
 
   release-sdk:
     needs: [changes, sdk, verify-page, worker]
