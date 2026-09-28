@@ -40,7 +40,11 @@ export function createRemoteClient(options: RemoteOptions): JmClient {
       try {
         const headers = new Headers({ 'x-jm-protocol': '1' });
         if (options.token) headers.set('authorization', `Bearer ${options.token}`);
-        const response = await transport(url, { headers, signal: controller.signal, redirect: 'error' });
+        const response = await transport(url, { headers, signal: controller.signal, redirect: 'manual' });
+        if (response.type === 'opaqueredirect' || response.status >= 300 && response.status < 400) {
+          await response.body?.cancel();
+          throw new JmError('UPSTREAM', 'Server redirects are not supported');
+        }
         const requestId = response.headers.get('x-request-id') ?? undefined;
         if (response.headers.get('x-jm-protocol') !== '1') {
           await response.body?.cancel(); throw new JmError('PROTOCOL_MISMATCH', 'Server does not support SDK protocol 1', false, requestId);

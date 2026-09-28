@@ -57,7 +57,9 @@ export class Upstream {
         const timer = setTimeout(() => { timedOut = true; controller.abort(); }, this.timeout);
         const start = Date.now(); let retryMs = Math.min(2000, 300 * 2 ** attempt);
         try {
-          const response = await this.transport(url, { ...init, signal: controller.signal, redirect: 'error' });
+          // Workers supports manual/follow only. Manual also prevents forwarding
+          // signed headers and cookies to a redirect destination in every runtime.
+          const response = await this.transport(url, { ...init, signal: controller.signal, redirect: 'manual' });
           if (!response.ok) {
             const seconds = Number(response.headers.get('retry-after'));
             if (Number.isFinite(seconds) && seconds > 0) retryMs = Math.min(5000, seconds * 1000);
