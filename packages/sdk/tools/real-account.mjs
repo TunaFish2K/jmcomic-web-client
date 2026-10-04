@@ -9,6 +9,7 @@ import { createMobileClient } from '../dist/mobile.js';
 const envFile = fileURLToPath(new URL('../../../.env.test.local', import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 const { JM_TEST_USER: user, JM_TEST_PASS: pass, JM_TEST_ALBUM_ID: albumId = '350234', JM_TEST_WRITE, JM_TEST_PROXY } = process.env;
+// Writes stay private to the test account: only a favorite toggle that is restored. Public comments are never posted.
 if (!user || !pass) {
   console.error('Set JM_TEST_USER and JM_TEST_PASS in .env.test.local at the repository root.');
   process.exit(2);
@@ -43,7 +44,6 @@ async function step(name, run) {
     return false;
   }
 }
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 try {
   const loggedIn = await step('login', async () => {
@@ -74,22 +74,8 @@ try {
         if (first.data.type === 'add' && !listed) throw new Error('added favorite did not appear in the list (state restored)');
         return `first ${first.data.type ?? 'unknown'}, restored with ${second.data.type ?? 'unknown'}`;
       });
-      await step('comment post and delete', async () => {
-        const marker = `sdk-acceptance-${Date.now()}`;
-        const posted = await client.comment({ albumId, content: marker });
-        if (!posted.ok) throw new Error(`comment refused: ${posted.message}`);
-        let own;
-        for (let attempt = 0; attempt < 5 && !own; attempt++) {
-          if (attempt) await delay(2000);
-          own = (await client.comments({ albumId, page: 1 })).items.find(item => item.content.includes(marker));
-        }
-        if (!own) throw new Error(`posted comment not found; delete "${marker}" on album ${albumId} manually`);
-        const removed = await client.deleteComment({ commentId: own.id, albumId });
-        if (!removed.ok) throw new Error(`delete refused: ${removed.message}; delete comment ${own.id} manually`);
-        return 'posted, found and deleted';
-      });
     } else {
-      console.log('SKIP writes — set JM_TEST_WRITE=1 to toggle a favorite and post/delete a comment (state is restored).');
+      console.log('SKIP writes — set JM_TEST_WRITE=1 to toggle a favorite and restore it.');
     }
     await step('logout', async () => (await client.logout()).ok ? 'ok' : 'refused by upstream');
   }

@@ -31,7 +31,7 @@ APK 中的 GET 和 POST 在非 2xx 时最多自动重试三次。SDK 不照搬�
 
 ## 接口
 
-验证状态：**实测**表示 2026-10-04 用 APK 签名访问真实上游、确认了响应结构；**源码**表示只由 APK 调用代码确认，等待真实账号验证。
+验证状态：**实测**表示已用 APK 签名访问真实上游并确认响应结构；公共接口实测于 2026-10-04，账号接口于 2026-10-05 用测试账号经 `pnpm sdk:test:account` 实测。**源码**表示只由 APK 调用代码确认。
 
 ### 发现（无需登录）
 
@@ -56,33 +56,33 @@ APK 中的 GET 和 POST 在非 2xx 时最多自动重试三次。SDK 不照搬�
 
 | 接口 | 方法 | 参数 | 说明 | 读/写 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| `/login` | POST | `username`、`password` | `data` 含 `uid`、`username`、`email`、`jwttoken`、`s`（AVS Cookie）、`level_name`、`coin` 等；APK 只在本地保存 1 小时 | 写 | 源码 |
+| `/login` | POST | `username`、`password` | `data` 含 `uid`、`username`、`email`、`jwttoken`、`s`（AVS Cookie）、`level_name`、`coin` 等；APK 只在本地保存 1 小时 | 写 | 实测 |
 | `/register` | POST | `username`、`password`、`password_confirm`、`email`、`gender` | | 写 | 源码 |
 | `/forgot` | POST | `email` | 第三方 SDK 写作 `/forget`，实现采用 APK 的 `/forgot` | 写 | 源码 |
-| `/logout` | POST | — | | 写 | 源码 |
-| `/useredit/{uid}` | GET | — | 资料表单数据 | 读 | 源码 |
+| `/logout` | POST | — | | 写 | 实测 |
+| `/useredit/{uid}` | GET | — | 资料表单数据 | 读 | 实测 |
 | `/useredit/{uid}` | POST | 整份表单：`username`、`email`、`password`、`password_confirm`、`birthday`、`relations`、`sexuality`、`website`、`city`、`country` 等 | 先 GET 再整体提交 | 写 | 源码 |
 
 ### 收藏与互动
 
 | 接口 | 方法 | 参数 | 说明 | 读/写 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| `/favorite` | GET | `page`、`folder_id`、`o`（`mr` 最新、`mp` 最多图片） | 收藏列表和收藏夹 | 读 | 源码 |
-| `/favorite` | POST | `aid` | **切换**收藏状态，不是幂等的添加。`data` 为 `{status:"ok",msg,type}`。删除收藏也用这个接口 | 写 | 源码 |
+| `/favorite` | GET | `page`、`folder_id`、`o`（`mr` 最新、`mp` 最多图片） | 收藏列表和收藏夹，`data` 为 `{list,folder_list[{FID,name}],total,count}` | 读 | 实测 |
+| `/favorite` | POST | `aid` | **切换**收藏状态，不是幂等的添加。`data` 为 `{status:"ok",msg,type}`，`type` 为 `add` 或 `remove`。删除收藏也用这个接口 | 写 | 实测 |
 | `/favorite_folder` | POST | `type`：`add`（`folder_name`）、`edit`（`folder_id`、`folder_name`）、`del`（`folder_id`）、`move`（`folder_id`、`aid`） | `data` 为 `{status:"ok",msg}` | 写 | 源码 |
 | `/like` | POST | `id`（作品 ID），`like_type` 可选 | 点赞作品 | 写 | 源码 |
-| `/comment` | POST | `aid`、`comment`；回复时加 `comment_id` | | 写 | 源码 |
+| `/comment` | POST | `aid`、`comment`；回复时加 `comment_id` | 2026-10-05 上游拒绝含英文或数字的内容，返回“暂时不可输入英文和数字”。验收不发表公开评论 | 写 | 源码 |
 | `/comment_delete` | POST | `comment_id`、`aid` | 删除本人评论 | 写 | 源码 |
 
 ### 签到与历史
 
 | 接口 | 方法 | 参数 | 说明 | 读/写 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| `/daily` | GET | `user_id` | 当日签到信息，含 `daily_id` | 读 | 源码 |
+| `/daily` | GET | `user_id` | 当日签到信息，含 `daily_id` | 读 | 实测 |
 | `/daily_chk` | POST | `user_id`、`daily_id` | 签到 | 写 | 源码 |
 | `/daily_list` | GET | `user_id` | 可选月份 | 读 | 源码 |
 | `/daily_list/filter` | POST | `data`（月份） | 指定月份的签到记录；虽然用 POST，但是读操作 | 读 | 源码 |
-| `/watch_list` | GET | `page` | 云端观看历史 | 读 | 源码 |
+| `/watch_list` | GET | `page` | 云端观看历史 | 读 | 实测 |
 | `/watch_list` | POST | `id`（作品 ID） | **删除**一条历史，APK 只在长按删除时调用。`data` 为 `{status:1,msg}` | 写 | 源码 |
 
 `user_id`、`uid` 一律取自登录会话，不接受调用方传入。
