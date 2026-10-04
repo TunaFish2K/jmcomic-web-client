@@ -76,6 +76,34 @@ describe('account session', () => {
     assert.equal(result.current.notice, null);
   });
 
+  test('remember me keeps one copy in localStorage and follows other tabs', () => {
+    const { result } = renderHook(() => useAccount());
+    act(() => saveAccount({ ...account(), remember: true }));
+    assert.ok(localStorage.getItem(ACCOUNT_STORAGE_KEY));
+    assert.equal(sessionStorage.getItem(ACCOUNT_STORAGE_KEY), null);
+    assert.equal(result.current.account?.remember, true);
+    act(() => saveAccount(account()));
+    assert.ok(sessionStorage.getItem(ACCOUNT_STORAGE_KEY));
+    assert.equal(localStorage.getItem(ACCOUNT_STORAGE_KEY), null);
+    act(() => saveAccount({ ...account(), remember: true }));
+
+    // Another tab logs out: localStorage changes and a storage event arrives.
+    act(() => {
+      localStorage.removeItem(ACCOUNT_STORAGE_KEY);
+      window.dispatchEvent(new StorageEvent('storage', { key: ACCOUNT_STORAGE_KEY }));
+    });
+    assert.equal(result.current.account, null);
+    act(() => {
+      localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ ...account(), remember: true }));
+      window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated' }));
+    });
+    assert.equal(result.current.account, null);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: null })); });
+    assert.equal(result.current.account?.member.uid, '42');
+    act(() => clearAccount());
+    assert.equal(localStorage.getItem(ACCOUNT_STORAGE_KEY), null);
+  });
+
   test('expires on a timer and ignores malformed storage', () => {
     vi.useFakeTimers();
     try {

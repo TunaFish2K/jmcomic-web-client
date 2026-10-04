@@ -191,7 +191,7 @@ Worker 拒绝本机、私网/IP 字面量、自身地址、带凭据或查询参
 
 | 路径 | 方法 | 输入 | 返回 |
 | --- | --- | --- | --- |
-| `/login` | POST | `username`、`password` | `{ session, expiresAt, member }` |
+| `/login` | POST | `username`、`password`，`remember`（可选，为 true 时会话最长 30 天） | `{ session, expiresAt, remember, member }` |
 | `/register` | POST | `username`、`password`、`passwordConfirm`、`email`、`gender` | 写入结果 |
 | `/forgot` | POST | `email` | 写入结果 |
 | `/session` | GET | — | `{ uid, expiresAt }`，不请求上游 |

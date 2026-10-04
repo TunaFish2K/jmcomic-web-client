@@ -2,7 +2,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:
 import { createCipheriv, createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
-import { openSession, sealSession, SESSION_TTL_MS } from '../src/mobile-session';
+import { openSession, REMEMBER_TTL_MS, sealSession, SESSION_TTL_MS } from '../src/mobile-session';
 
 const KEY = 'test-account-session-key';
 const md5 = (value: string) => createHash('md5').update(value).digest('hex');
@@ -10,6 +10,7 @@ function encrypted(value: unknown, key: string) {
 	const cipher = createCipheriv('aes-256-ecb', Buffer.from(key), Buffer.alloc(0));
 	return Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]).toString('base64');
 }
+const LONG_JWT_EXP = Math.floor(Date.now() / 1000) + 365 * 86400;
 const jwt = (exp?: number) => `h.${Buffer.from(JSON.stringify(exp ? { exp } : {})).toString('base64url')}.s`;
 
 interface Seen { url: URL; method: string; headers: Headers; form: Record<string, string> }
@@ -49,7 +50,7 @@ async function request(path: string, init: RequestInit & { json?: unknown; sessi
 }
 async function login(uid = '42') {
 	respond = (call) => call.url.pathname === '/login'
-		? { uid, username: `user${uid}`, email: 'u@example.test', jwttoken: jwt(), s: `avs-${uid}`, level_name: 'Lv1', coin: '3', password: 'never' }
+		? { uid, username: `user${uid}`, email: 'u@example.test', jwttoken: jwt(LONG_JWT_EXP), s: `avs-${uid}`, level_name: 'Lv1', coin: '3', password: 'never' }
 		: { status: 'ok', msg: 'done' };
 	const response = await request('/login', { json: { username: `user${uid}`, password: 'secret' } });
 	expect(response.status).toBe(200);
@@ -65,6 +66,11 @@ describe('session tokens', () => {
 		await expect(openSession(KEY, sealed.token, now + SESSION_TTL_MS)).rejects.toMatchObject({ code: 'SESSION_EXPIRED' });
 		const short = await sealSession(KEY, { uid: '42', jwt: jwt(now / 1000 + 60), avs: 'a' }, now);
 		expect(short.expiresAt).toBe(now + 60_000);
+		const remembered = await sealSession(KEY, { uid: '42', jwt: jwt(now / 1000 + 365 * 86400), avs: 'a' }, now, REMEMBER_TTL_MS);
+		expect(remembered.expiresAt).toBe(now + REMEMBER_TTL_MS);
+		expect(await openSession(KEY, remembered.token, now + 7 * 86_400_000)).toMatchObject({ uid: '42' });
+		const capped = await sealSession(KEY, { uid: '42', jwt: jwt(now / 1000 + 86400), avs: 'a' }, now, REMEMBER_TTL_MS);
+		expect(capped.expiresAt).toBe(now + 86_400_000);
 	});
 
 	it('rejects tampered tokens and tokens sealed with another key', async () => {
@@ -84,6 +90,11 @@ describe('account routes', () => {
 		expect(JSON.stringify(body)).not.toMatch(/avs-42|never|jwttoken/);
 		expect(seen.filter((call) => call.url.pathname === '/login')).toHaveLength(1);
 		expect(seen[0]!.form).toEqual({ username: 'user42', password: 'secret' });
+		expect(body.remember).toBe(false);
+		expect(body.expiresAt - Date.now()).toBeLessThanOrEqual(SESSION_TTL_MS);
+		const remembered = await (await request('/login', { json: { username: 'user42', password: 'secret', remember: true } })).json() as { expiresAt: number; remember: boolean };
+		expect(remembered.remember).toBe(true);
+		expect(remembered.expiresAt - Date.now()).toBeGreaterThan(SESSION_TTL_MS * 24 * 29);
 		const check = await request('/session', { session: body.session });
 		expect(await check.json()).toEqual({ uid: '42', expiresAt: body.expiresAt });
 		expect(check.headers.get('Cache-Control')).toBe('no-store');
@@ -96,7 +107,7 @@ describe('account routes', () => {
 		expect(await daily.json()).toMatchObject({ dailyId: '7', record: [[{ date: '1', signed: true, bonus: false }]] });
 		const call = seen.at(-1)!;
 		expect(call.url.searchParams.get('user_id')).toBe('42');
-		expect(call.headers.get('authorization')).toBe(`Bearer ${jwt()}`);
+		expect(call.headers.get('authorization')).toBe(`Bearer ${jwt(LONG_JWT_EXP)}`);
 		expect(call.headers.get('cookie')).toContain('AVS=avs-42');
 
 		respond = () => ({ status: 'ok', msg: 'checked' });

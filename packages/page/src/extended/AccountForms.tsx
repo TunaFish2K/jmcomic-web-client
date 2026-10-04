@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Button, Label, Radio, RadioGroup } from "@heroui/react";
+import { Button, Checkbox, Label, Radio, RadioGroup } from "@heroui/react";
 import { accountApi, describeError } from "./api";
 import { saveAccount } from "./session";
 import { TRUST_NOTICE } from "./text";
@@ -34,7 +34,7 @@ export function AccountForms({ onLoggedIn }: { onLoggedIn?: () => void }) {
     const value = (form: FormData, name: string) => String(form.get(name) ?? "");
 
     const login = submit(async (form) => {
-        const response = await accountApi.login(value(form, "username"), value(form, "password"));
+        const response = await accountApi.login(value(form, "username"), value(form, "password"), form.get("remember") === "on");
         saveAccount(response);
         onLoggedIn?.();
         return null;
@@ -63,6 +63,13 @@ export function AccountForms({ onLoggedIn }: { onLoggedIn?: () => void }) {
                 <form onSubmit={login} className="space-y-3" aria-label="登录">
                     <TextInput label="用户名" name="username" autoComplete="username" isRequired />
                     <TextInput label="密码" name="password" type="password" autoComplete="current-password" isRequired />
+                    <Checkbox name="remember" value="on" className="flex items-start gap-2 text-sm">
+                        <Checkbox.Control className="mt-0.5"><Checkbox.Indicator /></Checkbox.Control>
+                        <Checkbox.Content>
+                            <span className="block">记住我（30 天）</span>
+                            <span className="block text-xs text-muted">在公用设备上不要勾选</span>
+                        </Checkbox.Content>
+                    </Checkbox>
                     <Button type="submit" fullWidth isPending={busy}>{busy ? "登录中..." : "登录"}</Button>
                 </form>
             )}

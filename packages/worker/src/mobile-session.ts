@@ -8,6 +8,8 @@ import type { AccountCredentials } from 'jmcomic-sdk-pwa/mobile';
 export interface AccountSession extends AccountCredentials { exp: number }
 
 export const SESSION_TTL_MS = 60 * 60 * 1000;
+/** "Remember me" sessions; the upstream JWT's own expiry still caps them. */
+export const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const VERSION = 'v1';
 const AAD = new TextEncoder().encode('jm-account-session-v1');
 const keys = new Map<string, Promise<CryptoKey>>();
@@ -47,9 +49,9 @@ export function jwtExpiry(jwt: string): number | null {
 	}
 }
 
-export async function sealSession(secret: string, credentials: AccountCredentials, now = Date.now()): Promise<{ token: string; expiresAt: number }> {
+export async function sealSession(secret: string, credentials: AccountCredentials, now = Date.now(), ttl = SESSION_TTL_MS): Promise<{ token: string; expiresAt: number }> {
 	const upstreamExpiry = jwtExpiry(credentials.jwt);
-	const exp = Math.min(now + SESSION_TTL_MS, upstreamExpiry ?? Infinity);
+	const exp = Math.min(now + ttl, upstreamExpiry ?? Infinity);
 	if (exp <= now) throw new JmError('INVALID_RESPONSE', 'Upstream session is already expired');
 	const session: AccountSession = { uid: credentials.uid, jwt: credentials.jwt, avs: credentials.avs, exp };
 	const iv = crypto.getRandomValues(new Uint8Array(12));

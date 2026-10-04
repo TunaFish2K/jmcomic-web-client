@@ -1,7 +1,7 @@
 import { JmError } from 'jmcomic-sdk-pwa';
 import { createMobileClient, type FavoriteFolderEdit, type MobileClient, type MobileWriteResult } from 'jmcomic-sdk-pwa/mobile';
 import { mobileError } from './mobile';
-import { requireSession, sealSession, SessionError, type AccountSession } from './mobile-session';
+import { REMEMBER_TTL_MS, requireSession, sealSession, SESSION_TTL_MS, SessionError, type AccountSession } from './mobile-session';
 
 type Input = Record<string, unknown>;
 interface AccountRoute {
@@ -54,8 +54,9 @@ const routes: Record<string, AccountRoute> = {
 		method: 'POST', auth: false,
 		async run(client, input, { secret, signal }) {
 			const { account, member } = await client.login(text(input, 'username', 100), text(input, 'password', 200), { signal });
-			const { token, expiresAt } = await sealSession(secret, account);
-			return { session: token, expiresAt, member: { uid: member.uid, username: member.username, email: member.email, level: member.level, coin: member.coin } };
+			const remember = input.remember === true;
+			const { token, expiresAt } = await sealSession(secret, account, Date.now(), remember ? REMEMBER_TTL_MS : SESSION_TTL_MS);
+			return { session: token, expiresAt, remember, member: { uid: member.uid, username: member.username, email: member.email, level: member.level, coin: member.coin } };
 		},
 	},
 	'/register': {

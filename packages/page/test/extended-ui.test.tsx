@@ -66,7 +66,7 @@ function defaults(call: Call): unknown {
       { id: '10', parentId: null, albumId: '77', userId: '42', username: 'reader', content: '<b>Mine</b>', likes: 0, createdAt: 'now', spoiler: false },
       { id: '11', parentId: '10', albumId: '77', userId: '5', username: 'other', content: 'Reply', likes: 0, createdAt: 'now', spoiler: true },
     ] };
-    case '/account/login': return { session: 'v1.sealed', expiresAt: Date.now() + 3_600_000, member };
+    case '/account/login': return { session: 'v1.sealed', expiresAt: Date.now() + 3_600_000, remember: call.body.remember === true, member };
     case '/account/favorites': return { total: 1, folders: [{ id: '5', name: 'Later' }], items: [comic('f1', 'Favorite one')] };
     case '/account/daily': return { dailyId: '7', eventName: '十月签到', progress: '40%', record: [[{ date: '1', signed: true, bonus: false }, { date: '2', signed: false, bonus: true }]], rewards: { threeDaysCoin: 1, sevenDaysCoin: 2, threeDaysExp: 3, sevenDaysExp: 4 } };
     case '/account/profile': return { username: 'reader', email: 'r@example.test', city: 'Taipei' };
@@ -171,9 +171,10 @@ describe('extended shell', () => {
     const dialog = await screen.findByRole('dialog', { name: '登录账号' });
     fireEvent.change(within(dialog).getByLabelText('用户名'), { target: { value: 'reader' } });
     fireEvent.change(within(dialog).getByLabelText('密码'), { target: { value: 'secret' } });
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /记住我/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: '登录' }));
     await waitFor(() => assert.ok(screen.queryByRole('dialog', { name: '登录账号' }) === null));
-    assert.deepEqual(last('/account/login').body, { username: 'reader', password: 'secret' });
+    assert.deepEqual(last('/account/login').body, { username: 'reader', password: 'secret', remember: true });
     await waitFor(() => assert.deepEqual(last('/account/favorite').body, { aid: '77' }));
     assert.equal(last('/account/favorite').auth, 'Bearer v1.sealed');
     assert.ok(await screen.findByText('已加入收藏'));
@@ -401,6 +402,7 @@ describe('me', () => {
     renderApp('/me');
     assert.ok(await screen.findByText('十月签到'));
     assert.ok(screen.getByText('reader'));
+    assert.ok(screen.getByText(/仅当前标签页 · 有效期至/));
     fireEvent.click(screen.getByRole('button', { name: '签到' }));
     await waitFor(() => assert.deepEqual(last('/account/daily/check').body, { dailyId: '7' }));
     assert.ok(await screen.findByText('签到成功'));

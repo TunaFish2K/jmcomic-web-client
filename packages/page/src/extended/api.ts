@@ -91,7 +91,8 @@ const post = <T = WriteResult>(path: string, body: unknown = {}) => request<T>(`
 const get = <T>(path: string, query?: Query, signal?: AbortSignal) => request<T>(`/account${path}`, { query, auth: true, signal });
 
 export const accountApi = {
-    login: (username: string, password: string) => request<LoginResponse>("/account/login", { body: { username, password } }),
+    login: (username: string, password: string, remember = false) =>
+        request<LoginResponse>("/account/login", { body: { username, password, remember } }),
     register: (input: { username: string; password: string; passwordConfirm: string; email: string; gender: string }) =>
         request<WriteResult>("/account/register", { body: input }),
     forgot: (email: string) => request<WriteResult>("/account/forgot", { body: { email } }),

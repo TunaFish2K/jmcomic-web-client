@@ -22,7 +22,7 @@ export type Daily = {
     rewards: { threeDaysCoin: number; sevenDaysCoin: number; threeDaysExp: number; sevenDaysExp: number };
 };
 export type Member = { uid: string; username: string; email: string; level: string; coin: number };
-export type LoginResponse = { session: string; expiresAt: number; member: Member };
+export type LoginResponse = { session: string; expiresAt: number; remember?: boolean; member: Member };
 export type WriteResult = { ok: boolean; message: string; type?: string };
 export type FolderEdit =
     | { type: "add"; name: string }

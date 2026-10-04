@@ -150,6 +150,9 @@ function Member({ account }: { account: AccountState }) {
                 <div className="min-w-0">
                     <div className="truncate font-medium">{member.username}</div>
                     <div className="text-xs text-muted">{[member.level, `金币 ${member.coin}`].filter(Boolean).join(" · ")}</div>
+                    <div className="text-xs text-muted">
+                        {account.remember ? "已记住登录" : "仅当前标签页"} · 有效期至 {new Date(account.expiresAt).toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </div>
                 </div>
                 <Button size="sm" variant="secondary" isPending={busy} onPress={() => void logout()}><LogOut size={14} />退出登录</Button>
             </div>
