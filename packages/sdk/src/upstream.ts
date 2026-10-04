@@ -1,5 +1,5 @@
 import { JmError, checkSignal } from './errors.js';
-import { DISCOVERY, INITIAL_VERSION, decodeEnvelope, decrypt, headers, md5, object, parseJson } from './protocol.js';
+import { DISCOVERY, INITIAL_VERSION, appHeaders, decodeData, decodeEnvelope, decrypt, headers, md5, object, parseJson } from './protocol.js';
 import { Flights, Gate, delay, readBytes } from './runtime.js';
 import type { Fetch, Logger } from './types.js';
 import type { CallOptions } from './types.js';
@@ -19,6 +19,15 @@ export interface NetworkOptions {
   timeoutMs?: number; retries?: number; logger?: Logger;
 }
 interface Session { base: string; version: string; imageBase: string; cookies: Map<string, string>; expires: number }
+/** Account credentials returned by login. They are passed per call and never stored in the domain session. */
+export interface AccountCredentials { uid: string; jwt: string; avs: string }
+export interface AppRequest {
+  method?: 'GET' | 'POST'; query?: Record<string, string>; form?: Record<string, string>; json?: unknown;
+  account?: AccountCredentials;
+  /** Writes are sent once: no retry, no domain failover, no request merging. */
+  write?: boolean;
+}
+interface RequestPolicy { retries?: number; acceptStatus?: (status: number) => boolean }
 export function baseUrl(value: string): string {
   try {
     const url = new URL(value.includes('://') ? value : `https://${value}`);
@@ -45,8 +54,9 @@ export class Upstream {
   }
   log(event: Parameters<Logger>[0]): void { try { this.options.logger?.(event); } catch { /* Observers cannot fail requests. */ } }
   private async request<T>(url: string, init: RequestInit, operation: string,
-    read: (response: Response) => Promise<T>): Promise<T> {
+    read: (response: Response) => Promise<T>, policy: RequestPolicy = {}): Promise<T> {
     const caller = init.signal ?? undefined;
+    const retries = policy.retries ?? this.retries;
     return this.gate.run(caller, async () => {
       for (let attempt = 0;; attempt++) {
         checkSignal(caller);
@@ -60,11 +70,12 @@ export class Upstream {
           // Workers supports manual/follow only. Manual also prevents forwarding
           // signed headers and cookies to a redirect destination in every runtime.
           const response = await this.transport(url, { ...init, signal: controller.signal, redirect: 'manual' });
-          if (!response.ok) {
+          if (!response.ok && !policy.acceptStatus?.(response.status)) {
             const seconds = Number(response.headers.get('retry-after'));
             if (Number.isFinite(seconds) && seconds > 0) retryMs = Math.min(5000, seconds * 1000);
             await response.body?.cancel();
             if (response.status === 404) throw new JmError('NOT_FOUND', 'Upstream resource not found');
+            if (response.status === 401) throw new JmError('UNAUTHORIZED', 'Upstream session is not authorized');
             throw new JmError('UPSTREAM', `Upstream HTTP ${response.status}`,
               [408, 425, 429].includes(response.status) || response.status >= 500);
           }
@@ -76,7 +87,7 @@ export class Upstream {
           checkSignal(caller);
           const error = timedOut ? new JmError('TIMEOUT', 'Upstream request timed out', true)
             : cause instanceof JmError ? cause : new JmError('UPSTREAM', 'Upstream transport failed', true, undefined, { cause });
-          if (!error.retryable || attempt >= this.retries) {
+          if (!error.retryable || attempt >= retries) {
             this.log({ event: 'error', operation, code: error.code, durationMs: Date.now() - start });
             throw error;
           }
@@ -165,6 +176,41 @@ export class Upstream {
       } catch (error) {
         checkSignal(signal);
         if (!(error instanceof JmError) || !error.retryable || attempt >= 1) throw error;
+        this.bad.set(session.base, Date.now());
+        if (this.session === session) this.session = undefined;
+        this.log({ event: 'failover', operation: path, code: error.code });
+      }
+    }
+  }
+  /** Calls an endpoint the way APK 2.1.9 does: app signing, optional JWT/AVS account and form or JSON bodies. */
+  async call(path: string, request: AppRequest, signal: AbortSignal): Promise<unknown> {
+    const method = request.method ?? 'GET';
+    for (let attempt = 0;; attempt++) {
+      const session = await this.initialize(signal);
+      const stamp = Math.floor(Date.now() / 1000);
+      const url = new URL(path, session.base);
+      Object.entries(request.query ?? {}).forEach(([key, value]) => url.searchParams.set(key, value));
+      if (method === 'GET' && !url.searchParams.has('lang')) url.searchParams.set('lang', 'TW');
+      const requestHeaders = appHeaders(stamp);
+      const cookies = new Map(session.cookies);
+      if (request.account) {
+        requestHeaders.set('authorization', `Bearer ${request.account.jwt}`);
+        if (request.account.avs) cookies.set('AVS', request.account.avs);
+      }
+      if (cookies.size) requestHeaders.set('cookie', [...cookies].map(([k, v]) => `${k}=${v}`).join('; '));
+      let body: BodyInit | undefined;
+      if (request.json !== undefined) { requestHeaders.set('content-type', 'application/json'); body = JSON.stringify(request.json); }
+      else if (request.form) { const form = new FormData(); Object.entries(request.form).forEach(([k, v]) => form.append(k, v)); body = form; }
+      try {
+        return await this.request(url.href, { method, headers: requestHeaders, body, signal }, path, async response => {
+          if (!request.account) this.cookies(response, session);
+          return decodeData(new TextDecoder().decode(await readBytes(response, 4 * 1024 * 1024)), stamp);
+        }, { retries: request.write ? 0 : undefined, acceptStatus: status => status === 400 });
+      } catch (error) {
+        checkSignal(signal);
+        if (request.write && error instanceof JmError && (error.code === 'TIMEOUT' || (error.code === 'UPSTREAM' && error.retryable)))
+          throw new JmError('WRITE_UNCERTAIN', 'Upstream write result is unknown; re-read before retrying', false, undefined, { cause: error });
+        if (request.write || !(error instanceof JmError) || !error.retryable || attempt >= 1) throw error;
         this.bad.set(session.base, Date.now());
         if (this.session === session) this.session = undefined;
         this.log({ event: 'failover', operation: path, code: error.code });

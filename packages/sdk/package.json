@@ -46,6 +46,10 @@
     "./upstream": {
       "types": "./dist/upstream.d.ts",
       "import": "./dist/upstream.js"
+    },
+    "./mobile": {
+      "types": "./dist/mobile.d.ts",
+      "import": "./dist/mobile.js"
     }
   },
   "scripts": {

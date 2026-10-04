@@ -5,7 +5,7 @@ export interface ServerOptions { token?: string; allowedOrigins?: string[] }
 export interface JmServer { fetch(request: Request): Promise<Response> }
 const status = { INVALID_ARGUMENT: 400, NOT_FOUND: 404, UPSTREAM: 502, INVALID_RESPONSE: 502,
   TIMEOUT: 504, ABORTED: 499, UNAUTHORIZED: 401, PROTOCOL_MISMATCH: 409,
-  UNSUPPORTED_IMAGE: 422, IMAGE_LIMIT: 413, BUSY: 503, DISPOSED: 503, INTERNAL: 500 };
+  UNSUPPORTED_IMAGE: 422, IMAGE_LIMIT: 413, BUSY: 503, DISPOSED: 503, INTERNAL: 500, WRITE_UNCERTAIN: 502 };
 function sameSecret(a: string, b: string): boolean {
   let diff = a.length ^ b.length;
   for (let i = 0; i < b.length; i++) diff |= (a.charCodeAt(i) || 0) ^ b.charCodeAt(i);

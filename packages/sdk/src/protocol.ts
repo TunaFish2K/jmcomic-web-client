@@ -2,6 +2,10 @@ import CryptoJS from 'crypto-js';
 import { JmError } from './errors.js';
 
 export const INITIAL_VERSION = '2.0.16';
+/** Version and signing secret used by the official app's account and discovery calls (APK 2.1.9). */
+export const APP_VERSION = '2.1.9';
+const APP_SECRET = '185Hcomic3PAPP7R';
+const USER_AGENT = 'Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Chrome/91.0.4472.114 Mobile Safari/537.36';
 export const DISCOVERY = [
   'https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt',
   'https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt',
@@ -29,26 +33,43 @@ export function parseJson(text: string): unknown {
   try { return JSON.parse(text); }
   catch { throw new JmError('INVALID_RESPONSE', 'Invalid upstream JSON', true); }
 }
-export function decodeEnvelope(text: string, stamp: number): Record<string, unknown> {
+/** Upstream business message, trimmed so it can be shown without leaking large payloads. */
+function upstreamMessage(envelope: Record<string, unknown>): string {
+  const message = envelope.errorMsg ?? envelope.message;
+  return typeof message === 'string' ? message.trim().slice(0, 200) : '';
+}
+/** Decodes an upstream envelope whose data may be any JSON value, such as a list. */
+export function decodeData(text: string, stamp: number): unknown {
   let raw = parseJson(text);
   if (typeof raw === 'string') raw = parseJson(raw);
   const envelope = object(raw);
-  if (envelope.code !== undefined && ![0, 200].includes(Number(envelope.code)))
-    throw new JmError('UPSTREAM', 'Upstream rejected the request', false);
+  if (envelope.code !== undefined && ![0, 200].includes(Number(envelope.code))) {
+    const message = upstreamMessage(envelope);
+    throw new JmError(Number(envelope.code) === 401 ? 'UNAUTHORIZED' : 'UPSTREAM',
+      message ? `Upstream rejected the request: ${message}` : 'Upstream rejected the request', false);
+  }
   let data = envelope.data;
   if (typeof data === 'string') {
     const trimmed = data.trim();
-    data = parseJson(trimmed.startsWith('{') ? trimmed : decrypt(data, md5(`${stamp}185Hcomic3PAPP7R`)));
+    if (!trimmed) return null;
+    data = parseJson(/^[[{]/.test(trimmed) ? trimmed : decrypt(data, md5(`${stamp}${APP_SECRET}`)));
     if (typeof data === 'string') data = parseJson(data);
   }
-  return object(data);
+  return data;
+}
+export function decodeEnvelope(text: string, stamp: number): Record<string, unknown> {
+  return object(decodeData(text, stamp));
 }
 export function headers(stamp: number, version: string, content = false): Headers {
   return new Headers({
     token: md5(`${stamp}${content ? '18comicAPPContent' : '18comicAPP'}`),
     tokenparam: `${stamp},${version}`,
-    'user-agent': 'Mozilla/5.0 (Linux; Android 9) AppleWebKit/537.36 Chrome/91.0.4472.114 Mobile Safari/537.36',
+    'user-agent': USER_AGENT,
   });
+}
+/** Headers signed the way APK 2.1.9 signs every API call. */
+export function appHeaders(stamp: number): Headers {
+  return new Headers({ token: md5(`${stamp}${APP_SECRET}`), tokenparam: `${stamp},${APP_VERSION}`, 'user-agent': USER_AGENT });
 }
 export function sliceCount(scrambleId: number, photoId: number, filename: string): number {
   if (photoId < scrambleId || /\.gif$/i.test(filename)) return 0;

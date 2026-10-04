@@ -32,7 +32,7 @@ export function createRemoteClient(options: RemoteOptions): JmClient {
   const transport = options.fetch ?? globalThis.fetch.bind(globalThis), flights = new Flights();
   const timeoutMs = integer(options.timeoutMs ?? 60000, 1, 600000, 'remote timeout');
   const maxBytes = integer(options.maxResponseBytes ?? 32 * 1024 * 1024, 1, 256 * 1024 * 1024, 'response limit');
-  const codes = new Set<ErrorCode>(['INVALID_ARGUMENT', 'NOT_FOUND', 'UPSTREAM', 'INVALID_RESPONSE', 'TIMEOUT', 'ABORTED', 'UNAUTHORIZED', 'PROTOCOL_MISMATCH', 'UNSUPPORTED_IMAGE', 'IMAGE_LIMIT', 'BUSY', 'DISPOSED', 'INTERNAL']);
+  const codes = new Set<ErrorCode>(['INVALID_ARGUMENT', 'NOT_FOUND', 'UPSTREAM', 'INVALID_RESPONSE', 'TIMEOUT', 'ABORTED', 'UNAUTHORIZED', 'PROTOCOL_MISMATCH', 'UNSUPPORTED_IMAGE', 'IMAGE_LIMIT', 'BUSY', 'DISPOSED', 'INTERNAL', 'WRITE_UNCERTAIN']);
   let sequence = 0;
   async function call<T>(path: string, params: Record<string, unknown>, signal?: AbortSignal, image = false): Promise<T> {
     return flights.run(String(sequence++), signal, async shared => {
