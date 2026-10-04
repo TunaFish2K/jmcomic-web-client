@@ -219,7 +219,13 @@ jobs:
         id: current
         env:
           GH_TOKEN: ${{ github.token }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
         run: |
+          if [[ -z "$CF_API_TOKEN" ]]; then
+            echo '::notice::未配置 CF_API_TOKEN，跳过 Worker 部署'
+            echo 'deploy=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           main_head="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
           if [[ "$main_head" == "$GITHUB_SHA" ]]; then
             echo 'deploy=true' >> "$GITHUB_OUTPUT"
@@ -233,3 +239,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          ALBUM_CACHE_KV_ID: ${{ secrets.ALBUM_CACHE_KV_ID }}

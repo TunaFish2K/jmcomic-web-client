@@ -4,15 +4,25 @@
 
 ## 工作区结构
 
-项目使用 pnpm workspace 管理三个包。
+项目使用 pnpm workspace 管理四个包。
 
-| 包 | 职责 |
-| --- | --- |
-| `@tiny-client/page` | 提供搜索、作品详情、阅读器、下载界面、PWA 和浏览器端缓存。 |
-| `@tiny-client/worker` | 运行 Cloudflare Worker。它负责访问上游接口，并向前端返回统一的数据。 |
-| `@tiny-client/shared` | 提供上游客户端、共享类型、图片还原、IndexedDB 图片缓存和文件导出函数。 |
+| 包 | 目录 | 职责 |
+| --- | --- | --- |
+| `@tiny-client/page` | `packages/page` | 提供搜索、作品详情、阅读器、下载界面、PWA 和浏览器端缓存。 |
+| `@tiny-client/worker` | `packages/worker` | 运行 Cloudflare Worker。它负责访问上游接口，并向前端返回统一的数据。 |
+| `@tiny-client/shared` | `packages/shared` | 提供上游客户端、共享类型、图片还原、IndexedDB 图片缓存和文件导出函数。 |
+| `jmcomic-sdk-pwa` | `packages/sdk` | 可独立发布的 SDK。前端图片处理和 Worker 上游访问都使用它。 |
+
+技术栈：
+
+- **前端**：React 19、Vite 8、Tailwind CSS 4、HeroUI、React Router 7、TanStack Query 5
+- **后端**：Cloudflare Workers 原生 Fetch Handler
+- **SDK**：TypeScript、CryptoJS、jSquash WASM
+- **应用共享模块**：缓存、数据类型、fflate、PDFKit
 
 根目录的 `scripts/test-integration.js` 对本地 Worker 执行集成测试。
+
+SDK 的迁移边界和验证方法见 [SDK 迁移说明](sdk-migration.md)，npm 自动发布配置见 [npm 发布配置](sdk-npm.md)。
 
 ## 数据流
 
@@ -38,7 +48,8 @@ Worker 不代理图片文件。排查图片问题时，应分别检查 Worker �
 | `CF_ACCOUNT_ID` | GitHub Actions Secret | 自动部署时必需 | 工作流将其映射为 Wrangler 使用的 `CLOUDFLARE_ACCOUNT_ID`。 |
 | `CLOUDFLARE_API_TOKEN` | 本地 shell | 可选 | 不使用 `wrangler login` 时，可以通过该变量向 Wrangler 提供令牌。 |
 | `CLOUDFLARE_ACCOUNT_ID` | 本地 shell | 可选 | 与 `CLOUDFLARE_API_TOKEN` 配合使用。 |
-| `ALBUM_CACHE_KV` | Worker binding | 可选 | 为批量作品接口启用 Cloudflare KV 缓存。 |
+| `ALBUM_CACHE_KV_ID` | GitHub Actions Secret 或本地 shell | 可选 | KV 命名空间 ID。部署时用于生成 `ALBUM_CACHE_KV` binding。 |
+| `ALBUM_CACHE_KV` | Worker binding | 可选 | 为作品和章节接口启用 Cloudflare KV 缓存。由 `ALBUM_CACHE_KV_ID` 在部署时注入。 |
 
 Vite 在启动和构建时读取 `VITE_BACKEND_URL`。修改该值后，必须重新启动开发服务器或重新构建前端。
 
@@ -48,19 +59,9 @@ Vite 在启动和构建时读取 `VITE_BACKEND_URL`。修改该值后，必须�
 
 多章节作品在 1 分钟内视为 fresh，并可在 15 分钟内作为 stale 数据立即返回。单章节作品和章节数据的 fresh 时间为 1 小时，stale 上限为 24 小时。stale 响应会触发后台刷新；请求加上 `refresh=1` 时，Worker 会等待刷新完成，并在上游失败时退回仍在 stale 时限内的数据。
 
-如需启用 KV，请先在 Cloudflare 中创建命名空间。然后在 `packages/worker/wrangler.jsonc` 中按以下形式配置 `compatibility_flags` 和 KV binding，并替换命名空间 ID：
+仓库中的 `packages/worker/wrangler.jsonc` 不包含 KV binding。`worker:deploy` 会先运行 `packages/worker/scripts/deploy-config.mjs`：如果设置了 `ALBUM_CACHE_KV_ID`，就生成带 `ALBUM_CACHE_KV` binding 的 `wrangler.deploy.json`，再用它部署。该文件不提交到仓库。GitHub Actions 从同名 Secret 读取这个 ID，配置步骤见 [README](../README.md#1-部署-worker推荐github-actions)。
 
-```jsonc
-"compatibility_flags": [
-  "nodejs_compat"
-],
-"kv_namespaces": [
-  {
-    "binding": "ALBUM_CACHE_KV",
-    "id": "<KV_NAMESPACE_ID>"
-  }
-]
-```
+本地 `worker:dev` 不绑定 KV。Worker 单元测试通过 `vitest.config.mts` 中的 miniflare 配置获得本地 KV。
 
 ## 开发命令
 
@@ -73,7 +74,7 @@ Vite 在启动和构建时读取 `VITE_BACKEND_URL`。修改该值后，必须�
 | `pnpm run page:dev` | 只启动 Vite 开发服务器。必须单独配置 `VITE_BACKEND_URL`。 |
 | `pnpm run page:build` | 构建前端，输出到 `packages/page/dist`。 |
 | `pnpm run worker:dev` | 在 `0.0.0.0:8787` 启动本地 Worker。 |
-| `pnpm run worker:deploy` | 使用 Wrangler 部署 Worker。 |
+| `pnpm run worker:deploy` | 使用 Wrangler 部署 Worker。设置 `ALBUM_CACHE_KV_ID` 时绑定 KV。 |
 | `pnpm --filter @tiny-client/page run lint` | 检查前端 TypeScript 和 React 代码。 |
 | `pnpm --filter @tiny-client/page test` | 运行前端单元测试和构建产物测试。必须先构建前端。 |
 | `pnpm --filter @tiny-client/page run test:browser` | 使用 Playwright 验证旧 PWA 升级和搜索栏状态。必须先构建前端并安装浏览器。 |
@@ -161,7 +162,7 @@ Service Worker 不缓存或代理 HTML、CSS、JavaScript、API 和图片。它�
 
 `/release.json` 包含当前 Pages 构建的提交和分支。该文件、HTML、manifest 和 `/sw.js` 都必须使用 `no-store`。hash 资源位于 `/assets-v3`，恢复期间每次使用前必须重验证。
 
-OCR 运行时、WASM 和 PP-OCRv5 mobile 模型不会进入 PWA 预缓存，也不会由 Service Worker 拦截。用户首次翻译时才会下载这些资源，后续复用取决于资源服务器提供的普通 HTTP 缓存策略。LLM 请求由浏览器直接发往用户配置的服务；Worker 不代理 API Key 或译文。
+OCR 运行时、WASM 和 PP-OCRv5 mobile 模型不会进入 PWA 预缓存，也不会由 Service Worker 拦截。用户首次翻译时才会下载这些资源，后续复用取决于资源服务器提供的普通 HTTP 缓存策略。LLM 请求默认由浏览器直接发往用户配置的服务；用户开启 Worker 代理后，才会经 `POST /llm-proxy` 转发，Worker 不保存 API Key 或译文。
 
 自动翻译只处理当前章节。范围顺序是当前页、后一页、前一页，并继续按距离展开。本地 OCR 使用单例 Worker 串行执行，OCR 完成后的 LLM 请求按用户设置的 `1–6` 并发数运行。后台任务失败后会暂停当前范围，直到用户翻页、修改设置或手动翻译。Chat Completions 请求不发送 `temperature`；`reasoning_effort` 根据“跟随服务、关闭、开启”三态决定是否发送及使用的等级。
 
@@ -170,6 +171,12 @@ OCR 运行时、WASM 和 PP-OCRv5 mobile 模型不会进入 PWA 预缓存，也�
 翻译状态仅跟踪当前页。取消自动当前页不会终止其他后台任务；该页在翻页、修改设置或手动翻译前不会重新进入自动队列。每个运行任务都有独立的 `AbortController`；PaddleOCR 的单次 `predict` 无法中途终止，因此取消发生在 OCR 阶段时会保留 OCR 缓存并跳过后续 LLM 请求。
 
 V3 翻译设置包含可编辑的翻译风格和内容处理提示词。V1/V2 设置加载后使用默认模板，显式空字符串保持为空。两段提示词的稳定哈希参与译文缓存键与自动完成键，固定 JSON 输出协议追加在组合 system 消息末尾。
+
+## 发布检查
+
+每次前端部署后，读取 `/release.json`，确认 `commit` 等于目标提交。还要检查 `/sw.js`、`/manifest.webmanifest` 和 HTML 响应是否包含 `Cache-Control: no-cache, no-store, must-revalidate`。这些响应头由 `packages/page/public/_headers` 配置。
+
+PWA 故障不能通过恢复旧 Pages 部署解决，因为旧部署会同时恢复旧 Service Worker 和旧缓存头。出现回归时，应在当前安全基线上追加修复提交，并继续保留 `assets-v3`、清理 Worker 和关键资源的 `no-store` 响应头。
 
 ## 安卓 PWA 开屏验证
 

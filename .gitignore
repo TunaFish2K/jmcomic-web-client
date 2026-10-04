@@ -195,3 +195,6 @@ packages/page/test-results/
 !.env.example
 .wrangler/
 .artifacts/
+
+# Generated Worker deploy config
+packages/worker/wrangler.deploy.json
