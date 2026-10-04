@@ -11,7 +11,6 @@ import {
 import { ACCOUNT_STORAGE_KEY, clearAccount, dismissAccountNotice, loadAccount, saveAccount, useAccount } from '../src/extended/session';
 import { accountApi, describeError, MobileApiError, mobileApi } from '../src/extended/api';
 import { htmlToText, todayIndex } from '../src/extended/text';
-import { listRecentProgress, saveReadingProgress } from '../src/reader/reader-store';
 
 const member = { uid: '42', username: 'reader', email: 'r@example.test', level: 'Lv1', coin: 3 };
 const account = (expiresAt = Date.now() + 60_000) => ({ session: 'v1.token', expiresAt, member });
@@ -184,15 +183,5 @@ describe('helpers', () => {
     assert.equal(todayIndex(new Date('2026-10-05T12:00:00')), 1);
     assert.equal(todayIndex(new Date('2026-10-04T12:00:00')), 7);
     assert.equal(todayIndex(), todayIndex(new Date()));
-  });
-
-  test('list recent local reading, one entry per album', () => {
-    saveReadingProgress({ albumId: '1', chapterId: '10', chapterIndex: 0, page: 2, totalPages: 9, updatedAt: 100 });
-    saveReadingProgress({ albumId: '1', chapterId: '11', chapterIndex: 1, page: 1, totalPages: 9, updatedAt: 300 });
-    saveReadingProgress({ albumId: '2', chapterId: '2', chapterIndex: 0, page: 0, totalPages: 3, updatedAt: 200 });
-    localStorage.setItem('reading-progress:bad', '{');
-    localStorage.setItem('reading-progress:old', '{"albumId":3}');
-    assert.deepEqual(listRecentProgress().map((item) => [item.albumId, item.chapterId]), [['1', '11'], ['2', '2']]);
-    assert.equal(listRecentProgress(1).length, 1);
   });
 });

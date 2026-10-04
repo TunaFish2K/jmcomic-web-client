@@ -39,7 +39,6 @@ import { Root } from '../src/root';
 import { saveAccount, loadAccount, clearAccount } from '../src/extended/session';
 import { saveExtendedPreferences, DEFAULT_EXTENDED_PREFERENCES } from '../src/extended/preferences';
 import { ExtendedModeToggle } from '../src/extended/ExtendedModeToggle';
-import { saveReadingProgress, saveAlbumMeta } from '../src/reader/reader-store';
 
 type Call = { path: string; method: string; query: URLSearchParams; body: Record<string, unknown>; auth: string | null };
 const member = { uid: '42', username: 'reader', email: 'r@example.test', level: 'Lv1', coin: 3 };
@@ -399,8 +398,6 @@ describe('favorites', () => {
 describe('me', () => {
   test('daily sign-in, profile edits, cloud history and logout', async () => {
     signIn();
-    saveAlbumMeta('55', { id: '55', name: 'Local album' } as never);
-    saveReadingProgress({ albumId: '55', chapterId: '55', chapterIndex: 0, page: 4, totalPages: 10, updatedAt: Date.now() });
     renderApp('/me');
     assert.ok(await screen.findByText('十月签到'));
     assert.ok(screen.getByText('reader'));
@@ -429,10 +426,6 @@ describe('me', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除记录' }));
     assert.ok(await screen.findByText('删除失败'));
 
-    fireEvent.click(screen.getByRole('button', { name: /Local album/ }));
-    assert.ok(screen.getByRole('dialog', { name: 'album-55' }));
-    fireEvent.click(screen.getByText('close album'));
-
     overrides['/account/logout'] = () => new Response('{}', { status: 502 });
     fireEvent.click(screen.getByRole('button', { name: /退出登录/ }));
     assert.ok(await screen.findByRole('form', { name: '登录' }));
@@ -458,11 +451,6 @@ describe('me', () => {
     await waitFor(() => assert.ok(screen.getAllByText(/请求失败/).length >= 2));
     fireEvent.click(screen.getByRole('button', { name: '下页' }));
     assert.ok(await screen.findByText('Comic h-2'));
-  });
-
-  test('shows the empty local history', async () => {
-    renderApp('/me');
-    assert.ok(await screen.findByText('还没有阅读记录'));
   });
 });
 

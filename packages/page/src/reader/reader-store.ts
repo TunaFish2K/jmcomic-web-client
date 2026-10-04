@@ -97,24 +97,6 @@ export function getReadingProgress(albumId: string, chapterId: string): ChapterP
   }
 }
 
-/** Most recently read albums, newest first, one entry per album. */
-export function listRecentProgress(limit = 20): ChapterProgress[] {
-  const latest = new Map<string, ChapterProgress>();
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!key?.startsWith(PROGRESS_PREFIX)) continue;
-    try {
-      const progress = JSON.parse(localStorage.getItem(key) ?? '') as ChapterProgress;
-      if (typeof progress.albumId !== 'string' || typeof progress.updatedAt !== 'number') continue;
-      const known = latest.get(progress.albumId);
-      if (!known || progress.updatedAt > known.updatedAt) latest.set(progress.albumId, progress);
-    } catch {
-      // Skip entries written by older versions.
-    }
-  }
-  return [...latest.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, limit);
-}
-
 export function getLatestChapterProgress(albumId: string, chapterIds: string[]): ChapterProgress | null {
   let latest: ChapterProgress | null = null;
   for (const id of chapterIds) {

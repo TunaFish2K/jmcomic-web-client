@@ -2,17 +2,15 @@ import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@heroui/react";
 import { CalendarCheck, LogOut } from "lucide-react";
-import { EmptyBlock, Notice } from "../ui/feedback";
+import { Notice } from "../ui/feedback";
 import { TextInput } from "../ui/fields";
 import { Pager } from "../ui/Pager";
-import { getAlbumMeta, listRecentProgress } from "../reader/reader-store";
 import { accountApi, describeError } from "./api";
 import { AccountGate } from "./AccountGate";
 import { ComicGrid } from "./ComicGrid";
 import { ExtendedModeToggle } from "./ExtendedModeToggle";
 import { clearAccount, type AccountState } from "./session";
 import { PageFrame, QueryState, Section } from "./ui";
-import { useExtendedShell } from "./shell";
 import type { WriteResult } from "./types";
 
 type Message = { text: string; tone: "info" | "success" | "error" } | null;
@@ -162,33 +160,10 @@ function Member({ account }: { account: AccountState }) {
     );
 }
 
-function LocalHistory() {
-    const { openAlbum } = useExtendedShell();
-    const recent = listRecentProgress(20);
-    return (
-        <Section title="本地阅读记录">
-            {recent.length === 0 ? <EmptyBlock compact>还没有阅读记录</EmptyBlock> : (
-                <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
-                    {recent.map((progress) => (
-                        <li key={progress.albumId}>
-                            <button type="button" className="flex min-h-11 w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-surface-secondary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500"
-                                onClick={() => openAlbum(progress.albumId)}>
-                                <span className="truncate">{getAlbumMeta(progress.albumId)?.name ?? `#${progress.albumId}`}</span>
-                                <span className="shrink-0 text-xs text-muted">第 {progress.page + 1}/{progress.totalPages} 页 · {new Date(progress.updatedAt).toLocaleDateString()}</span>
-                            </button>
-                        </li>
-                    ))}
-                </ul>
-            )}
-        </Section>
-    );
-}
-
 export function MePage() {
     return (
         <PageFrame title="我的">
             <AccountGate>{(account) => <Member account={account} />}</AccountGate>
-            <LocalHistory />
             <Section title="设置"><ExtendedModeToggle /></Section>
         </PageFrame>
     );
