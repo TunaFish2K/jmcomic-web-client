@@ -9,6 +9,7 @@ import {
     throwIfDownloadAborted,
 } from "./download-utils";
 import type { BatchMode, DownloadFormat, DownloadTarget } from "./types";
+import { TextInput } from "../ui/fields";
 
 export function SeriesDownloadManager({ albumName, items }: {
     albumName: string;
@@ -109,37 +110,17 @@ export function SeriesDownloadManager({ albumName, items }: {
                 可选范围下载。支持逐话分别导出，也支持把所选章节整合为一个文件。
             </div>
             <div className="grid grid-cols-2 gap-2">
-                <label className="text-xs text-gray-500 dark:text-gray-400">
-                    起始话数
-                    <input
-                        type="number"
-                        min={1}
-                        max={orderedItems.length}
-                        value={rangeStart}
-                        onChange={(e) => setRangeStart(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
-                    />
-                </label>
-                <label className="text-xs text-gray-500 dark:text-gray-400">
-                    结束话数
-                    <input
-                        type="number"
-                        min={1}
-                        max={orderedItems.length}
-                        value={rangeEnd}
-                        onChange={(e) => setRangeEnd(e.target.value)}
-                        className="mt-1 w-full rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
-                    />
-                </label>
+                <TextInput label="起始话数" inputMode="numeric" value={rangeStart} onChange={setRangeStart} />
+                <TextInput label="结束话数" inputMode="numeric" value={rangeEnd} onChange={setRangeEnd} />
             </div>
             <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="secondary" className="text-xs" onPress={() => quickSelectRange(1, orderedItems.length)}>
+                <Button size="sm" variant="secondary"  onPress={() => quickSelectRange(1, orderedItems.length)}>
                     全部
                 </Button>
                 <Button
                     size="sm"
                     variant="secondary"
-                    className="text-xs"
+                    
                     onPress={() => quickSelectRange(1, Math.min(10, orderedItems.length))}
                 >
                     前 10 话
@@ -147,19 +128,19 @@ export function SeriesDownloadManager({ albumName, items }: {
                 <Button
                     size="sm"
                     variant="secondary"
-                    className="text-xs"
+                    
                     onPress={() => quickSelectRange(Math.max(1, orderedItems.length - 9), orderedItems.length)}
                 >
                     后 10 话
                 </Button>
             </div>
             <div>
-                <div className="text-xs text-gray-500 dark:text-gray-400 mb-2">下载方式</div>
+                <div className="mb-2 text-xs text-muted">下载方式</div>
                 <div className="flex gap-2">
                     <Button
                         size="sm"
                         variant={batchMode === 'individual' ? 'primary' : 'secondary'}
-                        className="text-xs flex-1"
+                        className="flex-1"
                         onPress={() => setBatchMode('individual')}
                     >
                         多个文件
@@ -167,24 +148,24 @@ export function SeriesDownloadManager({ albumName, items }: {
                     <Button
                         size="sm"
                         variant={batchMode === 'combined' ? 'primary' : 'secondary'}
-                        className="text-xs flex-1"
+                        className="flex-1"
                         onPress={() => setBatchMode('combined')}
                     >
                         合并为一个
                     </Button>
                 </div>
             </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">
+            <div className="text-xs text-muted">
                 共 {orderedItems.length} 话，当前选择 {selectedItems.length} 话
             </div>
             <div className="flex gap-2">
-                <Button size="sm" variant="secondary" className="text-xs flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('pdf'); }}>
+                <Button size="sm" variant="secondary" className="flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('pdf'); }}>
                     <FileText size={14} className="mr-1" />PDF
                 </Button>
-                <Button size="sm" variant="secondary" className="text-xs flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('zip'); }}>
+                <Button size="sm" variant="secondary" className="flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('zip'); }}>
                     <FileArchive size={14} className="mr-1" />ZIP
                 </Button>
-                <Button size="sm" variant="secondary" className="text-xs flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('cbz'); }}>
+                <Button size="sm" variant="secondary" className="flex-1" isDisabled={selectedItems.length === 0} onPress={() => { void handleBatchDownload('cbz'); }}>
                     <Download size={14} className="mr-1" />CBZ
                 </Button>
             </div>

@@ -42,13 +42,6 @@
     --color-primary-900: var(--color-brand-900);
     --color-primary-950: var(--color-brand-950);
     --color-primary-foreground: var(--color-brand-foreground);
-
-    --animate-shimmer: shimmer 1.8s ease-in-out infinite;
-
-    @keyframes shimmer {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-    }
 }
 
 @utility wrap-break-word {
@@ -67,14 +60,49 @@ body,
     padding: 0;
 }
 
+/*
+ * HeroUI neutrals follow the app's warm gray scale so its Select, Popover, Modal and
+ * Tabs match the hand-written surfaces. Layers are shared by every overlay.
+ */
 html {
     --theme-accent: #00dd99;
     --theme-accent-foreground: #000000;
     --accent: var(--theme-accent);
     --accent-foreground: var(--theme-accent-foreground);
+    --background: #f5f5f4;
+    --surface: oklch(100% 0 0);
+    --surface-secondary: var(--color-gray-100);
+    --surface-tertiary: var(--color-gray-200);
+    --overlay: oklch(100% 0 0);
+    --field-background: oklch(100% 0 0);
+    /* Secondary buttons and selects need contrast against the #f5f5f4 page. */
+    --default: oklch(93% 0.003 56);
+    --muted: var(--color-gray-500);
+    --border: var(--color-gray-200);
+    --separator: var(--color-gray-200);
+    --segment: oklch(100% 0 0);
+    --z-nav: 30;
+    --z-panel: 40;
+    --z-modal: 50;
+    --z-popover: 60;
+    --z-toast: 70;
     background-color: #f5f5f4;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+}
+
+html.dark {
+    --background: #0c0a09;
+    --surface: var(--color-gray-900);
+    --surface-secondary: var(--color-gray-800);
+    --surface-tertiary: var(--color-gray-700);
+    --overlay: var(--color-gray-900);
+    --field-background: var(--color-gray-900);
+    --default: var(--color-gray-800);
+    --muted: var(--color-gray-400);
+    --border: var(--color-gray-700);
+    --separator: var(--color-gray-800);
+    --segment: var(--color-gray-700);
 }
 
 html.dark,
@@ -100,6 +128,12 @@ html.dark input:-webkit-autofill:hover,
 html.dark input:-webkit-autofill:focus,
 html.dark input:-webkit-autofill:active {
     -webkit-box-shadow: 0 0 0 1000px oklch(14.7% 0.004 49.25) inset !important;
+}
+
+/* Floating layers sit above dialogs so selects and pickers inside a dialog stay visible. */
+.popover,
+.select__popover {
+    z-index: var(--z-popover);
 }
 
 .search-input-group {
@@ -142,5 +176,3 @@ html.dark input:-webkit-autofill:active {
 
 /* 扫描当前包的源码 */
 @source "./**/*.{js,ts,jsx,tsx}";
-/* 扫描 HeroUI 的源码 */
-@source "../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}";

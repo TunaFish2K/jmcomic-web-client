@@ -1,9 +1,13 @@
 import { useState } from "react";
+import { Alert, Button } from "@heroui/react";
+import { SettingSwitch } from "../ui/controls";
 import { useExtendedPreferences } from "./preferences";
 
 /**
  * Turns extended mode on or off. The first time it is turned on, the user confirms that
- * account data passes through this deployment's Worker.
+ * account data passes through this deployment's Worker. The confirmation is inline rather
+ * than a modal because the toggle lives inside the appearance popover, which closes when
+ * focus moves to another overlay.
  */
 export function ExtendedModeToggle() {
     const { preferences, setEnabled } = useExtendedPreferences();
@@ -14,23 +18,21 @@ export function ExtendedModeToggle() {
         else setConfirming(true);
     };
     return (
-        <div className="space-y-2 text-sm">
-            <label className="flex items-center justify-between gap-3">
-                <span>
-                    <span className="block font-medium">扩展模式</span>
-                    <span className="block text-xs text-gray-500">首页推荐、分类排行和账号功能</span>
-                </span>
-                <input type="checkbox" role="switch" aria-label="扩展模式" className="h-5 w-5 accent-brand-500"
-                    checked={preferences.enabled} onChange={toggle} />
-            </label>
+        <div className="space-y-2">
+            <SettingSwitch label="扩展模式" description="首页推荐、分类排行和账号功能" checked={preferences.enabled} onChange={toggle} />
             {confirming && (
-                <div role="alertdialog" aria-label="开启扩展模式" className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
-                    <p>扩展模式会显示更多上游内容。登录时，账号和密码会经过本站部署者的 Worker 转发到上游，部署者有能力看到它们。只在信任部署者时登录。</p>
-                    <div className="flex gap-2">
-                        <button type="button" className="rounded-md bg-amber-600 px-3 py-1 text-white" onClick={() => { setEnabled(true); setConfirming(false); }}>我已了解，开启</button>
-                        <button type="button" className="rounded-md border border-amber-400 px-3 py-1" onClick={() => setConfirming(false)}>取消</button>
+                <Alert status="warning" role="alertdialog" aria-label="开启扩展模式" className="flex-wrap gap-2 text-xs">
+                    <Alert.Indicator />
+                    <Alert.Content>
+                        <Alert.Description>
+                            扩展模式会显示更多上游内容。登录时，账号和密码会经过本站部署者的 Worker 转发到上游，部署者有能力看到它们。只在信任部署者时登录。
+                        </Alert.Description>
+                    </Alert.Content>
+                    <div className="flex w-full gap-2">
+                        <Button size="sm" onPress={() => { setEnabled(true); setConfirming(false); }}>我已了解，开启</Button>
+                        <Button size="sm" variant="secondary" onPress={() => setConfirming(false)}>取消</Button>
                     </div>
-                </div>
+                </Alert>
             )}
         </div>
     );

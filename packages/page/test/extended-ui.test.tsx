@@ -14,11 +14,19 @@ vi.mock('../src/home/AlbumCard', () => ({
   AlbumCard: ({ item, onClick }: { item: { id: string; name: string }; onClick: () => void }) => <button type="button" data-album-id={item.id} onClick={onClick}>{item.name}</button>,
 }));
 vi.mock('../src/theme/ThemeControls', () => ({ ThemePopover: () => <div data-testid="theme-popover" /> }));
-vi.mock('../src/home', () => ({
-  default: ({ embedded, renderAlbumExtras }: { embedded?: boolean; renderAlbumExtras?: (id: string) => ReactNode }) => (
-    <div data-testid="search-page" data-embedded={String(embedded)}>{renderAlbumExtras?.('77')}</div>
-  ),
-}));
+vi.mock('../src/home', async () => {
+  const { useSearchParams } = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  function SearchPageStub({ embedded, renderAlbumExtras, idleContent }: { embedded?: boolean; renderAlbumExtras?: (id: string) => ReactNode; idleContent?: ReactNode }) {
+    const query = useSearchParams()[0].get('q');
+    return (
+      <div data-testid="search-page" data-embedded={String(embedded)}>
+        {renderAlbumExtras?.('77')}
+        {idleContent && !query && <div data-testid="idle-content">{idleContent}</div>}
+      </div>
+    );
+  }
+  return { default: SearchPageStub };
+});
 vi.mock('../src/home/AlbumModal', () => ({
   AlbumModal: ({ albumId, onClose, extras }: { albumId: string; onClose: () => void; extras?: ReactNode }) => (
     <div role="dialog" aria-label={`album-${albumId}`}><button type="button" onClick={onClose}>close album</button>{extras}</div>
@@ -111,12 +119,22 @@ function renderApp(path = '/', element: ReactNode = <ExtendedApp />) {
 }
 const signIn = () => saveAccount({ session: 'v1.sealed', expiresAt: Date.now() + 3_600_000, member });
 const last = (path: string) => [...calls].reverse().find((call) => call.path === path)!;
+/** HeroUI selects: the trigger carries the field label as aria-label; options open in a popover. */
+const selectTrigger = (label: string) => screen.getAllByRole('button').find((button) => button.getAttribute('aria-label') === label)!;
+async function choose(label: string, option: string) {
+  await waitFor(() => assert.ok(selectTrigger(label)));
+  fireEvent.click(selectTrigger(label));
+  fireEvent.click(await screen.findByRole('option', { name: option }));
+}
 const location = () => screen.getByTestId('location').textContent;
 
 describe('extended shell', () => {
-  test('home lists comic sections and latest items, and searches through the existing page', async () => {
+  test('home keeps the original search page and lists comic sections and latest items under it', async () => {
     renderApp('/');
-    assert.ok(await screen.findByText('Promoted'));
+    const search = await screen.findByTestId('search-page');
+    assert.equal(search.dataset.embedded, 'true');
+    assert.ok(within(search).getByRole('button', { name: /收藏/ }));
+    assert.ok(await within(screen.getByTestId('idle-content')).findByText('Promoted'));
     assert.ok(screen.getByText('热门推荐'));
     assert.ok(screen.queryByText('Library') === null);
     assert.ok(await screen.findByText('Latest one'));
@@ -126,14 +144,8 @@ describe('extended shell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '更多' }));
     assert.equal(location(), '/discover?tab=section&id=26&title=%E7%83%AD%E9%97%A8%E6%8E%A8%E8%8D%90');
-
     fireEvent.click(screen.getByRole('link', { name: '首页' }));
-    fireEvent.change(await screen.findByLabelText('搜索内容'), { target: { value: ' cats ' } });
-    fireEvent.click(screen.getByRole('button', { name: '搜索' }));
-    assert.equal(location(), '/?q=cats');
-    const search = await screen.findByTestId('search-page');
-    assert.equal(search.dataset.embedded, 'true');
-    assert.ok(within(search).getByRole('button', { name: /收藏/ }));
+    assert.ok(await screen.findByTestId('idle-content'));
   });
 
   test('opens album details with account actions and closes them', async () => {
@@ -195,17 +207,17 @@ describe('album account actions', () => {
     fireEvent.click(await screen.findByRole('button', { name: '点赞' }));
     assert.ok(await screen.findByText('已点赞'));
 
-    fireEvent.change(await screen.findByLabelText('目标收藏夹'), { target: { value: '5' } });
+    await choose('目标收藏夹', 'Later');
     overrides['/account/favorite-folder'] = () => ({ ok: false, message: '已在此收藏夹' });
     fireEvent.click(screen.getByRole('button', { name: '移动' }));
     assert.ok(await screen.findByText('已在此收藏夹'));
     assert.deepEqual(last('/account/favorite-folder').body, { type: 'move', folderId: '5', aid: '77' });
 
     overrides['/account/favorite'] = () => new Response(JSON.stringify({ error: { code: 'WRITE_UNCERTAIN', message: 'unknown' } }), { status: 502 });
-    fireEvent.click(screen.getByRole('button', { name: /收藏/ }));
+    fireEvent.click(screen.getByRole('button', { name: /收藏 \/ 取消收藏/ }));
     assert.ok(await screen.findByText('操作结果未知，请刷新确认后再试'));
     overrides['/account/favorite'] = () => ({ ok: true, message: '', type: 'del' });
-    fireEvent.click(screen.getByRole('button', { name: /收藏/ }));
+    fireEvent.click(screen.getByRole('button', { name: /收藏 \/ 取消收藏/ }));
     assert.ok(await screen.findByText('已取消收藏'));
   });
 
@@ -264,28 +276,28 @@ describe('discover', () => {
   test('categories and rankings keep their filters in the URL', async () => {
     renderApp('/discover');
     assert.ok(await screen.findByText('Comic c-0--1'));
-    fireEvent.click(await screen.findByRole('button', { name: '同人' }));
+    fireEvent.click(await screen.findByRole('tab', { name: '同人' }));
     assert.ok(await screen.findByText('Comic c-doujin--1'));
-    fireEvent.change(screen.getByLabelText('排序'), { target: { value: 'mv_m' } });
+    await choose('排序', '月排行');
     assert.ok(await screen.findByText('Comic c-doujin-mv_m-1'));
     fireEvent.click(screen.getByRole('button', { name: '下页' }));
     assert.ok(await screen.findByText('Comic c-doujin-mv_m-2'));
     assert.match(location()!, /c=doujin/);
-    fireEvent.click(screen.getByRole('button', { name: '最新A漫' }));
+    fireEvent.click(screen.getByRole('tab', { name: '最新A漫' }));
     assert.ok(await screen.findByText('Comic c-0-mv_m-1'));
   });
 
   test('serialization by weekday, weekly picks, hot tags and random picks', async () => {
     renderApp('/discover');
     fireEvent.click(screen.getByRole('tab', { name: '连载' }));
-    fireEvent.click(await screen.findByRole('button', { name: '周三' }));
+    fireEvent.click(await screen.findByRole('tab', { name: '周三' }));
     assert.ok(await screen.findByText('Comic s-3'));
 
     fireEvent.click(screen.getByRole('tab', { name: '每周必看' }));
     assert.ok(await screen.findByText('Comic w-260-manga'));
-    fireEvent.click(screen.getByRole('button', { name: '韩漫' }));
+    fireEvent.click(screen.getByRole('tab', { name: '韩漫' }));
     assert.ok(await screen.findByText('Comic w-260-hanman'));
-    fireEvent.change(screen.getByLabelText('期数'), { target: { value: '259' } });
+    await choose('期数', '第258期');
     assert.ok(await screen.findByText('Comic w-259-hanman'));
 
     fireEvent.click(screen.getByRole('tab', { name: '热门标签' }));
@@ -307,6 +319,8 @@ describe('discover', () => {
     assert.equal(last('/promote-list').query.get('page'), '0');
     fireEvent.click(screen.getByRole('button', { name: '下页' }));
     await waitFor(() => assert.equal(last('/promote-list').query.get('page'), '1'));
+    fireEvent.click(screen.getByRole('button', { name: '返回发现' }));
+    assert.equal(location(), '/discover?tab=categories');
   });
 
   test('empty lists say so', async () => {
@@ -331,7 +345,7 @@ describe('favorites', () => {
     await waitFor(() => assert.deepEqual(last('/account/favorite-folder').body, { type: 'add', name: 'Next' }));
     assert.ok(await screen.findByText('已保存'));
 
-    fireEvent.change(screen.getByLabelText('收藏夹'), { target: { value: '5' } });
+    await choose('收藏夹', 'Later');
     await waitFor(() => assert.equal(last('/account/favorites').query.get('folder'), '5'));
     fireEvent.click(await screen.findByRole('button', { name: '重命名' }));
     assert.equal((screen.getByLabelText('收藏夹名称') as HTMLInputElement).value, 'Later');
@@ -345,9 +359,9 @@ describe('favorites', () => {
     fireEvent.click(screen.getByRole('button', { name: '删除收藏夹' }));
     fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
     await waitFor(() => assert.deepEqual(last('/account/favorite-folder').body, { type: 'del', folderId: '5' }));
-    await waitFor(() => assert.equal((screen.getByLabelText('收藏夹') as HTMLSelectElement).value, '0'));
+    await waitFor(() => assert.equal(selectTrigger('收藏夹').textContent, '全部收藏'));
 
-    fireEvent.change(screen.getByLabelText('排序'), { target: { value: 'mp' } });
+    await choose('排序', '更新时间');
     await waitFor(() => assert.equal(last('/account/favorites').query.get('order'), 'mp'));
     fireEvent.click(await screen.findByRole('button', { name: '取消收藏' }));
     await waitFor(() => assert.deepEqual(last('/account/favorite').body, { aid: 'f1' }));

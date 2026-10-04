@@ -4,7 +4,8 @@ import { act, fireEvent, render, renderHook, screen } from '@testing-library/rea
 import { beforeEach, describe, test, vi } from 'vitest';
 import { DEFAULT_THEME_PREFERENCES, THEME_STORAGE_KEY, type ThemeMode } from '../src/theme/theme';
 
-vi.mock('@heroui/react', () => {
+vi.mock('@heroui/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@heroui/react')>();
   const ColorSwatchPicker = ({ children, onChange }: { children: ReactNode; onChange: (color: { toString: () => string }) => void }) => (
     <div><button type="button" onClick={() => onChange({ toString: () => '#00DD99' })}>choose preset</button>{children}</div>
   );
@@ -24,7 +25,7 @@ vi.mock('@heroui/react', () => {
   Popover.Content = ({ children }: { children: ReactNode }) => <div>{children}</div>;
   Popover.Dialog = ({ children }: { children: ReactNode }) => <div>{children}</div>;
   Popover.Heading = ({ children }: { children: ReactNode }) => <h2>{children}</h2>;
-  return { ColorArea, ColorPicker, ColorSlider, ColorSwatchPicker, Popover };
+  return { ...actual, ColorArea, ColorPicker, ColorSlider, ColorSwatchPicker, Popover };
 });
 
 import { ThemePanel, ThemePopover } from '../src/theme/ThemeControls';

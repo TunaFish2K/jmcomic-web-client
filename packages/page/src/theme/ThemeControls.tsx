@@ -104,7 +104,7 @@ export function ThemePanel({ tone = 'adaptive' }: { tone?: 'adaptive' | 'dark' }
             >
               <span className="block h-full w-full rounded-sm" style={{ backgroundColor: accentColor }} />
             </ColorPicker.Trigger>
-            <ColorPicker.Popover className="z-[100] w-64 space-y-3 p-3" placement="bottom left">
+            <ColorPicker.Popover className="z-(--z-popover) w-64 space-y-3 p-3" placement="bottom left">
               <ColorArea colorSpace="hsb" xChannel="saturation" yChannel="brightness" className="h-36 w-full">
                 <ColorArea.Thumb />
               </ColorArea>
@@ -167,7 +167,7 @@ export function ThemePopover({ className = '' }: { className?: string }) {
           style={{ backgroundColor: accentColor }}
         />
       </Popover.Trigger>
-      <Popover.Content placement="bottom end" className="z-[90] w-72 p-0">
+      <Popover.Content placement="bottom end" className="z-(--z-popover) w-72 p-0">
         <Popover.Dialog className="p-4 outline-none">
           <Popover.Heading className="mb-4 text-sm font-semibold">外观</Popover.Heading>
           <ThemePanel />

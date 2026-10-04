@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { NavLink, useLocation, useSearchParams } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Compass, Home as HomeIcon, Star, User } from "lucide-react";
 import Home from "../home";
@@ -13,7 +13,7 @@ import { AlbumActions } from "./AlbumActions";
 import { mobileApi } from "./api";
 import { DiscoverPage } from "./DiscoverPage";
 import { FavoritesPage } from "./FavoritesPage";
-import { HomePage } from "./HomePage";
+import { HomeFeed } from "./HomePage";
 import { MePage } from "./MePage";
 import { loadAccount } from "./session";
 import { ExtendedShellContext, type ExtendedShell } from "./shell";
@@ -30,7 +30,6 @@ const renderAlbumExtras = (albumId: string) => <AlbumActions albumId={albumId} /
 /** Extended mode: bottom navigation around discovery, favorites and account pages. The reader stays full screen. */
 export default function ExtendedApp() {
     const { pathname } = useLocation();
-    const [params] = useSearchParams();
     const queryClient = useQueryClient();
     const { showTaskPanel, setShowTaskPanel, taskContextValue, clearCompleted } = useDownloads();
     const [album, setAlbum] = useState<{ id: string; cached?: BatchAlbumItem } | null>(null);
@@ -68,19 +67,18 @@ export default function ExtendedApp() {
     const page = pathname === "/discover" ? <DiscoverPage />
         : pathname === "/favorites" ? <FavoritesPage />
             : pathname === "/me" ? <MePage />
-                : params.has("q") ? <Home embedded renderAlbumExtras={renderAlbumExtras} />
-                    : <HomePage />;
+                : <Home embedded renderAlbumExtras={renderAlbumExtras} idleContent={<HomeFeed />} />;
 
     return (
         <ExtendedShellContext.Provider value={shell}>
             <TaskContext.Provider value={taskContextValue}>
                 <div className="fixed inset-0 flex flex-col">
                     <main className="relative min-h-0 flex-1">{page}</main>
-                    <nav aria-label="主导航" className="shrink-0 border-t border-gray-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-gray-800 dark:bg-gray-950">
+                    <nav aria-label="主导航" className="relative z-(--z-nav) shrink-0 border-t border-border bg-surface pb-[env(safe-area-inset-bottom)]">
                         <ul className="mx-auto grid h-14 max-w-2xl grid-cols-4">
                             {NAV.map(({ to, label, icon: Icon }) => (
                                 <li key={to}>
-                                    <NavLink to={to} end className={({ isActive }) => `flex h-full flex-col items-center justify-center gap-0.5 text-xs ${isActive && !(to === "/" && params.has("q")) ? "text-brand-600 dark:text-brand-300" : "text-gray-500"}`}>
+                                    <NavLink to={to} end className={({ isActive }) => `flex h-full flex-col items-center justify-center gap-0.5 text-xs transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500 ${isActive ? "text-brand-600 dark:text-brand-300" : "text-muted hover:text-foreground"}`}>
                                         <Icon size={20} />{label}
                                     </NavLink>
                                 </li>

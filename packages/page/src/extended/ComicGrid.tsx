@@ -23,7 +23,7 @@ export function ComicGrid({ items, layout = "grid", renderAction }: {
     const { albumCache, getCardRef } = useAlbumBatch(result);
     const className = layout === "row"
         ? "flex gap-2 overflow-x-auto pb-1 [&>*]:w-28 [&>*]:shrink-0"
-        : "grid grid-cols-3 gap-2 sm:grid-cols-4";
+        : "grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5";
     return (
         <div className={className}>
             {items.map((item) => (

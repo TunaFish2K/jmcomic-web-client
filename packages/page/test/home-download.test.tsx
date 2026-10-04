@@ -20,7 +20,8 @@ vi.mock('@tiny-client/shared', () => ({
   startTemporaryDownload: state.startDownload,
 }));
 
-vi.mock('@heroui/react', () => ({
+vi.mock('@heroui/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@heroui/react')>()),
   Button: ({ children, onPress, isDisabled, ...props }: { children: ReactNode; onPress?: () => void; isDisabled?: boolean }) => (
     <button type="button" disabled={isDisabled} onClick={onPress} {...props}>{children}</button>
   ),
@@ -291,14 +292,15 @@ describe('download state and controls', () => {
     assert.ok(screen.getByText('Network error'));
     fireEvent.click(screen.getByRole('button', { name: '清除' }));
     assert.equal(clearCompleted.mock.calls.length, 1);
-    const buttons = screen.getAllByRole('button');
-    fireEvent.click(buttons[1]);
+    fireEvent.click(screen.getByRole('button', { name: '关闭下载面板' }));
     assert.equal(onClose.mock.calls.length, 1);
-    fireEvent.click(screen.getByText('下载 (2进行中)').parentElement!.parentElement!);
-    assert.equal(screen.queryByText('Network error'), null);
-    fireEvent.click(screen.getByText('下载 (2进行中)').parentElement!.parentElement!);
-    fireEvent.click(screen.getAllByRole('button').at(-1)!);
-    assert.ok(removeTask.mock.calls.length > 0);
+    const header = screen.getByRole('button', { name: /下载 \(2进行中\)/ });
+    fireEvent.click(header);
+    assert.equal(header.getAttribute('aria-expanded'), 'false');
+    assert.ok(screen.queryByText('Network error') === null);
+    fireEvent.click(header);
+    fireEvent.click(screen.getByRole('button', { name: '移除任务 Failed' }));
+    assert.deepEqual(removeTask.mock.calls[0], ['d']);
 
     view.rerender(<Provider value={makeContext()}><TaskPanel onClose={onClose} /></Provider>);
     assert.equal(view.container.firstChild, null);

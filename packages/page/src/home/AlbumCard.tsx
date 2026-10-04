@@ -13,11 +13,19 @@ export function AlbumCard({ item, cachedData, onClick, cardRef }: {
         <div
             ref={cardRef}
             data-album-id={item.id}
-            className="border dark:border-gray-700 rounded-lg overflow-hidden cursor-pointer hover:shadow-md transition-shadow bg-white dark:bg-gray-900 flex flex-col"
+            role="button"
+            tabIndex={0}
+            aria-label={item.name}
+            className="flex cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-surface transition-shadow hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
             onClick={onClick}
+            onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onClick();
+            }}
         >
             {/* cover */}
-            <div className="w-full aspect-[3/4] bg-gray-100 shrink-0">
+            <div className="aspect-[3/4] w-full shrink-0 overflow-hidden bg-surface-secondary">
                 {photo?.images[0] ? (
                     <CoverImage
                         coverUrl={photo.images[0].url}
@@ -34,8 +42,8 @@ export function AlbumCard({ item, cachedData, onClick, cardRef }: {
                 <div className="text-xs font-medium leading-snug line-clamp-2 break-words" title={item.name}>
                     {item.name}
                 </div>
-                <div className="text-xs text-gray-400 truncate">{item.author}</div>
-                <div className="text-xs text-gray-300 dark:text-gray-600">#{item.id}</div>
+                <div className="truncate text-xs text-muted">{item.author}</div>
+                <div className="text-xs text-muted">#{item.id}</div>
             </div>
         </div>
     );

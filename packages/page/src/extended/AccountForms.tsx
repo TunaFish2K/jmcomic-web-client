@@ -1,25 +1,21 @@
 import { useState, type FormEvent } from "react";
+import { Button, Label, Radio, RadioGroup } from "@heroui/react";
 import { accountApi, describeError } from "./api";
 import { saveAccount } from "./session";
-import { Notice } from "./ui";
-import { buttonClass, chipClass, inputClass, primaryButtonClass } from "./shell";
+import { TRUST_NOTICE } from "./text";
+import { AppDialog } from "../ui/AppDialog";
+import { Segmented } from "../ui/controls";
+import { Notice } from "../ui/feedback";
+import { TextInput } from "../ui/fields";
 
 type Mode = "login" | "register" | "forgot";
-
-function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
-    return (
-        <label className="block space-y-1 text-xs text-gray-500">
-            <span>{label}</span>
-            <input className={inputClass} required {...props} />
-        </label>
-    );
-}
+const MODES = [["login", "登录"], ["register", "注册"], ["forgot", "找回密码"]] as const;
 
 /** Login, registration and password reset. Passwords are only kept in component state. */
 export function AccountForms({ onLoggedIn }: { onLoggedIn?: () => void }) {
     const [mode, setMode] = useState<Mode>("login");
     const [busy, setBusy] = useState(false);
-    const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+    const [message, setMessage] = useState<{ text: string; tone: "success" | "error" } | null>(null);
 
     const submit = (run: (form: FormData) => Promise<string | null>) => async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -28,9 +24,9 @@ export function AccountForms({ onLoggedIn }: { onLoggedIn?: () => void }) {
         setMessage(null);
         try {
             const text = await run(form);
-            if (text) setMessage({ text, error: false });
+            if (text) setMessage({ text, tone: "success" });
         } catch (error) {
-            setMessage({ text: describeError(error), error: true });
+            setMessage({ text: describeError(error).replace(/^请求失败：/, ""), tone: "error" });
         } finally {
             setBusy(false);
         }
@@ -61,38 +57,39 @@ export function AccountForms({ onLoggedIn }: { onLoggedIn?: () => void }) {
 
     return (
         <div className="space-y-3">
-            <div className="flex gap-2" role="tablist">
-                {([["login", "登录"], ["register", "注册"], ["forgot", "找回密码"]] as const).map(([id, label]) => (
-                    <button key={id} type="button" role="tab" aria-selected={mode === id} className={chipClass(mode === id)}
-                        onClick={() => { setMode(id); setMessage(null); }}>{label}</button>
-                ))}
-            </div>
-            {message && <Notice tone={message.error ? "error" : "info"}>{message.text.replace(/^请求失败：/, "")}</Notice>}
+            <Segmented label="账号操作" fullWidth value={mode} options={MODES} onChange={(next) => { setMode(next); setMessage(null); }} />
+            {message && <Notice tone={message.tone}>{message.text}</Notice>}
             {mode === "login" && (
-                <form onSubmit={login} className="space-y-2" aria-label="登录">
-                    <Field label="用户名" name="username" autoComplete="username" />
-                    <Field label="密码" name="password" type="password" autoComplete="current-password" />
-                    <button type="submit" className={`${primaryButtonClass} w-full`} disabled={busy}>{busy ? "登录中..." : "登录"}</button>
+                <form onSubmit={login} className="space-y-3" aria-label="登录">
+                    <TextInput label="用户名" name="username" autoComplete="username" isRequired />
+                    <TextInput label="密码" name="password" type="password" autoComplete="current-password" isRequired />
+                    <Button type="submit" fullWidth isPending={busy}>{busy ? "登录中..." : "登录"}</Button>
                 </form>
             )}
             {mode === "register" && (
-                <form onSubmit={register} className="space-y-2" aria-label="注册">
-                    <Field label="用户名" name="username" autoComplete="username" />
-                    <Field label="邮箱" name="email" type="email" autoComplete="email" />
-                    <Field label="密码" name="password" type="password" autoComplete="new-password" />
-                    <Field label="确认密码" name="passwordConfirm" type="password" autoComplete="new-password" />
-                    <fieldset className="flex gap-4 text-sm">
-                        <legend className="mb-1 text-xs text-gray-500">性别</legend>
-                        <label className="flex items-center gap-1"><input type="radio" name="gender" value="Male" defaultChecked />男</label>
-                        <label className="flex items-center gap-1"><input type="radio" name="gender" value="Female" />女</label>
-                    </fieldset>
-                    <button type="submit" className={`${primaryButtonClass} w-full`} disabled={busy}>注册</button>
+                <form onSubmit={register} className="space-y-3" aria-label="注册">
+                    <TextInput label="用户名" name="username" autoComplete="username" isRequired />
+                    <TextInput label="邮箱" name="email" type="email" autoComplete="email" isRequired />
+                    <TextInput label="密码" name="password" type="password" autoComplete="new-password" isRequired />
+                    <TextInput label="确认密码" name="passwordConfirm" type="password" autoComplete="new-password" isRequired />
+                    <RadioGroup name="gender" defaultValue="Male" orientation="horizontal" className="gap-1">
+                        <Label className="text-xs text-muted">性别</Label>
+                        <div className="flex gap-4">
+                            {([["Male", "男"], ["Female", "女"]] as const).map(([id, text]) => (
+                                <Radio key={id} value={id} className="flex items-center gap-2 text-sm">
+                                    <Radio.Control><Radio.Indicator /></Radio.Control>
+                                    <Radio.Content>{text}</Radio.Content>
+                                </Radio>
+                            ))}
+                        </div>
+                    </RadioGroup>
+                    <Button type="submit" fullWidth isPending={busy}>注册</Button>
                 </form>
             )}
             {mode === "forgot" && (
-                <form onSubmit={forgot} className="space-y-2" aria-label="找回密码">
-                    <Field label="注册邮箱" name="email" type="email" autoComplete="email" />
-                    <button type="submit" className={`${buttonClass} w-full`} disabled={busy}>发送重设邮件</button>
+                <form onSubmit={forgot} className="space-y-3" aria-label="找回密码">
+                    <TextInput label="注册邮箱" name="email" type="email" autoComplete="email" isRequired />
+                    <Button type="submit" variant="secondary" fullWidth isPending={busy}>发送重设邮件</Button>
                 </form>
             )}
         </div>
@@ -101,17 +98,9 @@ export function AccountForms({ onLoggedIn }: { onLoggedIn?: () => void }) {
 
 export function LoginDialog({ onClose, onLoggedIn }: { onClose: () => void; onLoggedIn: () => void }) {
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-            <div role="dialog" aria-modal="true" aria-label="登录账号"
-                className="w-full max-w-sm space-y-3 rounded-xl bg-white p-4 shadow-2xl dark:bg-gray-900"
-                onClick={(event) => event.stopPropagation()}>
-                <div className="flex items-center justify-between">
-                    <h2 className="text-base font-semibold">登录账号</h2>
-                    <button type="button" className="text-sm text-gray-400" onClick={onClose}>关闭</button>
-                </div>
-                <p className="text-xs text-gray-500">账号和密码会经过本站部署者的 Worker 转发到上游，只在信任部署者时登录。</p>
-                <AccountForms onLoggedIn={onLoggedIn} />
-            </div>
-        </div>
+        <AppDialog title="登录账号" size="sm" onClose={onClose}>
+            <p className="text-xs text-muted">{TRUST_NOTICE}</p>
+            <AccountForms onLoggedIn={onLoggedIn} />
+        </AppDialog>
     );
 }

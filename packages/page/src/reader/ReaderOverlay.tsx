@@ -109,7 +109,7 @@ function ChapterDrawer({
                   <span className="line-clamp-1 flex-1 min-w-0">{ch.name}</span>
                 </div>
                 {prog && (
-                  <span className="text-[10px] text-gray-500 mt-0.5 tabular-nums">
+                  <span className="text-xs text-gray-500 mt-0.5 tabular-nums">
                     已读 {prog.page + 1}/{prog.totalPages}
                   </span>
                 )}
@@ -165,7 +165,7 @@ function BoundaryHint({
         <div className="w-40 h-1.5 bg-gray-700 rounded-full overflow-hidden">
           <div className="h-full bg-brand-500 rounded-full" style={{ width: `${pct}%` }} />
         </div>
-        <div className="text-gray-400 text-[11px]">{hint2}</div>
+        <div className="text-gray-400 text-xs">{hint2}</div>
       </div>
     </div>
   );
@@ -270,7 +270,7 @@ function SettingsPanel({
         <div className="border-t border-gray-700/50 pt-3">
           <div className="flex items-center justify-between gap-3">
             <span className="text-gray-300 text-xs">
-              漫画翻译 <span className="text-[9px] font-medium uppercase text-brand-400">Beta</span>
+              漫画翻译 <span className="text-xs font-medium uppercase text-brand-400">Beta</span>
             </span>
             <button type="button" onClick={onOpenTranslationSettings} className="flex min-h-10 items-center gap-1.5 rounded-md bg-gray-800 px-2.5 py-1.5 text-xs text-gray-200 transition-colors hover:bg-gray-700">
               <Languages size={14} />
@@ -295,7 +295,7 @@ function SettingsPanel({
               <Trash2 size={12} />清除
             </button>
           </div>
-          <div className="text-gray-500 text-[10px] mt-1">
+          <div className="text-gray-500 text-xs mt-1">
             {cacheStats
               ? `${(cacheStats.totalSize / 1024 / 1024).toFixed(1)}MB (${cacheStats.count}张)`
               : '计算中...'}
@@ -772,7 +772,7 @@ export function ReaderOverlay({
           <div className="flex flex-col items-center gap-2 py-4 h-full" style={{ paddingTop: '3.5rem' }}>
             <div className="flex flex-col-reverse items-center gap-0.5">
               <button type="button" onClick={onNextChapter} disabled={!hasNextChapter} className="flex h-9 w-9 items-center justify-center text-white/70 hover:text-white disabled:cursor-default disabled:opacity-30" title="下一章" aria-label="下一章"><ChevronDown size={14} /></button>
-              <span className="text-white/60 text-[10px] tabular-nums" style={{ writingMode: 'vertical-rl' }}>{activePage + 1}/{totalPages}</span>
+              <span className="text-white/60 text-xs tabular-nums" style={{ writingMode: 'vertical-rl' }}>{activePage + 1}/{totalPages}</span>
               <button type="button" onClick={onPrevChapter} disabled={!hasPrevChapter} className="flex h-9 w-9 items-center justify-center text-white/70 hover:text-white disabled:cursor-default disabled:opacity-30" title="上一章" aria-label="上一章"><ChevronUp size={14} /></button>
             </div>
             <div

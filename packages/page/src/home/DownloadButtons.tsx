@@ -51,7 +51,7 @@ export function DownloadButtons({ items, label }: {
 
     return (
         <div className="mt-3 space-y-2">
-            <div className="text-gray-500 dark:text-gray-400 text-xs">{label ?? '下载格式:'}</div>
+            <div className="text-xs text-muted">{label ?? '下载格式：'}</div>
             <div className="flex gap-2">
                 <Button size="sm" variant="secondary" className={previewActionButtonClass} onPress={() => handleDownload('pdf')}>
                     <FileText size={14} className="mr-1" />{isBatch ? '全部 PDF' : 'PDF'}

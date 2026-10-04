@@ -10,11 +10,16 @@ import { AlbumModal } from "./AlbumModal";
 import { AlbumCard } from "./AlbumCard";
 import { CoverImage } from "./CoverImage";
 import { ThemePopover } from "../theme/ThemeControls";
+import { EmptyBlock, LoadingState, Notice } from "../ui/feedback";
 
-/** Search page. `embedded` places it inside the extended shell instead of filling the viewport. */
-export default function Home({ embedded = false, renderAlbumExtras }: {
+/**
+ * Search page. `embedded` places it inside the extended shell instead of filling the viewport;
+ * `idleContent` fills the space below the search bar while no search has been made.
+ */
+export default function Home({ embedded = false, renderAlbumExtras, idleContent }: {
     embedded?: boolean;
     renderAlbumExtras?: (albumId: string) => ReactNode;
+    idleContent?: ReactNode;
 } = {}) {
     const [modalAlbumId, setModalAlbumId] = useState<string | null>(null);
 
@@ -33,7 +38,7 @@ export default function Home({ embedded = false, renderAlbumExtras }: {
 
     return (
         <TaskContext.Provider value={taskContextValue}>
-            <div className={`${embedded ? 'absolute' : 'fixed'} inset-0 flex flex-col items-center pt-4 px-4`}>
+            <div className={`${embedded ? 'absolute' : 'fixed'} inset-0 flex flex-col items-center px-4 pt-[max(1rem,env(safe-area-inset-top))]`}>
 
                 {/* task panel */}
                 {showTaskPanel && (
@@ -94,7 +99,7 @@ export default function Home({ embedded = false, renderAlbumExtras }: {
                                     onChange={handleQueryChange}
                                     aria-describedby={queryError ? "search-query-error" : undefined}
                                     aria-invalid={!!queryError}
-                                    className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_#030712]"
+                                    className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_var(--color-gray-950)]"
                                 />
                             </InputGroup>
                             <Button
@@ -164,21 +169,17 @@ export default function Home({ embedded = false, renderAlbumExtras }: {
                     </form>
 
                     {isSearchError && (
-                        <div className="shrink-0 mb-3 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
-                            <div className="min-w-0">
-                                <div className="text-sm font-medium">第 {urlPage} 页加载失败</div>
-                                <div className="text-xs opacity-80">
+                        <div className="mb-3 shrink-0">
+                            <Notice tone="error" action={(
+                                <Button size="sm" variant="secondary" className="shrink-0" onPress={() => { void refetchSearch(); }}>
+                                    <RefreshCw size={14} />重试
+                                </Button>
+                            )}>
+                                <span className="block font-medium">第 {urlPage} 页加载失败</span>
+                                <span className="block text-xs opacity-80">
                                     {fallbackSearch ? '仍显示上一次成功加载的结果。' : '请检查网络或稍后重试。'}
-                                </div>
-                            </div>
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                className="shrink-0 text-xs"
-                                onPress={() => { void refetchSearch(); }}
-                            >
-                                <RefreshCw size={14} className="mr-1" />重试
-                            </Button>
+                                </span>
+                            </Notice>
                         </div>
                     )}
 
@@ -193,12 +194,18 @@ export default function Home({ embedded = false, renderAlbumExtras }: {
                             </div>
                         )}
 
+                        {/* ── extended mode: recommendations until the first search ── */}
+                        {idleContent && !urlQuery && (
+                            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-3">{idleContent}</div>
+                        )}
+
                         {/* ── direct match ── */}
                         {redirectAid && (
-                            <div className="shrink-0 mb-3 border dark:border-gray-700 rounded-lg bg-brand-50 dark:bg-brand-900/30 overflow-hidden">
-                                <div className="p-2 bg-brand-100 dark:bg-brand-900/40 text-sm font-medium text-brand-800 dark:text-brand-200">搜索到直接匹配的本子</div>
-                                <div
-                                    className="p-3 cursor-pointer hover:bg-brand-50 dark:hover:bg-brand-900/20"
+                            <div className="mb-3 shrink-0 overflow-hidden rounded-lg border border-border bg-brand-50 dark:bg-brand-900/30">
+                                <div className="bg-brand-100 p-2 text-sm font-medium text-brand-800 dark:bg-brand-900/40 dark:text-brand-200">搜索到直接匹配的本子</div>
+                                <button
+                                    type="button"
+                                    className="block w-full cursor-pointer p-3 text-left hover:bg-brand-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-brand-500 dark:hover:bg-brand-900/20"
                                     onClick={() => setModalAlbumId(redirectAid)}
                                 >
                                     <div className="flex gap-3 items-center">
@@ -212,10 +219,10 @@ export default function Home({ embedded = false, renderAlbumExtras }: {
                                         )}
                                         <div>
                                             <div className="text-sm font-medium">{albumCache.get(redirectAid)?.album?.name ?? `#${redirectAid}`}</div>
-                                            <div className="text-xs text-gray-400">点击查看详情</div>
+                                            <div className="text-xs text-muted">点击查看详情</div>
                                         </div>
                                     </div>
-                                </div>
+                                </button>
                             </div>
                         )}
 
@@ -238,35 +245,32 @@ export default function Home({ embedded = false, renderAlbumExtras }: {
 
                         {/* ── first load ── */}
                         {searchPending && !data && (
-                            <div className="flex flex-1 items-center justify-center text-gray-500 dark:text-gray-400" role="status">
-                                <div className="flex items-center gap-2">
-                                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500 dark:border-gray-600 dark:border-t-brand-500" />
-                                    <span className="text-sm">正在搜索...</span>
-                                </div>
+                            <div className="flex flex-1 items-center justify-center">
+                                <LoadingState label="正在搜索..." />
                             </div>
                         )}
 
                         {/* ── empty ── */}
                         {data && "content" in data && data.content.length === 0 && !redirectAid && (
-                            <div className="flex-1 flex items-center justify-center text-gray-500 dark:text-gray-400 text-sm">
-                                没有找到相关结果
+                            <div className="flex flex-1 items-center justify-center">
+                                <EmptyBlock>没有找到相关结果</EmptyBlock>
                             </div>
                         )}
 
                         {/* ── pagination ── */}
                         {totalCount > 0 && (
-                            <div className="shrink-0 py-3 border-t dark:border-gray-700">
+                            <div className="shrink-0 border-t border-border py-3">
                                 <div className="flex items-center justify-center gap-1 mb-2">
-                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                    <Button variant="secondary" size="sm"
                                         isDisabled={urlPage === 1 || searchPending} onPress={() => handlePageChange(1)}>首页</Button>
-                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                    <Button variant="secondary" size="sm"
                                         isDisabled={!hasPrevPage || searchPending} onPress={() => handlePageChange(urlPage - 1)}>上页</Button>
-                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                    <Button variant="secondary" size="sm"
                                         isDisabled={!hasNextPage || searchPending || isSearchError} onPress={() => handlePageChange(urlPage + 1)}>下页</Button>
-                                    <Button variant="secondary" size="sm" className="px-2 text-xs"
+                                    <Button variant="secondary" size="sm"
                                         isDisabled={urlPage === totalPages || searchPending || isSearchError} onPress={() => handlePageChange(totalPages)}>尾页</Button>
                                 </div>
-                                <div className="text-center text-gray-500 dark:text-gray-400 text-xs">{totalCount}条·{urlPage}/{totalPages}页</div>
+                                <div className="text-center text-xs text-muted">{totalCount} 条 · {urlPage}/{totalPages} 页</div>
                             </div>
                         )}
                     </div>

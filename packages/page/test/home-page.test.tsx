@@ -11,7 +11,8 @@ const state = vi.hoisted(() => ({
   taskProps: null as null | Record<string, unknown>,
 }));
 
-vi.mock('@heroui/react', () => {
+vi.mock('@heroui/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@heroui/react')>();
   const Button = ({ children, onPress, isDisabled, ...props }: { children: ReactNode; onPress?: () => void; isDisabled?: boolean }) => (
     <button type={(props as { type?: 'button' | 'submit' }).type ?? 'button'} disabled={isDisabled} onClick={onPress} {...props}>{children}</button>
   );
@@ -34,7 +35,7 @@ vi.mock('@heroui/react', () => {
   Select.Popover = ({ children }: { children: ReactNode }) => <>{children}</>;
   const ListBox = ({ children }: { children: ReactNode }) => <>{children}</>;
   ListBox.Item = () => null;
-  return { Button, InputGroup, Select, ListBox };
+  return { ...actual, Button, InputGroup, Select, ListBox };
 });
 
 vi.mock('../src/home/useSearchState', () => ({ useSearchState: () => state.search }));
@@ -105,13 +106,24 @@ describe('Home page', () => {
     (state.modalProps?.onClose as () => void)();
   });
 
+  test('shows extended-mode content below the search bar only before a search', () => {
+    state.search = makeSearch({ urlQuery: '', data: undefined, hasResults: false, totalCount: 0 });
+    const view = render(<Home embedded idleContent={<div>Recommended</div>} />);
+    assert.ok(screen.getByText('Recommended'));
+    assert.ok(screen.getByPlaceholderText('搜索内容...'));
+    state.search = makeSearch();
+    view.rerender(<Home embedded idleContent={<div>Recommended</div>} />);
+    assert.ok(screen.queryByText('Recommended') === null);
+    assert.ok(screen.getByText('One'));
+  });
+
   test('renders validation, loading, background progress, empty and error states', () => {
     state.search = makeSearch({
       queryError: '请输入搜索内容', isSearchError: true, searchPending: true,
       fallbackSearch: { content: [] }, hasResults: false,
     });
     const view = render(<Home />);
-    assert.ok(screen.getByRole('alert'));
+    assert.ok(screen.getAllByRole('alert').some((alert) => alert.textContent?.includes('加载失败')));
     assert.ok(screen.getByText('仍显示上一次成功加载的结果。'));
     assert.ok(screen.getByRole('progressbar', { name: '正在更新搜索结果' }));
     fireEvent.click(screen.getByRole('button', { name: '重试' }));

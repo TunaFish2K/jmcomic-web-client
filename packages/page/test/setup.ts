@@ -66,3 +66,8 @@ if (typeof window !== 'undefined' && !window.requestAnimationFrame) {
   window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 0);
   window.cancelAnimationFrame = window.clearTimeout;
 }
+
+// react-aria overlays and tab indicators wait for CSS animations; jsdom has none.
+if (typeof Element !== 'undefined' && !Element.prototype.getAnimations) {
+  Element.prototype.getAnimations = () => [];
+}

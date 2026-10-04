@@ -37,7 +37,8 @@ async function mockBackend(page: Page, options: { favoriteStatus?: number } = {}
 
 async function enableExtendedMode(page: Page) {
     await page.getByRole('button', { name: '外观设置' }).click();
-    await page.getByRole('switch', { name: '扩展模式' }).click();
+    // react-aria keeps the real checkbox visually hidden; users press the visible label.
+    await page.locator('label').filter({ has: page.getByRole('switch', { name: '扩展模式' }) }).click();
     await expect(page.getByRole('alertdialog', { name: '开启扩展模式' })).toBeVisible();
     await page.getByRole('button', { name: '我已了解，开启' }).click();
     await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
@@ -66,7 +67,7 @@ test.describe('mobile viewport', () => {
 
         await page.getByRole('link', { name: '首页' }).click();
         await page.getByText('Promoted fixture').click();
-        await page.getByRole('button', { name: /收藏/ }).click();
+        await page.getByRole('button', { name: /收藏 \/ 取消收藏/ }).click();
         const login = page.getByRole('dialog', { name: '登录账号' });
         await expect(login).toBeVisible();
         await login.getByLabel('用户名').fill('reader');
@@ -93,7 +94,7 @@ test.describe('mobile viewport', () => {
             { session: 'v1.sealed', expiresAt: Date.now() + 3_600_000, member });
         await page.reload();
         await page.getByText('Promoted fixture').click();
-        await page.getByRole('button', { name: /收藏/ }).click();
+        await page.getByRole('button', { name: /收藏 \/ 取消收藏/ }).click();
         await expect(page.getByText('登录已过期，请重新登录')).toBeVisible();
         // Close the album dialog by clicking its backdrop.
         await page.mouse.click(5, 5);
@@ -101,4 +102,17 @@ test.describe('mobile viewport', () => {
         await expect(page.getByText(/登录已过期，请重新登录。/)).toBeVisible();
         await expect(page.getByRole('form', { name: '登录' })).toBeVisible();
     });
+});
+
+test('album details close with Escape and return focus to the card', async ({ page }) => {
+    await mockBackend(page);
+    await page.goto('/');
+    await enableExtendedMode(page);
+    const card = page.locator('[data-album-id="1"]');
+    await card.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(card).toBeFocused();
 });

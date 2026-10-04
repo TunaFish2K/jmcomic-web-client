@@ -23,7 +23,8 @@ vi.mock('@tanstack/react-query', () => ({
     return state.query;
   },
 }));
-vi.mock('@heroui/react', () => ({
+vi.mock('@heroui/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@heroui/react')>()),
   Button: ({ children, onPress, ...props }: { children: ReactNode; onPress?: () => void }) => <button type="button" onClick={onPress} {...props}>{children}</button>,
 }));
 vi.mock('../src/api', () => ({ getBatchAlbum: state.getBatchAlbum }));
@@ -112,10 +113,9 @@ describe('AlbumModal', () => {
     assert.deepEqual(state.navigate.mock.calls[0], ['/reader/10', { state: { album: singleAlbum, photo: singlePhoto } }]);
     assert.equal(state.saveAlbumMeta.mock.calls.length, 1);
 
-    const backdrop = screen.getByText('Single album').closest('.fixed')!;
     fireEvent.click(screen.getByText('Single album'));
     assert.equal(onClose.mock.calls.length, 0);
-    fireEvent.click(backdrop);
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
     assert.equal(onClose.mock.calls.length, 1);
   });
 

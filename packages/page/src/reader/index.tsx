@@ -1813,7 +1813,7 @@ export default function ReaderPage() {
       />
 
       {(translation.task || translation.notice) && !translation.dialogOpen && (
-        <div className="absolute bottom-14 left-1/2 z-[60] w-[22rem] max-w-[calc(100vw-24px)] -translate-x-1/2">
+        <div className="absolute bottom-14 left-1/2 z-(--z-toast) w-[22rem] max-w-[calc(100vw-24px)] -translate-x-1/2">
           <div
             className={`flex min-h-10 items-center gap-2 rounded-md border px-3 py-2 text-xs shadow-xl backdrop-blur-md ${
               !translation.task && translation.notice?.kind === 'error'
@@ -1868,7 +1868,7 @@ export default function ReaderPage() {
                         }
                       />
                     </div>
-                    <div className="mt-1 text-[10px] tabular-nums text-gray-400">
+                    <div className="mt-1 text-xs tabular-nums text-gray-400">
                       {formatModelBytes(translation.task.ocrInitialization.loadedBytes)}
                       {translation.task.ocrInitialization.totalBytes
                         ? ` / ${formatModelBytes(translation.task.ocrInitialization.totalBytes)}`
@@ -1880,8 +1880,9 @@ export default function ReaderPage() {
             <button
               type="button"
               onClick={translation.task ? translation.cancelCurrentTranslation : translation.dismissNotice}
-              className="ml-1 flex h-6 w-6 shrink-0 items-center justify-center text-current opacity-70 hover:opacity-100"
+              className="ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-current opacity-70 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-current"
               title={translation.task ? '取消当前页翻译' : '关闭'}
+              aria-label={translation.task ? '取消当前页翻译' : '关闭翻译提示'}
             >
               <X size={14} />
             </button>

@@ -124,7 +124,7 @@ export function TranslationSettingsDialog({
 
     return (
         <div
-            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-3"
+            className="fixed inset-0 z-(--z-modal) flex items-center justify-center bg-black/70 p-3"
             onMouseDown={(event) => {
                 if (event.target === event.currentTarget) onClose();
             }}
@@ -144,11 +144,11 @@ export function TranslationSettingsDialog({
                                 className="flex items-center gap-1.5 text-sm font-semibold"
                             >
                                 漫画翻译
-                                <span className="text-[10px] font-medium uppercase text-brand-400">
+                                <span className="text-xs font-medium uppercase text-brand-400">
                                     Beta
                                 </span>
                             </h2>
-                            <p className="mt-0.5 text-[10px] font-normal text-gray-400">
+                            <p className="mt-0.5 text-xs font-normal text-gray-400">
                                 支持日文 → 中文
                             </p>
                         </div>
@@ -156,8 +156,9 @@ export function TranslationSettingsDialog({
                     <button
                         type="button"
                         onClick={onClose}
-                        className="p-1 text-gray-400 hover:text-white"
+                        className="flex h-10 w-10 items-center justify-center rounded-md text-gray-400 hover:text-white focus-visible:outline-2 focus-visible:outline-brand-500"
                         title="关闭"
+                        aria-label="关闭翻译设置"
                     >
                         <X size={18} />
                     </button>
@@ -183,7 +184,7 @@ export function TranslationSettingsDialog({
                                                 apiProtocol: option.value,
                                             }))
                                         }
-                                        className={`h-9 border-r border-gray-600 px-2 text-[11px] transition-colors last:border-r-0 ${
+                                        className={`h-9 border-r border-gray-600 px-2 text-xs transition-colors last:border-r-0 ${
                                             draft.apiProtocol === option.value
                                                 ? "bg-brand-500 text-brand-foreground"
                                                 : "bg-gray-950 text-gray-300 hover:bg-gray-800"
@@ -280,7 +281,7 @@ export function TranslationSettingsDialog({
                                     Worker 代理
                                 </span>
                                 {draft.useWorkerProxy && (
-                                    <p className="mt-1 text-[10px] leading-4 text-gray-400">
+                                    <p className="mt-1 text-xs leading-4 text-gray-400">
                                         开启表示你信任服务器传输你的API KEY。
                                     </p>
                                 )}
@@ -520,6 +521,7 @@ export function TranslationSettingsDialog({
                                     }
                                     className="flex h-7 w-7 items-center justify-center text-gray-400 hover:text-white"
                                     title="恢复默认翻译风格"
+                                    aria-label="恢复默认翻译风格"
                                 >
                                     <RotateCcw size={14} />
                                 </button>
@@ -557,6 +559,7 @@ export function TranslationSettingsDialog({
                                     }
                                     className="flex h-7 w-7 items-center justify-center text-gray-400 hover:text-white"
                                     title="恢复默认内容处理提示词"
+                                    aria-label="恢复默认内容处理提示词"
                                 >
                                     <RotateCcw size={14} />
                                 </button>
