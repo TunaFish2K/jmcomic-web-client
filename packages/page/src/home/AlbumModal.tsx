@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@heroui/react";
@@ -12,10 +12,12 @@ import { CoverImage } from "./CoverImage";
 import { SeriesDownloadManager } from "./SeriesDownloadManager";
 import { DownloadButtons, previewFullActionButtonClass } from "./DownloadButtons";
 
-export function AlbumModal({ albumId, cachedData, onClose }: {
+export function AlbumModal({ albumId, cachedData, onClose, extras }: {
     albumId: string;
     cachedData: BatchAlbumItem | undefined;
     onClose: () => void;
+    /** Extended-mode actions (favorite, like, comments) shown under the album details. */
+    extras?: ReactNode;
 }) {
     const navigate = useNavigate();
     const detailQuery = useQuery<BatchAlbumItem>({
@@ -172,6 +174,8 @@ export function AlbumModal({ albumId, cachedData, onClose }: {
                                     </div>
                                 </div>
                             )}
+
+                            {extras}
 
                             {isSeriesAlbum ? (
                                 <div className="space-y-3">

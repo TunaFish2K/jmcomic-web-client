@@ -1,6 +1,7 @@
 import { ColorArea, ColorPicker, ColorSlider, ColorSwatchPicker, Popover } from '@heroui/react';
 import { Check, Monitor, Moon, Palette, RotateCcw, Sun } from 'lucide-react';
 import { useTheme } from './theme-context';
+import { ExtendedModeToggle } from '../extended/ExtendedModeToggle';
 import { normalizeHexColor, THEME_PRESETS, type ThemeMode } from './theme';
 
 const MODE_OPTIONS: Array<{
@@ -170,6 +171,9 @@ export function ThemePopover({ className = '' }: { className?: string }) {
         <Popover.Dialog className="p-4 outline-none">
           <Popover.Heading className="mb-4 text-sm font-semibold">外观</Popover.Heading>
           <ThemePanel />
+          <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
+            <ExtendedModeToggle />
+          </div>
         </Popover.Dialog>
       </Popover.Content>
     </Popover>

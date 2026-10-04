@@ -25,3 +25,9 @@
 `packages/sdk` 是可独立安装的公开子包，继承 Unlicense。前端图片处理和 Worker 上游访问共用 SDK，旧应用接口和 UI 保持兼容。图片处理运行在浏览器 Web Worker 内，旧 IndexedDB 图片仍可读取；新结果使用 `sdk-v1` 缓存前缀。
 
 SDK 保留本机、独立 HTTP 服务、远程连接三种模式。应用缓存、批量接口、搜索防重复、LLM 代理、OCR、导出及阅读状态仍属于应用。Flutter App 不迁移。原私有 SDK 仓库保留历史和 Release，停止独立发布。
+
+## 扩展模式
+
+默认关闭的可选界面，由用户在设置中开启，偏好保存在 `localStorage` 的 `jm-extended-mode:v1`。关闭时只加载原有的搜索页，不请求 `/api/mobile/*`，扩展代码也不会下载。
+
+开启后，首页、发现、收藏、我的四个页面共用底部导航；`/?q=…` 仍显示原来的搜索页，阅读器保持全屏。账号会话令牌只保存在 `sessionStorage`，账号数据的查询缓存以 `['account', uid, …]` 为键，退出或重新登录时清除。设计见 [ADR 0002](docs/adr/0002-account-session.md)，上游接口见 [手机接口台账](docs/mobile-api.md)。

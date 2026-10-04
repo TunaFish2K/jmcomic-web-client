@@ -7,6 +7,15 @@
 /reader/*
   Cache-Control: no-cache, no-store, must-revalidate
 
+/discover
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/favorites
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/me
+  Cache-Control: no-cache, no-store, must-revalidate
+
 /sw.js
   Cache-Control: no-cache, no-store, must-revalidate
 

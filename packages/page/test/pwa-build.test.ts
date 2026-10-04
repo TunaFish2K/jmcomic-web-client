@@ -76,6 +76,7 @@ describe('PWA build output', () => {
     assert.doesNotMatch(serviceWorker, /pdfkit\.standalone-/);
     assert.doesNotMatch(serviceWorker, /cover-images/);
     assert.doesNotMatch(serviceWorker, /\/(?:search|album|photo|batch-album)/);
+    assert.doesNotMatch(serviceWorker, /api\/mobile/);
     assert.doesNotMatch(serviceWorker, /createHandlerBoundToURL\("index\.html"\)/);
 
     const precachedUrls = [...serviceWorker.matchAll(/url:"([^"]+)"/g)].map((match) => match[1]);
@@ -154,6 +155,9 @@ describe('PWA build output', () => {
     assert.match(headers, /\/release\.json\s+Cache-Control: no-cache, no-store, must-revalidate/);
     assert.match(headers, /^\/\s+Cache-Control: no-cache, no-store, must-revalidate/m);
     assert.match(headers, /\/reader\/\*\s+Cache-Control: no-cache, no-store, must-revalidate/);
+    for (const route of ['discover', 'favorites', 'me']) {
+      assert.match(headers, new RegExp(`^/${route}\\s+Cache-Control: no-cache, no-store, must-revalidate`, 'm'));
+    }
     assert.match(headers, /\/assets-v3\/\*\s+Cache-Control: public, max-age=0, must-revalidate/);
     assert.doesNotMatch(headers, /\/assets\/\*/);
     assert.doesNotMatch(headers, /immutable/);

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button, InputGroup, Select, ListBox } from "@heroui/react";
 import { SearchIcon, RefreshCw } from "lucide-react";
 import { TaskContext } from "./task-context";
@@ -11,7 +11,11 @@ import { AlbumCard } from "./AlbumCard";
 import { CoverImage } from "./CoverImage";
 import { ThemePopover } from "../theme/ThemeControls";
 
-export default function Home() {
+/** Search page. `embedded` places it inside the extended shell instead of filling the viewport. */
+export default function Home({ embedded = false, renderAlbumExtras }: {
+    embedded?: boolean;
+    renderAlbumExtras?: (albumId: string) => ReactNode;
+} = {}) {
     const [modalAlbumId, setModalAlbumId] = useState<string | null>(null);
 
     const {
@@ -29,7 +33,7 @@ export default function Home() {
 
     return (
         <TaskContext.Provider value={taskContextValue}>
-            <div className="fixed inset-0 flex flex-col items-center pt-4 px-4">
+            <div className={`${embedded ? 'absolute' : 'fixed'} inset-0 flex flex-col items-center pt-4 px-4`}>
 
                 {/* task panel */}
                 {showTaskPanel && (
@@ -42,6 +46,7 @@ export default function Home() {
                         albumId={modalAlbumId}
                         cachedData={albumCache.get(modalAlbumId)}
                         onClose={() => setModalAlbumId(null)}
+                        extras={renderAlbumExtras?.(modalAlbumId)}
                     />
                 )}
 
