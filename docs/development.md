@@ -163,7 +163,45 @@ Worker 拒绝本机、私网/IP 字面量、自身地址、带凭据或查询参
 | `/random` | — | 不缓存 |
 | `/comments` | `aid`，`page` | 1 分钟 |
 
-公开数据写入 Cloudflare Cache API，同时返回相同 TTL 的 `Cache-Control: public`。`X-Cache` 为 `miss`、`edge` 或 `bypass`。错误统一返回 `{ error: { code, message } }` 和 `no-store`：参数错误为 `400`，上游拒绝或网络失败为 `502`，超时为 `504`。评论的 `content` 是上游原样返回的 HTML，前端只能按纯文本显示。
+公开数据写入 Cloudflare Cache API，同时返回相同 TTL 的 `Cache-Control: public`。`X-Cache` 为 `miss`、`edge` 或 `bypass`。错误统一返回 `{ error: { code, message } }` 和 `no-store`：参数错误为 `400`，上游业务拒绝（例如密码错误）为 `422 UPSTREAM_REJECTED`，上游网络失败为 `502`，超时为 `504`。评论的 `content` 是上游原样返回的 HTML，前端只能按纯文本显示。
+
+#### 账号接口：`/api/mobile/account/*`
+
+实现位于 `packages/worker/src/mobile-account.ts` 和 `mobile-session.ts`，设计见 [ADR 0002](adr/0002-account-session.md)。所有响应均为 `no-store`。
+
+`POST` 接口只接受 JSON 正文（最大 16 KiB）。除 `login`、`register`、`forgot` 外，其他接口都需要 `Authorization: Bearer <会话令牌>`。
+
+| 路径 | 方法 | 输入 | 返回 |
+| --- | --- | --- | --- |
+| `/login` | POST | `username`、`password` | `{ session, expiresAt, member }` |
+| `/register` | POST | `username`、`password`、`passwordConfirm`、`email`、`gender` | 写入结果 |
+| `/forgot` | POST | `email` | 写入结果 |
+| `/session` | GET | — | `{ uid, expiresAt }`，不请求上游 |
+| `/logout` | POST | — | 写入结果 |
+| `/profile` | GET | — | 资料字段（已去除密码和令牌类字段） |
+| `/profile/update` | POST | `fields`，只接受 `username`、`email`、`password`、`password_confirm`、`birthday`、`relations`、`sexuality`、`website`、`city`、`country` | 写入结果；Worker 先读取当前资料，再整份提交 |
+| `/favorites` | GET | `page`，`folder`，`order`（`mr`、`mp`） | `{ total, folders, items }` |
+| `/favorite` | POST | `aid` | 写入结果，含 `type`；**切换**收藏状态 |
+| `/favorite-folder` | POST | `type`：`add`（`name`）、`edit`（`folderId`、`name`）、`del`（`folderId`）、`move`（`folderId`、`aid`） | 写入结果 |
+| `/like` | POST | `aid` | 写入结果 |
+| `/comment` | POST | `aid`、`content`，回复时加 `replyTo` | 写入结果 |
+| `/comment/delete` | POST | `commentId`、`aid` | 写入结果 |
+| `/daily` | GET | — | `{ dailyId, eventName, progress, record, rewards }` |
+| `/daily/check` | POST | `dailyId` | 写入结果 |
+| `/daily/list` | GET | — | 上游原样数据 |
+| `/daily/month` | GET | `month` | 上游原样数据 |
+| `/history` | GET | `page` | `{ total, items }` |
+| `/history/delete` | POST | `aid` | 写入结果 |
+
+写入结果为 `{ ok, message }`；`ok: false` 表示上游拒绝，`message` 是上游提示。账号相关的错误码：
+
+- `401 SESSION_INVALID`：缺少令牌、令牌被篡改，或者是用其他密钥签发的。
+- `401 SESSION_EXPIRED`：会话已过期。
+- `401 UNAUTHORIZED`：上游不接受这个账号。
+- `503 ACCOUNT_DISABLED`：部署者没有配置 `ACCOUNT_SESSION_KEY`。
+- `502 WRITE_UNCERTAIN`：写操作已发出，但结果未知。重试前要重新读取状态。
+
+本地开发要启用账号功能时，在 `packages/worker/.dev.vars` 中写入 `ACCOUNT_SESSION_KEY=<任意随机字符串>`。该文件已被 git 忽略。
 
 ## 缓存与持久化
 

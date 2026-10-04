@@ -35,6 +35,7 @@
    | `CF_API_TOKEN` | 必需 | Cloudflare API 令牌 |
    | `CF_ACCOUNT_ID` | 必需 | Cloudflare 账户 ID |
    | `ALBUM_CACHE_KV_ID` | 可选 | KV 命名空间 ID |
+   | `ACCOUNT_SESSION_KEY` | 可选 | 扩展模式账号功能的会话加密密钥，用 `openssl rand -base64 32` 生成。不配置时无法登录，其他功能不受影响 |
 
 5. 打开 **Actions → Verify and release → Run workflow**，选择 `main` 分支并运行。首次运行会执行完整测试，需要十几分钟。
 6. `deploy-worker` 任务成功后，在 Dashboard 的 **Workers & Pages** 中找到名为 `worker` 的 Worker，并记下它的地址：`https://worker.<子域>.workers.dev`。

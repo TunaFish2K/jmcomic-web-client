@@ -82,8 +82,8 @@ it('never caches random recommendations and reports upstream refusals as JSON er
 	expect(calls.filter(url => url.pathname === '/random_recommend')).toHaveLength(2);
 
 	const refused = await request('/api/mobile/week');
-	expect(refused.status).toBe(502);
-	expect(await refused.json()).toEqual({ error: { code: 'UPSTREAM', message: 'Upstream rejected the request: maintenance' } });
+	expect(refused.status).toBe(422);
+	expect(await refused.json()).toEqual({ error: { code: 'UPSTREAM_REJECTED', message: 'Upstream rejected the request: maintenance' } });
 });
 
 it('reports account availability, rejects unknown routes and non-GET methods', async () => {

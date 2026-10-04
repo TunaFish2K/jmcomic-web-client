@@ -198,3 +198,4 @@ packages/page/test-results/
 
 # Generated Worker deploy config
 packages/worker/wrangler.deploy.json
+packages/worker/.dev.vars

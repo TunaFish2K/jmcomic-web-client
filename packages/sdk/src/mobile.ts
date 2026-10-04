@@ -23,6 +23,13 @@ export interface MobileComment {
   id: string; parentId: string | null; albumId: string; userId: string; username: string; content: string;
   likes: number; createdAt: string; spoiler: boolean;
 }
+export interface MobileFavorites { total: number; folders: { id: string; name: string }[]; items: MobileComic[] }
+export interface MobileDaily {
+  dailyId: string; eventName: string; progress: string;
+  /** Weeks of days, as rendered by the official app. */
+  record: { date: string; signed: boolean; bonus: boolean }[][];
+  rewards: { threeDaysCoin: number; sevenDaysCoin: number; threeDaysExp: number; sevenDaysExp: number };
+}
 /** Profile fields shown to the user. The raw record is kept so updates can resend unchanged fields. */
 export interface MobileMember { uid: string; username: string; email: string; level: string; coin: number; raw: Record<string, unknown> }
 export interface LoginResult { account: AccountCredentials; member: MobileMember }
@@ -51,7 +58,7 @@ export interface MobileClient {
   register(params: { username: string; password: string; passwordConfirm: string; email: string; gender: string }, options?: CallOptions): Promise<MobileWriteResult>;
   forgot(email: string, options?: CallOptions): Promise<MobileWriteResult>;
   logout(options?: CallOptions): Promise<MobileWriteResult>;
-  favorites(params: { page: number; folderId?: string; order?: string }, options?: CallOptions): Promise<Record<string, unknown>>;
+  favorites(params: { page: number; folderId?: string; order?: string }, options?: CallOptions): Promise<MobileFavorites>;
   toggleFavorite(albumId: string, options?: CallOptions): Promise<MobileWriteResult>;
   editFavoriteFolder(edit: FavoriteFolderEdit, options?: CallOptions): Promise<MobileWriteResult>;
   like(albumId: string, options?: CallOptions): Promise<MobileWriteResult>;
@@ -60,11 +67,11 @@ export interface MobileClient {
   deleteComment(params: { commentId: string; albumId: string }, options?: CallOptions): Promise<MobileWriteResult>;
   profile(options?: CallOptions): Promise<Record<string, unknown>>;
   updateProfile(fields: Record<string, string>, options?: CallOptions): Promise<MobileWriteResult>;
-  daily(options?: CallOptions): Promise<Record<string, unknown>>;
+  daily(options?: CallOptions): Promise<MobileDaily>;
   dailyCheck(dailyId: string, options?: CallOptions): Promise<MobileWriteResult>;
   dailyList(options?: CallOptions): Promise<unknown>;
   dailyFilter(month: string, options?: CallOptions): Promise<unknown>;
-  history(page: number, options?: CallOptions): Promise<Record<string, unknown>>;
+  history(page: number, options?: CallOptions): Promise<MobileComicPage>;
   removeHistory(albumId: string, options?: CallOptions): Promise<MobileWriteResult>;
   dispose(): void;
 }
@@ -183,8 +190,15 @@ export function createMobileClient(options: MobileClientOptions = {}): MobileCli
       account = undefined;
       return result;
     },
-    favorites: async ({ page: pageNumber, folderId = '0', order = 'mr' }, call) => record(await read('favorites', '/favorite',
-      { page: String(integer(pageNumber, 1, 10000, 'page')), folder_id: folderId, o: order }, call, true)),
+    async favorites({ page: pageNumber, folderId = '0', order = 'mr' }, call) {
+      if (!/^\d{1,16}$/.test(folderId) || !['mr', 'mp'].includes(order)) throw new JmError('INVALID_ARGUMENT', 'Invalid favorite folder or order');
+      const data = record(await read('favorites', '/favorite', { page: String(integer(pageNumber, 1, 10000, 'page')), folder_id: folderId, o: order }, call, true));
+      return {
+        total: num(data.total),
+        folders: list(data.folder_list).map(value => { const item = record(value); return { id: text(item.FID), name: text(item.name) }; }).filter(item => item.id),
+        items: comics(data.list),
+      };
+    },
     toggleFavorite: async (albumId, call) => write('toggle-favorite', '/favorite', { aid: id(albumId) }, call),
     async editFavoriteFolder(edit, call) {
       const form: Record<string, string> = { type: edit.type };
@@ -203,11 +217,21 @@ export function createMobileClient(options: MobileClientOptions = {}): MobileCli
     deleteComment: async ({ commentId, albumId }, call) => write('delete-comment', '/comment_delete', { comment_id: id(commentId), aid: id(albumId) }, call),
     profile: async call => record(await read('profile', `/useredit/${id(signedIn().uid)}`, {}, call, true)),
     updateProfile: async (fields, call) => write('update-profile', `/useredit/${id(signedIn().uid)}`, fields, call),
-    daily: async call => record(await read('daily', '/daily', { user_id: id(signedIn().uid) }, call, true)),
+    async daily(call) {
+      const data = record(await read('daily', '/daily', { user_id: id(signedIn().uid) }, call, true));
+      return {
+        dailyId: text(data.daily_id), eventName: text(data.event_name), progress: text(data.currentProgress),
+        record: list(data.record).map(week => list(week).map(value => {
+          const day = record(value);
+          return { date: text(day.date), signed: day.signed === true, bonus: day.bonus === true };
+        })),
+        rewards: { threeDaysCoin: num(data.three_days_coin), sevenDaysCoin: num(data.seven_days_coin), threeDaysExp: num(data.three_days_exp), sevenDaysExp: num(data.seven_days_exp) },
+      };
+    },
     dailyCheck: async (dailyId, call) => write('daily-check', '/daily_chk', { user_id: id(signedIn().uid), daily_id: id(dailyId) }, call),
     dailyList: async call => read('daily-list', '/daily_list', { user_id: id(signedIn().uid) }, call, true),
     dailyFilter: async (month, call) => run('daily-filter', '/daily_list/filter', { method: 'POST', form: { data: required(month, 'month') }, account: signedIn() }, call),
-    history: async (pageNumber, call) => record(await read('history', '/watch_list', { page: String(integer(pageNumber, 1, 10000, 'page')) }, call, true)),
+    history: async (pageNumber, call) => page(await read('history', '/watch_list', { page: String(integer(pageNumber, 1, 10000, 'page')) }, call, true)),
     removeHistory: async (albumId, call) => write('remove-history', '/watch_list', { id: id(albumId) }, call),
     dispose() { lifetime.abort(); network.dispose(); },
   };

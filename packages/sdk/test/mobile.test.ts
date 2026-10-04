@@ -135,3 +135,21 @@ test('comments keep reply links from the flat upstream list', async () => {
     assert.deepEqual(result.items.map(item => [item.id, item.parentId, item.username, item.spoiler]), [['10', null, 'Nick', false], ['11', '10', 'u2', true]]);
   } finally { client.dispose(); }
 });
+
+test('favorites, history and daily responses are normalized', async () => {
+  const client = createMobileClient({ domains: ['api.test'], retries: 0, account: { uid: '42', jwt: 'j', avs: 'a' }, fetch: upstream(entry => {
+    if (entry.url.pathname === '/favorite') return ok({ total: '21', count: 20, folder_list: [{ FID: '5', name: 'Later', UID: '42' }], list: [{ id: '7', name: 'Fav', author: 'A', image: '', category: { id: '1', title: 'x' } }] });
+    if (entry.url.pathname === '/watch_list') return ok({ total: 1, list: [{ id: '8', name: 'Seen', author: 'B' }] });
+    return ok({ daily_id: '3', event_name: 'Event', currentProgress: '40%', three_days_coin: '5', record: [[{ date: '1', signed: true, bonus: false }, { date: '2', signed: false, bonus: true }]] });
+  }) });
+  try {
+    const favorites = await client.favorites({ page: 1, folderId: '5', order: 'mp' });
+    assert.deepEqual([favorites.total, favorites.folders, favorites.items.map(item => item.id)], [21, [{ id: '5', name: 'Later' }], ['7']]);
+    await assert.rejects(client.favorites({ page: 1, order: 'drop' }), { code: 'INVALID_ARGUMENT' });
+    assert.deepEqual((await client.history(1)).items.map(item => item.name), ['Seen']);
+    const daily = await client.daily();
+    assert.equal(daily.dailyId, '3');
+    assert.deepEqual(daily.record, [[{ date: '1', signed: true, bonus: false }, { date: '2', signed: false, bonus: true }]]);
+    assert.equal(daily.rewards.threeDaysCoin, 5);
+  } finally { client.dispose(); }
+});

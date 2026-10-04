@@ -1,5 +1,7 @@
 import { JmError } from 'jmcomic-sdk-pwa';
 import { createMobileClient, type MobileClient } from 'jmcomic-sdk-pwa/mobile';
+import { handleAccountRequest } from './mobile-account';
+import { SessionError } from './mobile-session';
 
 /** Public discovery routes. Each entry validates its own query and declares a browser/edge TTL (0 = no-store). */
 interface MobileRoute {
@@ -63,19 +65,32 @@ const routes: Record<string, MobileRoute> = {
 };
 
 const STATUS: Record<string, number> = {
-	INVALID_ARGUMENT: 400, UNAUTHORIZED: 401, NOT_FOUND: 404, TIMEOUT: 504,
-	UPSTREAM: 502, INVALID_RESPONSE: 502, WRITE_UNCERTAIN: 502, ABORTED: 499,
+	INVALID_ARGUMENT: 400, UNAUTHORIZED: 401, SESSION_INVALID: 401, SESSION_EXPIRED: 401, NOT_FOUND: 404,
+	METHOD_NOT_ALLOWED: 405, TIMEOUT: 504, UPSTREAM: 502, INVALID_RESPONSE: 502, WRITE_UNCERTAIN: 502,
+	ABORTED: 499, ACCOUNT_DISABLED: 503,
 };
 
+/**
+ * JSON error with a stable code. An upstream business refusal (wrong password, duplicate
+ * name…) is UPSTREAM_REJECTED/422 so clients can show the message instead of retrying.
+ */
 export function mobileError(error: unknown, corsHeaders: Record<string, string>): Response {
-	const known = error instanceof JmError;
-	const code = known ? error.code : 'INTERNAL';
-	if (!known) console.error('Mobile route failed', error);
+	let code = 'INTERNAL';
+	let message = 'Internal error';
+	if (error instanceof SessionError) ({ code, message } = error);
+	else if (error instanceof JmError) {
+		code = error.code === 'UPSTREAM' && !error.retryable ? 'UPSTREAM_REJECTED' : error.code;
+		message = error.message;
+	} else console.error('Mobile route failed', error);
 	return Response.json(
-		{ error: { code, message: known ? error.message : 'Internal error' } },
-		{ status: STATUS[code] ?? 500, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } },
+		{ error: { code, message } },
+		{ status: code === 'UPSTREAM_REJECTED' ? 422 : STATUS[code] ?? 500, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } },
 	);
 }
+const methodNotAllowed = (allow: string, corsHeaders: Record<string, string>) => Response.json(
+	{ error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' } },
+	{ status: 405, headers: { ...corsHeaders, 'Cache-Control': 'no-store', Allow: allow } },
+);
 
 /** Normalizes the query so equivalent requests share one edge cache entry. */
 function cacheKey(path: string, query: URLSearchParams): Request {
@@ -96,12 +111,11 @@ export async function handleMobileRequest(request: Request, url: URL, context: M
 	if (url.pathname !== MOBILE_PREFIX && !url.pathname.startsWith(`${MOBILE_PREFIX}/`)) return null;
 	const { env, ctx, corsHeaders } = context;
 	const path = url.pathname.slice(MOBILE_PREFIX.length) || '/';
-	if (request.method !== 'GET') {
-		return Response.json(
-			{ error: { code: 'INVALID_ARGUMENT', message: 'Method not allowed' } },
-			{ status: 405, headers: { ...corsHeaders, 'Cache-Control': 'no-store', Allow: 'GET' } },
-		);
+	if (path.startsWith('/account/')) {
+		const domains = () => context.getDomains();
+		return handleAccountRequest(request, url, path.slice('/account'.length), { env, corsHeaders, domains, methodNotAllowed });
 	}
+	if (request.method !== 'GET') return methodNotAllowed('GET', corsHeaders);
 
 	if (path === '/config') {
 		return Response.json(
