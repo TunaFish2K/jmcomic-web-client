@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, InputGroup, Select, ListBox } from "@heroui/react";
 import { SearchIcon, RefreshCw } from "lucide-react";
 import { TaskContext } from "./task-context";
@@ -11,6 +11,8 @@ import { AlbumCard } from "./AlbumCard";
 import { CoverImage } from "./CoverImage";
 import { ThemePopover } from "../theme/ThemeControls";
 import { EmptyBlock, LoadingState, Notice } from "../ui/feedback";
+import { useTagSearch } from "../search/useTagSearch";
+import { TagChips, TagSuggestions } from "../search/TagSearchParts";
 
 /**
  * Search page. `embedded` places it inside the extended shell instead of filling the viewport;
@@ -33,6 +35,14 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
         listRef,
     } = useSearchState(() => setModalAlbumId(null));
 
+    const tagSearch = useTagSearch({ value: query, onChange: handleQueryChange });
+    // Keep the text input in view as chips are added on narrow screens.
+    const chipRowRef = useRef<HTMLDivElement>(null);
+    const tokenCount = tagSearch.tokens.length;
+    useEffect(() => {
+        const row = chipRowRef.current;
+        if (row) row.scrollLeft = row.scrollWidth;
+    }, [tokenCount]);
     const { showTaskPanel, setShowTaskPanel, taskContextValue, clearCompleted } = useDownloads();
     const { albumCache, getCardRef } = useAlbumBatch(data);
 
@@ -58,7 +68,7 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
                 <div className="w-full max-w-2xl flex flex-col h-full">
 
                     {/* ── search bar ── */}
-                    <form onSubmit={handleSubmit} className="shrink-0 mb-3">
+                    <form onSubmit={handleSubmit} className="relative mb-3 shrink-0">
                         <div className="flex h-12 w-full">
                             <InputGroup
                                 className="search-input-group relative z-0 h-12 min-w-0 flex-1 rounded-r-none focus-within:z-10"
@@ -92,15 +102,28 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
                                         </Select.Popover>
                                     </Select>
                                 </InputGroup.Prefix>
-                                <InputGroup.Input
-                                    placeholder="搜索内容..."
-                                    name="query"
-                                    value={query}
-                                    onChange={handleQueryChange}
-                                    aria-describedby={queryError ? "search-query-error" : undefined}
-                                    aria-invalid={!!queryError}
-                                    className="flex-1 min-w-0 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_var(--color-gray-950)]"
-                                />
+                                <div ref={chipRowRef} className="flex h-full min-w-0 flex-1 items-center overflow-x-auto [scrollbar-width:none]">
+                                    <TagChips search={tagSearch} />
+                                    <InputGroup.Input
+                                        placeholder={tagSearch.tokens.length ? "" : "搜索内容..."}
+                                        name="query"
+                                        value={tagSearch.draft}
+                                        onChange={tagSearch.onInputChange}
+                                        onKeyDown={tagSearch.onKeyDown}
+                                        onFocus={tagSearch.onFocus}
+                                        onBlur={tagSearch.onBlur}
+                                        role="combobox"
+                                        aria-label="搜索内容"
+                                        aria-autocomplete="list"
+                                        aria-expanded={tagSearch.suggestions.length > 0}
+                                        aria-controls={tagSearch.suggestions.length ? tagSearch.listId : undefined}
+                                        aria-activedescendant={tagSearch.active >= 0 ? tagSearch.optionId(tagSearch.active) : undefined}
+                                        autoComplete="off"
+                                        aria-describedby={queryError ? "search-query-error" : undefined}
+                                        aria-invalid={!!queryError}
+                                        className="h-full min-w-24 flex-1 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_var(--color-gray-950)]"
+                                    />
+                                </div>
                             </InputGroup>
                             <Button
                                 type="submit"
@@ -115,6 +138,7 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
                                     : <SearchIcon size={18} />}
                             </Button>
                         </div>
+                        <TagSuggestions search={tagSearch} />
                         {queryError && (
                             <p id="search-query-error" role="alert" className="field-error mt-1 ml-1" data-visible="true">
                                 {queryError}

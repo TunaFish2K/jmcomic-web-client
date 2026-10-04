@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@heroui/react";
 import { AppDialog } from "../ui/AppDialog";
 import { LoadingState } from "../ui/feedback";
+import { TermMenu } from "../search/TermMenu";
+import { importCachedAlbums, recordAlbum } from "../search/vocabulary";
 import { BookOpen, RefreshCw } from "lucide-react";
 import { getBatchAlbum } from "../api";
 import type { BatchAlbumItem } from "../api";
@@ -68,7 +70,10 @@ export function AlbumModal({ albumId, cachedData, onClose, extras }: {
     const lastChapterIndex = lastChapter ? sortedSeries.indexOf(lastChapter) : -1;
 
     useEffect(() => {
-        if (album) saveAlbumMeta(albumId, album);
+        if (!album) return;
+        saveAlbumMeta(albumId, album);
+        importCachedAlbums();
+        recordAlbum(album);
     }, [album, albumId]);
 
     const header = (
@@ -124,7 +129,7 @@ export function AlbumModal({ albumId, cachedData, onClose, extras }: {
                             <div className="mb-1 text-xs text-muted">作者</div>
                             <div className="flex flex-wrap gap-1">
                                 {album!.author.map(a => (
-                                    <span key={a} className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded text-xs">{a}</span>
+                                    <TermMenu key={a} text={a} kind="author" onSearch={onClose} className="px-2 py-0.5 bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300 rounded text-xs" />
                                 ))}
                             </div>
                         </div>
@@ -135,7 +140,7 @@ export function AlbumModal({ albumId, cachedData, onClose, extras }: {
                             <div className="mb-1 text-xs text-muted">标签</div>
                             <div className="flex flex-wrap gap-1">
                                 {album!.tags.map(t => (
-                                    <span key={t} className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded text-xs">{t}</span>
+                                    <TermMenu key={t} text={t} kind="tag" onSearch={onClose} className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded text-xs" />
                                 ))}
                             </div>
                         </div>
@@ -146,7 +151,7 @@ export function AlbumModal({ albumId, cachedData, onClose, extras }: {
                             <div className="mb-1 text-xs text-muted">原作</div>
                             <div className="flex flex-wrap gap-1">
                                 {album!.works.map(w => (
-                                    <span key={w} className="px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded text-xs">{w}</span>
+                                    <TermMenu key={w} text={w} kind="work" onSearch={onClose} className="px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 rounded text-xs" />
                                 ))}
                             </div>
                         </div>
@@ -157,7 +162,7 @@ export function AlbumModal({ albumId, cachedData, onClose, extras }: {
                             <div className="mb-1 text-xs text-muted">角色</div>
                             <div className="flex flex-wrap gap-1">
                                 {album!.actors.map(a => (
-                                    <span key={a} className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded text-xs">{a}</span>
+                                    <TermMenu key={a} text={a} kind="actor" onSearch={onClose} className="px-2 py-0.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded text-xs" />
                                 ))}
                             </div>
                         </div>

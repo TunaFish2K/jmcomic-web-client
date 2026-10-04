@@ -52,7 +52,7 @@ describe('useSearchState', () => {
     assert.equal(preventDefault.mock.calls.length, 1);
     assert.equal(result.current.queryError, '请填写搜索内容');
 
-    act(() => result.current.handleQueryChange({ target: { value: 'new' } } as React.ChangeEvent<HTMLInputElement>));
+    act(() => result.current.handleQueryChange('new'));
     assert.equal(result.current.query, 'new');
     assert.equal(result.current.queryError, null);
   });

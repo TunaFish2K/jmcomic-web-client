@@ -15,7 +15,7 @@ const state = vi.hoisted(() => ({
   getLatestProgress: vi.fn(),
 }));
 
-vi.mock('react-router-dom', () => ({ useNavigate: () => state.navigate }));
+vi.mock('react-router-dom', () => ({ useNavigate: () => state.navigate, useLocation: () => ({ search: '' }) }));
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (config: Record<string, unknown>) => {
     state.queryConfig = config;

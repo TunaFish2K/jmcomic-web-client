@@ -81,9 +81,11 @@ describe('Home page', () => {
 
   test('runs search controls, pagination, opens and closes an album', () => {
     render(<Home />);
-    fireEvent.change(screen.getByPlaceholderText('搜索内容...'), { target: { value: 'next' } });
-    assert.equal((state.search.handleQueryChange as ReturnType<typeof vi.fn>).mock.calls.length, 1);
-    fireEvent.submit(screen.getByPlaceholderText('搜索内容...').closest('form')!);
+    // The current query shows as a chip; typing adds a draft term and reports the combined query.
+    assert.ok(screen.getByRole('button', { name: '包含：query，点击改为排除' }));
+    fireEvent.change(screen.getByLabelText('搜索内容'), { target: { value: 'next' } });
+    assert.deepEqual((state.search.handleQueryChange as ReturnType<typeof vi.fn>).mock.calls, [['+query +next']]);
+    fireEvent.submit(screen.getByLabelText('搜索内容').closest('form')!);
     assert.equal((state.search.handleSubmit as ReturnType<typeof vi.fn>).mock.calls.length, 1);
 
     fireEvent.change(screen.getByLabelText('搜索类别'), { target: { value: '2' } });
@@ -110,7 +112,7 @@ describe('Home page', () => {
     state.search = makeSearch({ urlQuery: '', data: undefined, hasResults: false, totalCount: 0 });
     const view = render(<Home embedded idleContent={<div>Recommended</div>} />);
     assert.ok(screen.getByText('Recommended'));
-    assert.ok(screen.getByPlaceholderText('搜索内容...'));
+    assert.ok(screen.getByLabelText('搜索内容'));
     state.search = makeSearch();
     view.rerender(<Home embedded idleContent={<div>Recommended</div>} />);
     assert.ok(screen.queryByText('Recommended') === null);

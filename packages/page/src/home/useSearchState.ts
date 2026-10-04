@@ -4,6 +4,8 @@ import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { search } from "../api";
 import type { SearchResult } from "@tiny-client/shared";
 import { getSearchResultIds, SEARCH_PAGE_SIZE } from "@tiny-client/shared";
+import { parseQuery } from "../search/query";
+import { recordSearch } from "../search/vocabulary";
 
 export type SettledSearch = {
     sessionKey: string;
@@ -24,6 +26,12 @@ export function useSearchState(onNavigate: () => void) {
 
     // local input state (controlled input, not yet submitted)
     const [query, setQuery]           = useState(urlQuery);
+    // Follow URL changes from outside the box (back/forward, tag links in album details).
+    const [syncedUrlQuery, setSyncedUrlQuery] = useState(urlQuery);
+    if (urlQuery !== syncedUrlQuery) {
+        setSyncedUrlQuery(urlQuery);
+        setQuery(urlQuery);
+    }
     const [category, setCategory]     = useState<"0"|"1"|"2"|"3"|"4">(urlCategory);
     const [orderBy, setOrderBy]       = useState<"mr"|"mv"|"mp"|"tf">(urlOrderBy);
     const [timeFilter, setTimeFilter] = useState<"a"|"t"|"w"|"m">(urlTime);
@@ -103,13 +111,15 @@ export function useSearchState(onNavigate: () => void) {
         setUrlParams({ q, cat, order: ord, time, page: String(pg) }, { replace: false });
     }, [setUrlParams]);
 
-    const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setQuery(e.target.value);
+    /** Receives the serialized upstream query from the tag search box. */
+    const handleQueryChange = (value: string) => {
+        setQuery(value);
         if (queryError) setQueryError(null);
     };
 
     const performSearch = () => {
         if (!query.trim()) return;
+        recordSearch(parseQuery(query).tokens);
         onNavigate();
         pushSearch(query, category, orderBy, timeFilter, 1);
     };
