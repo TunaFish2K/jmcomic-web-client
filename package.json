@@ -10,6 +10,7 @@
     "test:integration": "concurrently \"pnpm run worker:dev\" \"wait-on tcp:localhost:8787 && node scripts/test-integration.js\"",
     "sdk:build": "pnpm --filter jmcomic-sdk-pwa build",
     "sdk:test": "pnpm sdk:build && pnpm --filter jmcomic-sdk-pwa test",
+    "sdk:test:account": "pnpm sdk:build && node packages/sdk/tools/real-account.mjs",
     "sdk:pack": "pnpm --filter jmcomic-sdk-pwa pack"
   },
   "packageManager": "pnpm@10.28.0",

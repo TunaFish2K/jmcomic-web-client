@@ -82,10 +82,28 @@ Vite 在启动和构建时读取 `VITE_BACKEND_URL`。修改该值后，必须�
 | `pnpm --filter @tiny-client/page run test:translation` | 运行翻译设置、几何、缓存键和 LLM 协议测试。 |
 | `pnpm --filter @tiny-client/worker exec vitest run` | 运行 Worker 单元测试一次。 |
 | `pnpm run test:integration` | 启动 Worker，并对实时上游服务执行集成测试。 |
+| `pnpm sdk:test:account` | 用真实账号验收扩展模式的账号接口，只在本机运行，详见下文。 |
 | `pnpm --filter @tiny-client/page run test:client` | 直接连接实时上游服务，检查共享客户端。 |
 | `pnpm --filter @tiny-client/page run test:reader` | 运行阅读器导航、布局、设置存储和缩放几何测试。 |
 
 `test:integration` 和 `test:client` 都依赖网络与实时上游服务。上游不可用时，这两个命令可能失败。Worker 单元测试不请求实时上游服务。
+
+### 真实账号验收
+
+`pnpm sdk:test:account` 通过 SDK 直接访问真实上游，验证登录，以及资料、签到状态、收藏、云端历史和评论列表的读取，最后退出登录。账号放在仓库根目录的 `.env.test.local`，该文件已被 git 忽略：
+
+```dotenv
+JM_TEST_USER=测试账号
+JM_TEST_PASS=测试密码
+# 可选：用于收藏和评论检查的作品 ID，默认 350234
+JM_TEST_ALBUM_ID=350234
+# 可选：设为 1 时执行写操作检查
+JM_TEST_WRITE=1
+# 可选：HTTP 代理，格式为 host:port
+JM_TEST_PROXY=127.0.0.1:7890
+```
+
+写操作检查默认关闭。开启后，脚本会切换一次收藏再切回原状态，并发表一条带标记的评论、确认后删除；不会签到，也不会修改资料。自动恢复失败时，输出会说明需要手动清理的内容。输出不包含账号、密码、JWT 和 Cookie。CI 不运行这个脚本。
 
 ## Worker API
 
