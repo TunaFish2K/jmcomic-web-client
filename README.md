@@ -38,6 +38,7 @@
 
 5. 打开 **Actions → Verify and release → Run workflow**，选择 `main` 分支并运行。首次运行会执行完整测试，需要十几分钟。
 6. `deploy-worker` 任务成功后，在 Dashboard 的 **Workers & Pages** 中找到名为 `worker` 的 Worker，并记下它的地址：`https://worker.<子域>.workers.dev`。
+7. 在浏览器中打开 `<Worker 地址>/search?query=test`。如果返回 JSON 格式的搜索结果，说明 Worker 已经可以使用。
 
 之后，只要 `main` 分支中 Worker 相关的代码有变化（包括同步上游），测试通过后就会自动重新部署。SDK 代码变化还会让工作流在你的 fork 中创建 GitHub Release，这不影响部署。
 
@@ -59,27 +60,44 @@ ALBUM_CACHE_KV_ID=<KV 命名空间 ID> pnpm run worker:deploy
 
 ### 2. 部署前端（Cloudflare Pages）
 
-在 Cloudflare Dashboard 中进入 **Workers & Pages → 创建 → Pages → 连接到 Git**，选择你 fork 的仓库，并按下表填写：
+1. 在 Cloudflare Dashboard 中进入 **Workers & Pages**，点击 **创建**，选择 **Pages**，然后选择 **导入现有 Git 存储库**。
+2. 授权 Cloudflare 访问 GitHub，选择你 fork 的仓库。
+3. 按下表填写构建设置：
 
-| 设置 | 值 |
-| --- | --- |
-| 构建命令 | `pnpm run page:build` |
-| 构建输出目录 | `packages/page/dist` |
-| 环境变量 `VITE_BACKEND_URL` | 第 1 步得到的 Worker 地址，例如 `https://worker.xxx.workers.dev` |
-| 环境变量 `NODE_VERSION` | `24` |
+   | 设置 | 值 |
+   | --- | --- |
+   | 生产分支 | `main` |
+   | 框架预设 | 无 |
+   | 构建命令 | `pnpm run build` |
+   | 构建输出目录 | `dist` |
+   | 根目录（高级） | `packages/page` |
 
-保存后，Pages 会开始首次构建。之后仓库每次更新，Pages 都会自动重新构建。
+4. 在同一页的 **环境变量** 中添加：
 
-`VITE_BACKEND_URL` 是在构建时写入前端的，修改后要在 Pages 中重新部署才会生效。
+   | 变量 | 值 |
+   | --- | --- |
+   | `VITE_BACKEND_URL` | 第 1 步得到的 Worker 地址，例如 `https://worker.xxx.workers.dev`，末尾不要带 `/` |
+   | `NODE_VERSION` | `24` |
+
+5. 点击 **保存并部署**。首次构建需要几分钟，完成后会得到 `https://<项目名>.pages.dev` 地址。
+
+Pages 会自动识别仓库固定的 pnpm 版本，并安装整个 workspace 的依赖，不需要另外配置。之后 `main` 分支每次更新，Pages 都会自动重新构建。
+
+`VITE_BACKEND_URL` 是在构建时写入前端的。修改后，要在 Pages 项目的 **部署** 页面对最新部署选择 **重试部署**，修改才会生效。
 
 ### 3. 检查部署
 
 1. 打开 `https://<Pages 地址>/release.json`，确认 `commit` 是你刚部署的提交。
 2. 打开首页搜索一次，确认能返回结果，并能打开作品阅读。
 
+### 可选：绑定自己的域名
+
+- **前端**：在 Pages 项目的 **自定义域** 中添加域名。
+- **Worker**：在 Worker 的 **设置 → 域和路由** 中添加自定义域。添加后，把 Pages 的 `VITE_BACKEND_URL` 改成新地址，然后重新部署 Pages。
+
 ### 更新
 
-在 GitHub 上点击 **Sync fork**。Worker 和 Pages 会自动重新部署。
+在 GitHub 上打开你的 fork，点击 **Sync fork → Update branch**。Worker 和 Pages 会自动重新部署。可以在 fork 的 **Actions** 页面查看 Worker 的部署进度，在 Pages 项目的 **部署** 页面查看前端的构建进度。
 
 ## 漫画翻译
 
@@ -93,9 +111,11 @@ API Key 保存在浏览器的 `localStorage` 中。如果 LLM 服务不允许浏
 
 **`deploy-worker` 被跳过**：检查是否配置了 `CF_API_TOKEN`，以及是否在 `main` 分支上运行。未配置令牌时，任务日志里会显示“未配置 CF_API_TOKEN，跳过 Worker 部署”。
 
+**`deploy-worker` 没有运行**：`deploy-worker` 要等前面的测试任务通过后才会运行。在 Actions 中打开这次运行，找到失败的任务并查看日志；如果是偶发失败，点击 **Re-run failed jobs** 重新运行。
+
 **`deploy-worker` 提示需要注册 workers.dev 子域**：在 Cloudflare Dashboard 中打开一次 **Workers & Pages**，然后重新运行工作流。
 
-**Pages 构建失败**：检查是否设置了 `NODE_VERSION=24`，以及构建命令和输出目录是否与上表一致。
+**Pages 构建失败**：检查根目录、构建命令和输出目录是否与上表一致，以及是否设置了 `NODE_VERSION=24`。在 Pages 项目的 **部署** 页面，可以打开失败的部署查看构建日志。
 
 **页面能打开，但搜索失败**：检查 `VITE_BACKEND_URL` 是否是完整的 `https://` 地址，末尾不要带路径。修改后需要重新部署 Pages。也可以直接在浏览器中访问 `<Worker 地址>/search?query=test`，确认 Worker 本身可用。
 
