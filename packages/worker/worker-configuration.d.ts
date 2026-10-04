@@ -7,6 +7,7 @@ declare namespace Cloudflare {
 	}
 	interface Env {
 		ALBUM_CACHE_KV?: KVNamespace;
+		ACCOUNT_SESSION_KEY?: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

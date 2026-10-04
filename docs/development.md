@@ -50,6 +50,7 @@ Worker 不代理图片文件。排查图片问题时，应分别检查 Worker �
 | `CLOUDFLARE_ACCOUNT_ID` | 本地 shell | 可选 | 与 `CLOUDFLARE_API_TOKEN` 配合使用。 |
 | `ALBUM_CACHE_KV_ID` | GitHub Actions Secret 或本地 shell | 可选 | KV 命名空间 ID。部署时用于生成 `ALBUM_CACHE_KV` binding。 |
 | `ALBUM_CACHE_KV` | Worker binding | 可选 | 为作品和章节接口启用 Cloudflare KV 缓存。由 `ALBUM_CACHE_KV_ID` 在部署时注入。 |
+| `ACCOUNT_SESSION_KEY` | Worker Secret | 可选 | 扩展模式账号功能的会话加密密钥。未配置时，`/api/mobile/config` 返回 `accountEnabled: false`，发现功能照常可用。 |
 
 Vite 在启动和构建时读取 `VITE_BACKEND_URL`。修改该值后，必须重新启动开发服务器或重新构建前端。
 
@@ -142,6 +143,27 @@ Worker 拒绝本机、私网/IP 字面量、自身地址、带凭据或查询参
 接口会先读取 Worker 缓存。它为每个 ID 返回作品数据或结构化错误。
 
 所有接口都允许跨域请求。缺少必需参数、ID 列表为空或超出批量上限时，接口返回 `400`。未知路径返回 `404`。
+
+### 扩展模式接口：`/api/mobile/*`
+
+供默认关闭的扩展模式使用，实现位于 `packages/worker/src/mobile.ts`，底层调用 SDK 的 `jmcomic-sdk-pwa/mobile`。上游契约见 [手机接口台账](mobile-api.md)。只接受 `GET`，其他方法返回 `405`。
+
+| 路径 | 参数 | 缓存 |
+| --- | --- | --- |
+| `/config` | — | 60 秒；返回 `{ accountEnabled }`，表示是否配置了 `ACCOUNT_SESSION_KEY` |
+| `/promote` | — | 5 分钟 |
+| `/promote-list` | `id`，`page`（从 0 开始） | 5 分钟 |
+| `/latest` | `page`（从 0 开始） | 2 分钟 |
+| `/serialization` | `date`（1–7，周一到周日），`type`（默认 `all`），`page` | 5 分钟 |
+| `/categories` | — | 1 小时 |
+| `/categories/filter` | `c`（分类 slug，默认 `0`），`o`（空、`tf`、`mv`、`mv_m`、`mp_w` 等），`page` | 5 分钟 |
+| `/week` | — | 1 小时 |
+| `/week/filter` | `id`、`type`、`page` | 10 分钟 |
+| `/hot-tags` | — | 1 小时 |
+| `/random` | — | 不缓存 |
+| `/comments` | `aid`，`page` | 1 分钟 |
+
+公开数据写入 Cloudflare Cache API，同时返回相同 TTL 的 `Cache-Control: public`。`X-Cache` 为 `miss`、`edge` 或 `bypass`。错误统一返回 `{ error: { code, message } }` 和 `no-store`：参数错误为 `400`，上游拒绝或网络失败为 `502`，超时为 `504`。评论的 `content` 是上游原样返回的 HTML，前端只能按纯文本显示。
 
 ## 缓存与持久化
 

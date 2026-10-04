@@ -5,6 +5,7 @@ import { requestScope, withRequestScope, type ClientContext } from './request-sc
 import { assertDistinctSearchResult, selectFirstDistinctSearchResult } from './search';
 import { SearchResultCache, SEARCH_RESULT_CACHE_TTL_MS } from './search-cache';
 import { handleLlmProxyRequest, LLM_PROXY_TARGET_HEADER } from './llm-proxy';
+import { handleMobileRequest } from './mobile';
 import {
 	type CachedResource,
 	type ResourceDescriptor,
@@ -407,6 +408,9 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 
 		try {
 			if (url.pathname === '/llm-proxy') return handleLlmProxyRequest(request, corsHeaders);
+
+			const mobile = await handleMobileRequest(request, url, { env, ctx, corsHeaders, getDomains: () => getDomains() });
+			if (mobile) return mobile;
 
 			if (url.pathname === '/search') {
 				const query = url.searchParams.get('query');
