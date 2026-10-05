@@ -2,7 +2,7 @@ import { getClientDataAndCreateClient, getDomainsFromDomainServer } from './upst
 import { DOMAIN_SERVER_URL } from 'jmcomic-sdk-pwa/upstream';
 import { SEARCH_PAGE_SIZE } from '@tiny-client/shared/constants';
 import { requestScope, withRequestScope, type ClientContext } from './request-scope';
-import { assertDistinctSearchResult, selectFirstDistinctSearchResult } from './search';
+import { DomainHealth, searchDomainsInTurn } from './search';
 import { SearchResultCache, SEARCH_RESULT_CACHE_TTL_MS } from './search-cache';
 import { handleLlmProxyRequest, LLM_PROXY_TARGET_HEADER } from './llm-proxy';
 import { handleMobileRequest } from './mobile';
@@ -19,7 +19,6 @@ const BATCH_ALBUM_MAX_IDS = 15;
 const BATCH_PHOTO_UPSTREAM_CONCURRENCY = 4;
 const BATCH_ALBUM_UPSTREAM_CONCURRENCY = 3;
 const CLIENT_DOMAIN_RETRY_COUNT = 3;
-const SEARCH_CLIENT_RACE_COUNT = 5;
 const CLIENT_CONTEXT_CACHE_TTL_MS = 5 * 60_000;
 const DOMAIN_LIST_CACHE_TTL_MS = 5 * 60_000;
 
@@ -27,16 +26,6 @@ const DOMAIN_LIST_CACHE_TTL_MS = 5 * 60_000;
 const SEARCH_CLIENT_CACHE_TTL = 60_000;
 const SEARCH_CLIENT_CACHE_MAX_ENTRIES = 128;
 const searchClientCache = new Map<string, { domain: string; ts: number }>();
-
-async function getCachedSearchClient(key: string): Promise<ClientContext | undefined> {
-	const entry = searchClientCache.get(key);
-	if (!entry) return undefined;
-	if (Date.now() - entry.ts > SEARCH_CLIENT_CACHE_TTL) {
-		searchClientCache.delete(key);
-		return undefined;
-	}
-	return getDomainClient(entry.domain);
-}
 
 function setCachedSearchClient(key: string, context: ClientContext) {
 	searchClientCache.delete(key);
@@ -79,6 +68,8 @@ type BatchPhotoItem = {
 };
 
 let preferredClient: { domain: string; ts: number } | null = null;
+/** Upstream domains that recently reset or timed out; shared across requests in this isolate. */
+const domainHealth = new DomainHealth();
 
 let domainListCache: { domains: string[]; ts: number } | null = null;
 
@@ -214,6 +205,7 @@ function rememberPreferredClient(context: ClientContext) {
 }
 
 function invalidateClient(domain: string | null) {
+	if (domain) domainHealth.fail(domain);
 	if (!domain || preferredClient?.domain === domain) preferredClient = null;
 }
 
@@ -229,7 +221,7 @@ function getDomainClient(domain: string): Promise<ClientContext> {
 }
 
 async function createClient(excludedDomains: string[] = []): Promise<ClientContext> {
-	const allDomains = shuffle(await getDomains());
+	const allDomains = domainHealth.order(shuffle(await getDomains()));
 	const domains = allDomains.filter((domain) => !excludedDomains.includes(domain));
 	const candidateDomains = domains.length > 0 ? domains : allDomains;
 	let lastError: unknown;
@@ -239,9 +231,11 @@ async function createClient(excludedDomains: string[] = []): Promise<ClientConte
 			const { client } = await getDomainClient(domain);
 			console.log('Client created.', domain);
 			const context = { client, domain };
+			domainHealth.succeed(domain);
 			rememberPreferredClient(context);
 			return context;
 		} catch (error) {
+			domainHealth.fail(domain);
 			lastError = new UpstreamError('client_init', domain, error);
 			console.warn('Client creation failed for domain', domain, error);
 		}
@@ -464,36 +458,25 @@ async function handleRequest(request: Request, env: Env, ctx: ExecutionContext):
 						} else {
 							const promise = (async () => {
 								const sessionKey = `search:${query}:${searchOptions.mainTag}:${searchOptions.orderBy}:${searchOptions.time}`;
-								const reusablePreferred = preferredClient && Date.now() - preferredClient.ts < CLIENT_CONTEXT_CACHE_TTL_MS
-									? await getDomainClient(preferredClient.domain).catch(() => undefined)
-									: undefined;
-								const cachedContext = await getCachedSearchClient(sessionKey).catch(() => undefined) ?? reusablePreferred;
-								let upstreamResult: any;
-								if (cachedContext) {
-									try {
-										upstreamResult = assertDistinctSearchResult(
-											await cachedContext.client.search(query, searchOptions),
-											duplicateGuardIds,
-										);
-										setCachedSearchClient(sessionKey, cachedContext);
-									} catch (error) {
-										console.warn('Cached search client failed, falling back to race', cachedContext.domain, error);
-										searchClientCache.delete(sessionKey);
-										invalidateClient(cachedContext.domain);
-									}
-								}
-								if (upstreamResult) return upstreamResult;
-
-								const candidateDomains = shuffle(await getDomains())
-									.filter((domain) => domain !== cachedContext?.domain)
-									.slice(0, SEARCH_CLIENT_RACE_COUNT);
-								const winner = await selectFirstDistinctSearchResult(
-									candidateDomains.map((domain) => async () => {
-										const { client } = await getDomainClient(domain);
-										return { result: await client.search(query, searchOptions), value: { client, domain } };
-									}),
-									duplicateGuardIds,
-								);
+								const stickyDomain = searchClientCache.get(sessionKey);
+								const preferredDomain = preferredClient && Date.now() - preferredClient.ts < CLIENT_CONTEXT_CACHE_TTL_MS
+									? preferredClient.domain
+									: null;
+								const winner = await searchDomainsInTurn({
+									domains: domainHealth.order(shuffle(await getDomains()), [
+										stickyDomain && Date.now() - stickyDomain.ts <= SEARCH_CLIENT_CACHE_TTL ? stickyDomain.domain : null,
+										preferredDomain,
+									]),
+									attempt: async (domain) => {
+										const context = await getDomainClient(domain);
+										return { result: await context.client.search(query, searchOptions), value: context };
+									},
+									previousIds: duplicateGuardIds,
+									health: domainHealth,
+								}).catch((error) => {
+									searchClientCache.delete(sessionKey);
+									throw error;
+								});
 								setCachedSearchClient(sessionKey, winner.value);
 								rememberPreferredClient(winner.value);
 								return winner.result;

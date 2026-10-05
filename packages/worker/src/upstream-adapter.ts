@@ -42,7 +42,8 @@ export class ApplicationUpstream {
 }
 
 export async function getClientDataAndCreateClient(baseUrl: string): Promise<ApplicationUpstream> {
-  const core = createUpstreamClient({ domains: [baseUrl], retries: 0 });
+  // Upstream domains often reset a connection once; one quick retry recovers most of them.
+  const core = createUpstreamClient({ domains: [baseUrl], retries: 1 });
   try { return new ApplicationUpstream(core, await core.initialize()); }
   catch (error) { core.dispose(); throw error; }
 }

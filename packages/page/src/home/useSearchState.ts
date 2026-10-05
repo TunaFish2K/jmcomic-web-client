@@ -7,6 +7,19 @@ import { getSearchResultIds, SEARCH_PAGE_SIZE } from "@tiny-client/shared";
 import { parseQuery } from "../search/query";
 import { recordSearch } from "../search/vocabulary";
 
+/**
+ * Search retry policy: connection-level failures (the browser reports a TypeError, e.g. when
+ * the Worker is cut off) and gateway errors are often transient upstream resets, so they are
+ * retried with backoff. Client errors such as 400 are not.
+ */
+export function shouldRetrySearch(failureCount: number, error: unknown) {
+    if (failureCount >= 3) return false;
+    if (error instanceof TypeError) return true;
+    const status = error instanceof Error ? Number(error.message.match(/^(\d{3}) /)?.[1]) : NaN;
+    return status === 502 || status === 503 || status === 504;
+}
+export const searchRetryDelay = (attempt: number) => Math.min(800 * 2 ** attempt, 3200);
+
 export type SettledSearch = {
     sessionKey: string;
     page: number;
@@ -62,7 +75,8 @@ export function useSearchState(onNavigate: () => void) {
         staleTime: 5 * 60 * 1000,   // don't refetch the same query within 5 min
         gcTime: 10 * 60 * 1000,     // keep cached results for 10 min
         placeholderData: keepPreviousData,
-        retry: 1,
+        retry: shouldRetrySearch,
+        retryDelay: searchRetryDelay,
     });
     const {
         data: queryData,

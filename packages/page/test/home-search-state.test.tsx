@@ -147,3 +147,16 @@ describe('useSearchState', () => {
     assert.ok(apiMocks.search.mock.calls.length >= 2);
   });
 });
+
+describe('search retry policy', () => {
+  test('retries connection failures and gateway errors with backoff, not client errors', async () => {
+    const { shouldRetrySearch, searchRetryDelay } = await import('../src/home/useSearchState');
+    assert.equal(shouldRetrySearch(0, new TypeError('Failed to fetch')), true);
+    assert.equal(shouldRetrySearch(1, new Error('502 Bad Gateway, message: All upstream domains failed')), true);
+    assert.equal(shouldRetrySearch(2, new Error('504 , message: timeout')), true);
+    assert.equal(shouldRetrySearch(3, new TypeError('Failed to fetch')), false);
+    assert.equal(shouldRetrySearch(0, new Error('400 Bad Request, message: Missing query')), false);
+    assert.equal(shouldRetrySearch(0, 'weird'), false);
+    assert.deepEqual([0, 1, 2, 3].map(searchRetryDelay), [800, 1600, 3200, 3200]);
+  });
+});
