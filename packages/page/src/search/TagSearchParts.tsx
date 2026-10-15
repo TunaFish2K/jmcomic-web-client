@@ -4,11 +4,12 @@ import type { TermKind } from "./vocabulary";
 
 const KIND_LABEL: Record<TermKind, string> = { tag: "标签", author: "作者", actor: "角色", work: "原作", history: "历史" };
 
-/** Mode toggle and chips, rendered inside the search input group before the text input. */
+/** Mode toggle and chips, rendered inside the search input group before the text input.
+ *  Wrappers use `display: contents` so chips and the input wrap together in the parent row. */
 export function TagChips({ search }: { search: TagSearch }) {
     if (!search.tokens.length) return null;
     return (
-        <div className="flex shrink-0 items-center gap-1 pl-1">
+        <div className="contents">
             {search.showMode && (
                 <button type="button" onClick={search.toggleMode} aria-pressed={search.mode === "all"}
                     aria-label={`匹配方式：${search.mode === "all" ? "全部包含" : "任一包含"}`}
@@ -17,7 +18,7 @@ export function TagChips({ search }: { search: TagSearch }) {
                     {search.mode === "all" ? "全部" : "任一"}
                 </button>
             )}
-            <div className="flex items-center gap-1" role="list" aria-label="搜索标签">
+            <div className="contents" role="list" aria-label="搜索标签">
             {search.tokens.map((token) => (
                 <span key={token.text} role="listitem"
                     className={`flex h-7 max-w-40 shrink-0 items-center rounded-full text-xs ${token.exclude

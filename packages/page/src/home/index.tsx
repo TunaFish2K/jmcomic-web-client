@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Button, InputGroup, Select, ListBox } from "@heroui/react";
 import { SearchIcon, RefreshCw } from "lucide-react";
 import { TaskContext } from "./task-context";
@@ -36,13 +36,6 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
     } = useSearchState(() => setModalAlbumId(null));
 
     const tagSearch = useTagSearch({ value: query, onChange: handleQueryChange });
-    // Keep the text input in view as chips are added on narrow screens.
-    const chipRowRef = useRef<HTMLDivElement>(null);
-    const tokenCount = tagSearch.tokens.length;
-    useEffect(() => {
-        const row = chipRowRef.current;
-        if (row) row.scrollLeft = row.scrollWidth;
-    }, [tokenCount]);
     const { showTaskPanel, setShowTaskPanel, taskContextValue, clearCompleted } = useDownloads();
     const { albumCache, getCardRef } = useAlbumBatch(data);
 
@@ -69,12 +62,12 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
 
                     {/* ── search bar ── */}
                     <form onSubmit={handleSubmit} className="relative mb-3 shrink-0">
-                        <div className="flex h-12 w-full">
+                        <div className="flex min-h-12 w-full">
                             <InputGroup
-                                className="search-input-group relative z-0 h-12 min-w-0 flex-1 rounded-r-none focus-within:z-10"
+                                className="search-input-group relative z-0 h-auto min-h-12 min-w-0 flex-1 items-stretch rounded-r-none focus-within:z-10"
                                 isInvalid={!!queryError}
                             >
-                                <InputGroup.Prefix className="p-0 flex-shrink-0">
+                                <InputGroup.Prefix className="h-auto self-stretch p-0 flex-shrink-0">
                                     <Select
                                         aria-label="搜索类别"
                                         className="w-24 min-w-[96px] h-full"
@@ -102,7 +95,8 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
                                         </Select.Popover>
                                     </Select>
                                 </InputGroup.Prefix>
-                                <div ref={chipRowRef} className="flex h-full min-w-0 flex-1 items-center overflow-x-auto [scrollbar-width:none]">
+                                {/* Chips wrap onto extra lines on narrow screens; the box grows with them. */}
+                                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 py-1 pl-1">
                                     <TagChips search={tagSearch} />
                                     <InputGroup.Input
                                         placeholder={tagSearch.tokens.length ? "" : "搜索内容..."}
@@ -121,13 +115,13 @@ export default function Home({ embedded = false, renderAlbumExtras, idleContent 
                                         autoComplete="off"
                                         aria-describedby={queryError ? "search-query-error" : undefined}
                                         aria-invalid={!!queryError}
-                                        className="h-full min-w-24 flex-1 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_var(--color-gray-950)]"
+                                        className="h-10 min-w-24 flex-1 [&:-webkit-autofill]:h-full [&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_white] dark:[&:-webkit-autofill]:shadow-[inset_0_0_0_1000px_var(--color-gray-950)]"
                                     />
                                 </div>
                             </InputGroup>
                             <Button
                                 type="submit"
-                                className="relative z-0 -ml-px h-12 min-w-12 flex-shrink-0 rounded-field rounded-l-none px-4 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                                className="relative z-0 -ml-px h-auto min-h-12 min-w-12 flex-shrink-0 self-stretch rounded-field rounded-l-none px-4 bg-brand-500 text-brand-foreground hover:bg-brand-600 data-[hovered=true]:bg-brand-600 data-[pressed=true]:bg-brand-700 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
                                 variant="primary"
                                 isDisabled={searchPending}
                                 aria-label={searchPending ? '正在搜索' : '搜索'}

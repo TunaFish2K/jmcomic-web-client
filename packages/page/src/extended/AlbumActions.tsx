@@ -88,6 +88,8 @@ export function CommentsPanel({ albumId }: { albumId: string }) {
     const [page, setPage] = useState(1);
     const [replyTo, setReplyTo] = useState<MobileComment | null>(null);
     const [draft, setDraft] = useState("");
+    // Spoilers reveal on tap/click: hover-only reveal never fires on touch screens.
+    const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
     const write = useWrite();
     const comments = useQuery({
         queryKey: ["mobile", "comments", albumId, page],
@@ -132,7 +134,15 @@ export function CommentsPanel({ albumId }: { albumId: string }) {
                     )}
                 </span>
             </div>
-            <p className={`whitespace-pre-wrap break-words text-sm ${comment.spoiler ? "blur-sm hover:blur-none" : ""}`}>{htmlToText(comment.content)}</p>
+            {comment.spoiler && !revealed.has(comment.id) ? (
+                <button type="button" aria-label="剧透评论，点击显示" onClick={() => setRevealed((ids) => new Set(ids).add(comment.id))}
+                    className="block w-full cursor-pointer rounded text-left focus-visible:outline-2 focus-visible:outline-brand-500">
+                    <span className="block select-none whitespace-pre-wrap break-words text-sm blur-sm">{htmlToText(comment.content)}</span>
+                    <span className="text-xs text-muted">剧透 · 点击显示</span>
+                </button>
+            ) : (
+                <p className="whitespace-pre-wrap break-words text-sm">{htmlToText(comment.content)}</p>
+            )}
         </li>
     );
     return (

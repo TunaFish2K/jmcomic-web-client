@@ -46,3 +46,21 @@ test('tag chips build upstream queries and album tags refine the search', async 
     await input.pressSequentially('巨');
     await expect(page.getByRole('option', { name: /巨乳/ })).toBeVisible();
 });
+
+test('chips wrap instead of scrolling out of view on narrow screens', async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.route('http://backend.test/**', (route) => route.fulfill({ status: 404, headers: { 'Access-Control-Allow-Origin': '*' }, json: null }));
+    await page.goto('/');
+    const input = page.locator('input[name="query"]');
+    await input.click();
+    for (const term of ['巨乳', 'NTR', '全彩', '中文']) {
+        await input.pressSequentially(term);
+        await input.press('Tab');
+    }
+    const chips = page.getByRole('list', { name: '搜索标签' }).getByRole('listitem');
+    await expect(chips).toHaveText(['巨乳', 'NTR', '全彩', '中文']);
+    for (const chip of await chips.all()) await expect(chip).toBeInViewport({ ratio: 1 });
+    await expect(input).toBeInViewport({ ratio: 1 });
+    const box = await page.locator('.search-input-group').boundingBox();
+    expect(box!.height).toBeGreaterThan(48);
+});

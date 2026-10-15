@@ -228,6 +228,8 @@ describe('album account actions', () => {
     assert.ok(await screen.findByText('Mine'));
     assert.ok(document.querySelector('b') === null);
     assert.ok(screen.getByText('Reply').className.includes('blur-sm'));
+    fireEvent.click(screen.getByRole('button', { name: '剧透评论，点击显示' }));
+    assert.ok(!screen.getByText('Reply').className.includes('blur-sm'));
     assert.match(screen.getByText(/共 2 条/).textContent!, /共 2 条/);
     assert.equal(screen.getAllByRole('button', { name: '删除' }).length, 1);
 
